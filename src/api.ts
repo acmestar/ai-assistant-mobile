@@ -1,6 +1,7 @@
 import { useAppStore, CHAT_MODELS, OPENAI_SIZE_MAP, GPT2_SIZE_MAP, OPENAI_QUALITY_MAP, getImageModelDef } from './store';
 
 // 通过 Cloudflare Worker 代理，解决 CORS 问题
+// Worker 会把 /api 替换成 /v1，所以这里不需要加 /v1
 const API_BASE = 'https://ai.acmestar.top/api';
 
 // 超时包装函数
