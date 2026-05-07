@@ -412,14 +412,18 @@ async function generateGeminiImage(
   _quality: string,
   referenceImage?: string
 ): Promise<string> {
-  const instances: any[] = [{ prompt }];
+  // 构建 Gemini 请求格式
+  const contents: any[] = [];
+  const parts: any[] = [{ text: prompt }];
 
   if (referenceImage) {
     const m = referenceImage.match(/^data:([^;]+);base64,(.+)$/);
     if (m) {
-      instances[0].image = { mimeType: m[1], data: m[2] };
+      parts.push({ inlineData: { mimeType: m[1], data: m[2] } });
     }
   }
+
+  contents.push({ role: 'user', parts });
 
   let aspectRatio = 'square';
   if (ratio !== 'auto') {
@@ -428,9 +432,9 @@ async function generateGeminiImage(
     else if (w < h) aspectRatio = 'tall';
   }
 
-  // 通过中转站代理调用 Gemini
+  // 使用中转站的 Gemini API 格式：/v1beta/models/xxx:generateContent
   const resp = await fetchWithTimeout(
-    `${API_BASE}/beta/models/${modelId}:predict`,
+    `https://api.acmestar.top/v1beta/models/${modelId}:generateContent`,
     {
       method: 'POST',
       headers: {
@@ -438,9 +442,9 @@ async function generateGeminiImage(
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        instances,
-        parameters: {
-          sampleCount: 1,
+        contents,
+        generationConfig: {
+          responseModalities: ['IMAGE'],
           aspectRatio,
         },
       }),
@@ -454,7 +458,8 @@ async function generateGeminiImage(
   }
 
   const data = await resp.json();
-  const base64 = data.predictions?.[0]?.bytesBase64Encoded;
+  // Gemini 返回格式：candidates[0].content.parts[0].inlineData.data
+  const base64 = data?.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
 
   if (!base64) throw new Error('未返回图片');
 
