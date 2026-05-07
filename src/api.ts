@@ -122,11 +122,15 @@ async function callGeminiChat(
     });
   }
 
+  // 通过代理调用 Gemini API
   const resp = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:streamGenerateContent?key=${apiKey}&alt=sse`,
+    `${API_BASE}/beta/models/${modelId}:streamGenerateContent?alt=sse`,
     {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
       body: JSON.stringify({ contents }),
     }
   );
@@ -409,11 +413,15 @@ async function generateGeminiImage(
     else if (w < h) aspectRatio = 'tall';
   }
 
+  // 通过代理调用 Gemini API
   const resp = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:predict?key=${apiKey}`,
+    `${API_BASE}/beta/models/${modelId}:predict`,
     {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
       body: JSON.stringify({
         instances,
         parameters: {

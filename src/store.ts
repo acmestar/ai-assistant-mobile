@@ -36,11 +36,34 @@ export interface Conversation {
 export interface ImageRecord {
   id: string;
   prompt: string;
-  imageUrl: string;
+  imageUrl: string;        // 原图（base64）
+  thumbnailUrl?: string;   // 缩略图（base64，压缩后）
   modelId: string;
   ratio: string;
   referenceImage?: string;
   createdAt: number;
+}
+
+// 生成缩略图
+async function generateThumbnail(dataUrl: string, maxSize: number = 200): Promise<string> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      const scale = Math.min(maxSize / img.width, maxSize / img.height);
+      canvas.width = img.width * scale;
+      canvas.height = img.height * scale;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL('image/jpeg', 0.7));
+      } else {
+        resolve(dataUrl);
+      }
+    };
+    img.onerror = () => resolve(dataUrl);
+    img.src = dataUrl;
+  });
 }
 
 export interface ChatModel {
@@ -311,13 +334,25 @@ export const useAppStore = create<AppState>()(
         });
       },
 
-      addImageRecord: (record) => {
+      addImageRecord: async (record) => {
+        // 生成缩略图
+        const thumbnailUrl = await generateThumbnail(record.imageUrl, 200);
+
         const newRecord: ImageRecord = {
           ...record,
           id: Date.now().toString(),
           createdAt: Date.now(),
+          thumbnailUrl,
         };
-        set((state) => ({ imageRecords: [newRecord, ...state.imageRecords].slice(0, 50) }));
+
+        set((state) => {
+          // 限制最多保存 20 张图片，超出时删除最旧的
+          const records = [newRecord, ...state.imageRecords];
+          if (records.length > 20) {
+            records.pop();
+          }
+          return { imageRecords: records };
+        });
       },
 
       deleteImageRecord: (id) => {
