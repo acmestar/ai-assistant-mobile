@@ -1,6 +1,7 @@
 import { useAppStore, CHAT_MODELS, IMAGE_MODELS, OPENAI_SIZE_MAP, GPT2_SIZE_MAP, OPENAI_QUALITY_MAP, getImageModelDef } from './store';
 
-const API_BASE = 'https://api.acmestar.top/v1';
+// 通过 Cloudflare Worker 代理，解决 CORS 问题
+const API_BASE = 'https://ai.acmestar.top/api';
 
 export async function sendChatMessage(userMessage: string, imageBase64?: string): Promise<string> {
   const { apiKey, chatModelId, addMessage, setIsChatLoading } = useAppStore.getState();
