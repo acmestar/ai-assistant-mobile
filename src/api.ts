@@ -12,12 +12,17 @@ function fetchWithTimeout(url: string, options: RequestInit, timeout: number = 1
 }
 
 export async function sendChatMessage(userMessage: string, imageBase64?: string): Promise<string> {
-  const { apiKey, chatModelId, addMessage, setIsChatLoading } = useAppStore.getState();
+  const { apiKey, chatModelId, addMessage, setIsChatLoading, setPendingChatRequest, currentConversationId } = useAppStore.getState();
   if (!apiKey) throw new Error('请先设置 API Key');
 
   const model = CHAT_MODELS.find((m) => m.id === chatModelId) || CHAT_MODELS[0];
   addMessage(userMessage, 'user', imageBase64);
   setIsChatLoading(true);
+
+  // 保存请求状态，以便页面恢复时继续
+  if (currentConversationId) {
+    setPendingChatRequest({ conversationId: currentConversationId, userMessage, imageBase64 });
+  }
 
   try {
     const conversation = useAppStore.getState().getCurrentConversation();
@@ -51,13 +56,15 @@ export async function sendChatMessage(userMessage: string, imageBase64?: string)
     const data = await resp.json();
     const responseText = data.choices?.[0]?.message?.content || '';
     addMessage(responseText, 'assistant');
+    setPendingChatRequest(null); // 清除请求状态
     return responseText;
   } catch (error) {
-    // 用户主动离开页面导致的请求中断，静默处理
+    // 用户主动离开页面导致的请求中断，不清除请求状态，等页面恢复时继续
     if (error instanceof Error && (error.name === 'AbortError' || error.message.includes('abort') || error.message.includes('network'))) {
-      console.log('请求被中断');
+      console.log('请求被中断，等待页面恢复');
       return '';
     }
+    setPendingChatRequest(null);
     throw error;
   } finally {
     setIsChatLoading(false);

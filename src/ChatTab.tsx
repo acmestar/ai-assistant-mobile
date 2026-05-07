@@ -17,6 +17,8 @@ export default function ChatTab() {
     getCurrentConversation,
     clearConversation,
     deleteConversation,
+    pendingChatRequest,
+    setPendingChatRequest,
   } = useAppStore();
 
   const [input, setInput] = useState('');
@@ -32,6 +34,39 @@ export default function ChatTab() {
 
   const conversation = getCurrentConversation();
   const currentModel = CHAT_MODELS.find((m) => m.id === chatModelId);
+
+  // 页面恢复时检查是否有未完成的请求
+  useEffect(() => {
+    const handleVisibilityChange = async () => {
+      if (document.visibilityState === 'visible' && pendingChatRequest) {
+        const { conversationId, userMessage, imageBase64 } = pendingChatRequest;
+        // 只有当前对话匹配时才继续
+        if (conversationId === currentConversationId) {
+          setError(null);
+          shouldScrollToBottomRef.current = true;
+          try {
+            await sendChatMessage(userMessage, imageBase64);
+          } catch (e) {
+            setError(String(e));
+          }
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [pendingChatRequest, currentConversationId]);
+
+  // 组件挂载时也检查
+  useEffect(() => {
+    if (pendingChatRequest && pendingChatRequest.conversationId === currentConversationId && !isChatLoading) {
+      const { userMessage, imageBase64 } = pendingChatRequest;
+      setError(null);
+      shouldScrollToBottomRef.current = true;
+      setPendingChatRequest(null);
+      sendChatMessage(userMessage, imageBase64).catch((e) => setError(String(e)));
+    }
+  }, []);
 
   // 保存滚动位置
   const saveScrollPosition = useCallback(() => {

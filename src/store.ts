@@ -207,6 +207,8 @@ interface AppState {
   currentConversationId: string | null;
   chatModelId: string;
   setChatModelId: (id: string) => void;
+  pendingChatRequest: { conversationId: string; userMessage: string; imageBase64?: string } | null;
+  setPendingChatRequest: (req: { conversationId: string; userMessage: string; imageBase64?: string } | null) => void;
 
   // Image
   imageModelId: string;
@@ -248,6 +250,8 @@ export const useAppStore = create<AppState>()(
       currentConversationId: null,
       chatModelId: CHAT_MODELS[0].id,
       setChatModelId: (id) => set({ chatModelId: id }),
+      pendingChatRequest: null,
+      setPendingChatRequest: (req) => set({ pendingChatRequest: req }),
 
       // Image
       imageModelId: IMAGE_MODELS[0].id,
