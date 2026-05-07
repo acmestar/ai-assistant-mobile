@@ -6,7 +6,7 @@ import ImageTab from './ImageTab';
 import SettingsTab from './SettingsTab';
 
 export default function App() {
-  const { activeTab, setActiveTab, apiKey, createConversation, currentConversationId } = useAppStore();
+  const { activeTab, setActiveTab, apiKey, createConversation, currentConversationId, theme } = useAppStore();
 
   // Auto-create conversation if none exists
   useEffect(() => {
@@ -14,6 +14,11 @@ export default function App() {
       createConversation();
     }
   }, [currentConversationId, apiKey, createConversation]);
+
+  // 初始化主题
+  useEffect(() => {
+    document.documentElement.classList.toggle('light', theme === 'light');
+  }, [theme]);
 
   return (
     <div style={{

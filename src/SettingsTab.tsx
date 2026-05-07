@@ -1,9 +1,9 @@
 import { useState } from 'react';
-import { Key, Info, Check, Eye, EyeOff, Trash2, Wifi, AlertCircle } from 'lucide-react';
+import { Key, Info, Check, Eye, EyeOff, Trash2, Wifi, AlertCircle, Sun, Moon } from 'lucide-react';
 import { useAppStore, CHAT_MODELS, IMAGE_MODELS } from './store';
 
 export default function SettingsTab() {
-  const { apiKey, setApiKey, chatModelId, imageModelId, conversations, imageRecords } = useAppStore();
+  const { apiKey, setApiKey, chatModelId, imageModelId, conversations, imageRecords, theme, setTheme } = useAppStore();
   const [showKey, setShowKey] = useState(false);
   const [tempKey, setTempKey] = useState(apiKey);
   const [saved, setSaved] = useState(false);
@@ -22,13 +22,11 @@ export default function SettingsTab() {
     setNetworkStatus('idle');
     setNetworkError(null);
 
-    // 收集诊断信息
     const diagnostics: string[] = [];
     diagnostics.push(`User-Agent: ${navigator.userAgent}`);
     diagnostics.push(`平台: ${navigator.platform}`);
 
     try {
-      // 先测试简单的 GET 请求
       diagnostics.push('测试 1: 基础连接...');
       await fetch('https://ai.acmestar.top', { method: 'HEAD', mode: 'no-cors' });
       diagnostics.push('基础连接成功');
@@ -77,11 +75,29 @@ export default function SettingsTab() {
 
   return (
     <div style={{ height: '100%', overflow: 'auto', padding: 16, paddingTop: 20 }}>
+      {/* Theme Toggle */}
+      <div className="settings-section">
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {theme === 'dark' ? <Moon size={18} color="var(--accent)" /> : <Sun size={18} color="var(--accent)" />}
+            <span style={{ fontWeight: 500 }}>外观主题</span>
+          </div>
+          <button
+            onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+            className="btn-secondary"
+            style={{ padding: '8px 16px', display: 'flex', alignItems: 'center', gap: 6 }}
+          >
+            {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+            {theme === 'dark' ? '浅色' : '深色'}
+          </button>
+        </div>
+      </div>
+
       {/* API Key Section */}
       <div className="settings-section">
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
           <Key size={18} color="var(--accent)" />
-          <span style={{ fontWeight: 500 }}>API 密钥</span>
+          <span style={{ fontWeight: 600, fontSize: 16 }}>API 密钥</span>
         </div>
 
         <div style={{ position: 'relative', marginBottom: 12 }}>
@@ -128,7 +144,7 @@ export default function SettingsTab() {
           </a>
         </div>
 
-        <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 12 }}>
+        <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 12, textAlign: 'center' }}>
           密钥将安全存储在本地，不会上传到服务器
         </p>
       </div>
@@ -137,7 +153,7 @@ export default function SettingsTab() {
       <div className="settings-section">
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
           <Wifi size={18} color="var(--accent)" />
-          <span style={{ fontWeight: 500 }}>网络测试</span>
+          <span style={{ fontWeight: 600, fontSize: 16 }}>网络测试</span>
         </div>
 
         <button
@@ -150,7 +166,7 @@ export default function SettingsTab() {
         </button>
 
         {networkStatus === 'success' && (
-          <div style={{ marginTop: 12, padding: 12, background: 'rgba(34, 197, 94, 0.1)', borderRadius: 12, color: 'var(--accent)', fontSize: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ marginTop: 12, padding: 12, background: 'var(--accent-dim)', borderRadius: 12, color: 'var(--accent)', fontSize: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
             <Check size={16} /> 网络连接正常
           </div>
         )}
@@ -168,58 +184,58 @@ export default function SettingsTab() {
         )}
       </div>
 
-      {/* Current Models */}
+      {/* Current Models - 双列布局 */}
       <div className="settings-section">
-        <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 8 }}>当前模型</div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ color: 'var(--text-secondary)' }}>聊天模型</span>
-            <span style={{ color: 'var(--accent)' }}>{currentChatModel?.name}</span>
+        <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12, fontWeight: 500 }}>当前模型</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div style={{ background: 'var(--bg-tertiary)', borderRadius: 12, padding: 12 }}>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>聊天模型</div>
+            <div style={{ color: 'var(--accent)', fontWeight: 500, fontSize: 14 }}>{currentChatModel?.name}</div>
           </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ color: 'var(--text-secondary)' }}>生图模型</span>
-            <span style={{ color: 'var(--accent)' }}>{currentImageModel?.name}</span>
+          <div style={{ background: 'var(--bg-tertiary)', borderRadius: 12, padding: 12 }}>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>生图模型</div>
+            <div style={{ color: 'var(--accent)', fontWeight: 500, fontSize: 14 }}>{currentImageModel?.name}</div>
           </div>
         </div>
       </div>
 
       {/* Stats */}
       <div className="settings-section">
-        <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 8 }}>数据统计</div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ color: 'var(--text-secondary)' }}>对话数量</span>
-            <span>{conversations.length}</span>
+        <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12, fontWeight: 500 }}>数据统计</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div style={{ background: 'var(--bg-tertiary)', borderRadius: 12, padding: 12, textAlign: 'center' }}>
+            <div style={{ fontSize: 24, fontWeight: 600, color: 'var(--text-primary)' }}>{conversations.length}</div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>对话数量</div>
           </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ color: 'var(--text-secondary)' }}>生成图片</span>
-            <span>{imageRecords.length}</span>
+          <div style={{ background: 'var(--bg-tertiary)', borderRadius: 12, padding: 12, textAlign: 'center' }}>
+            <div style={{ fontSize: 24, fontWeight: 600, color: 'var(--text-primary)' }}>{imageRecords.length}</div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>生成图片</div>
           </div>
         </div>
       </div>
 
       {/* Available Models Info */}
       <div className="settings-section">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
           <Info size={18} color="var(--accent)" />
-          <span style={{ fontWeight: 500 }}>可用模型</span>
+          <span style={{ fontWeight: 600, fontSize: 16 }}>可用模型</span>
         </div>
 
         <div style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 6 }}>聊天模型</div>
+          <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 8, fontWeight: 500 }}>聊天模型</div>
           {CHAT_MODELS.map((m) => (
             <div
               key={m.id}
               style={{
                 display: 'flex',
                 justifyContent: 'space-between',
-                padding: '6px 0',
-                fontSize: 14,
-                color: 'var(--text-secondary)',
+                alignItems: 'center',
+                padding: '12px 0',
+                borderBottom: '1px solid var(--border)',
               }}
             >
-              <span>{m.name}</span>
-              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+              <span style={{ color: 'var(--text-primary)', fontWeight: 500 }}>{m.name}</span>
+              <span style={{ fontSize: 12, color: 'var(--text-muted)', background: 'var(--bg-tertiary)', padding: '4px 8px', borderRadius: 6 }}>
                 {m.maxTokens >= 100000 ? '超长上下文' : `${Math.round(m.maxTokens / 1000)}K`}
               </span>
             </div>
@@ -227,20 +243,20 @@ export default function SettingsTab() {
         </div>
 
         <div>
-          <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 6 }}>生图模型</div>
+          <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 8, fontWeight: 500 }}>生图模型</div>
           {IMAGE_MODELS.map((m) => (
             <div
               key={m.id}
               style={{
                 display: 'flex',
                 justifyContent: 'space-between',
-                padding: '6px 0',
-                fontSize: 14,
-                color: 'var(--text-secondary)',
+                alignItems: 'center',
+                padding: '12px 0',
+                borderBottom: '1px solid var(--border)',
               }}
             >
-              <span>{m.name}</span>
-              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{m.provider}</span>
+              <span style={{ color: 'var(--text-primary)', fontWeight: 500 }}>{m.name}</span>
+              <span style={{ fontSize: 12, color: 'var(--text-muted)', background: 'var(--bg-tertiary)', padding: '4px 8px', borderRadius: 6 }}>{m.tag}</span>
             </div>
           ))}
         </div>
@@ -260,6 +276,7 @@ export default function SettingsTab() {
           alignItems: 'center',
           justifyContent: 'center',
           gap: 8,
+          fontWeight: 500,
         }}
       >
         <Trash2 size={18} />
@@ -267,7 +284,7 @@ export default function SettingsTab() {
       </button>
 
       {/* Version */}
-      <div style={{ textAlign: 'center', marginTop: 20, color: 'var(--text-muted)', fontSize: 12 }}>
+      <div style={{ textAlign: 'center', marginTop: 24, color: 'var(--text-muted)', fontSize: 12 }}>
         AI 助手 v1.0.0
       </div>
     </div>

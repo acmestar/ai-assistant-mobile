@@ -228,6 +228,8 @@ interface AppState {
   setIsChatLoading: (loading: boolean) => void;
   isImageLoading: boolean;
   setIsImageLoading: (loading: boolean) => void;
+  theme: 'dark' | 'light';
+  setTheme: (theme: 'dark' | 'light') => void;
 
   // Actions
   createConversation: () => string;
@@ -276,6 +278,11 @@ export const useAppStore = create<AppState>()(
       setIsChatLoading: (loading) => set({ isChatLoading: loading }),
       isImageLoading: false,
       setIsImageLoading: (loading) => set({ isImageLoading: loading }),
+      theme: 'dark',
+      setTheme: (theme) => {
+        set({ theme });
+        document.documentElement.classList.toggle('light', theme === 'light');
+      },
 
       // Actions
       createConversation: () => {
@@ -381,6 +388,7 @@ export const useAppStore = create<AppState>()(
         imageRatio: state.imageRatio,
         imageQuality: state.imageQuality,
         imageRecords: state.imageRecords,
+        theme: state.theme,
       }),
     }
   )

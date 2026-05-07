@@ -171,9 +171,9 @@ export default function ImageTab() {
       )}
 
       {/* Images Grid */}
-      <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
+      <div style={{ flex: 1, overflow: 'auto', padding: 16, background: 'var(--bg-primary)' }}>
         {storageWarning && (
-          <div style={{ padding: 12, background: 'rgba(239, 68, 68, 0.1)', borderRadius: 12, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8, color: 'var(--danger)', fontSize: 13 }}>
+          <div style={{ padding: 12, background: 'rgba(245, 158, 11, 0.1)', borderRadius: 12, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8, color: 'var(--accent-orange)', fontSize: 13 }}>
             <AlertCircle size={16} /><span>存储空间即将满（{imageRecords.length}/20），请及时下载保存重要图片</span>
           </div>
         )}
@@ -212,10 +212,10 @@ export default function ImageTab() {
             ))}
           </div>
         ) : !isImageLoading && (
-          <div style={{ textAlign: 'center', color: 'var(--text-muted)', marginTop: 60 }}>
-            <ImageIcon size={48} style={{ marginBottom: 16, opacity: 0.3 }} />
-            <p>输入描述生成图片</p>
-            <p style={{ fontSize: 12, marginTop: 8 }}>可上传参考图辅助生成</p>
+          <div style={{ textAlign: 'center', color: 'var(--text-muted)', marginTop: 60, padding: 20 }}>
+            <ImageIcon size={48} strokeWidth={1.5} style={{ marginBottom: 16, opacity: 0.5 }} />
+            <p style={{ fontSize: 16 }}>输入描述生成图片</p>
+            <p style={{ fontSize: 13, marginTop: 8 }}>可上传参考图辅助生成</p>
           </div>
         )}
 

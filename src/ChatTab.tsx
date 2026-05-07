@@ -246,10 +246,11 @@ export default function ChatTab() {
       )}
 
       {/* Messages */}
-      <div ref={messagesContainerRef} style={{ flex: 1, overflow: 'auto', padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div ref={messagesContainerRef} style={{ flex: 1, overflow: 'auto', padding: 16, display: 'flex', flexDirection: 'column', gap: 12, background: 'var(--bg-primary)' }}>
         {conversation.messages.length === 0 && (
-          <div style={{ textAlign: 'center', color: 'var(--text-muted)', marginTop: 40 }}>
-            <p style={{ marginBottom: 8 }}>发送消息开始对话</p>
+          <div style={{ textAlign: 'center', color: 'var(--text-muted)', marginTop: 60, padding: 20 }}>
+            <MessageSquare size={48} strokeWidth={1.5} style={{ marginBottom: 16, opacity: 0.5 }} />
+            <p style={{ marginBottom: 8, fontSize: 16 }}>发送消息开始对话</p>
             <p style={{ fontSize: 13 }}>支持超长上下文，可发送图片</p>
           </div>
         )}
@@ -294,7 +295,7 @@ export default function ChatTab() {
       <div style={{ padding: 12, background: 'var(--bg-secondary)', borderTop: '1px solid var(--border)' }}>
         {attachedImage && (
           <div style={{ marginBottom: 8, position: 'relative', display: 'inline-block' }}>
-            <img src={attachedImage} alt="" style={{ height: 60, borderRadius: 8 }} />
+            <img src={attachedImage} alt="" style={{ height: 60, borderRadius: 12 }} />
             <button
               onClick={() => setAttachedImage(null)}
               style={{
@@ -326,8 +327,16 @@ export default function ChatTab() {
           />
           <button
             onClick={() => fileInputRef.current?.click()}
-            className="btn-secondary"
-            style={{ padding: 12 }}
+            style={{
+              padding: 12,
+              background: 'var(--bg-tertiary)',
+              border: '1px solid var(--border)',
+              borderRadius: 12,
+              color: 'var(--text-secondary)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
           >
             <ImageIcon size={20} />
           </button>
@@ -337,14 +346,14 @@ export default function ChatTab() {
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSend()}
             placeholder="输入消息..."
-            style={{ flex: 1 }}
+            style={{ flex: 1, borderRadius: 20 }}
           />
 
           <button
             onClick={handleSend}
             disabled={isChatLoading || (!input.trim() && !attachedImage)}
             className="btn-primary"
-            style={{ padding: 12 }}
+            style={{ padding: 12, borderRadius: 12 }}
           >
             {isChatLoading ? <Loader2 size={20} className="animate-spin" /> : <Send size={20} />}
           </button>
