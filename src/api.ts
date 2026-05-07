@@ -166,7 +166,7 @@ async function callGeminiChat(
 }
 
 export async function generateImage(prompt: string, referenceImage?: string): Promise<string> {
-  const { apiKey, imageModelId, imageRatio, addGeneratedImage, setIsImageLoading } = useAppStore.getState();
+  const { apiKey, imageModelId, imageRatio, addImageRecord, setIsImageLoading } = useAppStore.getState();
 
   if (!apiKey) throw new Error('请先设置 API Key');
 
@@ -180,10 +180,18 @@ export async function generateImage(prompt: string, referenceImage?: string): Pr
     if (model.provider === 'gemini') {
       imageUrl = await generateGeminiImage(apiKey, model.id, prompt, ratio, referenceImage);
     } else {
-      imageUrl = await generateOpenAIImage(apiKey, model.id, prompt, ratio, referenceImage);
+      imageUrl = await generateOpenAIImage(apiKey, model.id, prompt, ratio);
     }
 
-    addGeneratedImage(imageUrl);
+    // 保存生图记录
+    addImageRecord({
+      prompt,
+      imageUrl,
+      modelId: model.id,
+      ratio: ratio.id,
+      referenceImage,
+    });
+
     return imageUrl;
   } finally {
     setIsImageLoading(false);

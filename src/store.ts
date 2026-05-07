@@ -4,13 +4,11 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 // 自定义存储，优先使用 localStorage，失败则用内存
 const customStorage = createJSONStorage(() => {
   try {
-    // 测试 localStorage 是否可用
     const testKey = '__test__';
     localStorage.setItem(testKey, testKey);
     localStorage.removeItem(testKey);
     return localStorage;
   } catch {
-    // 如果 localStorage 不可用，使用内存存储
     const memoryStorage: Record<string, string> = {};
     return {
       getItem: (name: string) => memoryStorage[name] || null,
@@ -35,6 +33,16 @@ export interface Conversation {
   createdAt: number;
 }
 
+export interface ImageRecord {
+  id: string;
+  prompt: string;
+  imageUrl: string;
+  modelId: string;
+  ratio: string;
+  referenceImage?: string;
+  createdAt: number;
+}
+
 export interface ChatModel {
   id: string;
   name: string;
@@ -53,14 +61,13 @@ export interface ImageModel {
   id: string;
   name: string;
   provider: 'openai' | 'gemini';
-  supportsReference?: boolean;  // 是否支持参考图
 }
 
 export const IMAGE_MODELS: ImageModel[] = [
-  { id: 'gemini-3.1-flash-image-preview', name: 'Gemini Flash 3.1', provider: 'gemini', supportsReference: true },
-  { id: 'gemini-3-pro-image-preview', name: 'Gemini Pro 3', provider: 'gemini', supportsReference: true },
-  { id: 'gpt-image-1.5', name: 'GPT Image 1.5', provider: 'openai', supportsReference: true },
-  { id: 'gpt-image-2', name: 'GPT Image 2', provider: 'openai', supportsReference: true },
+  { id: 'gemini-3.1-flash-image-preview', name: 'Gemini Flash 3.1', provider: 'gemini' },
+  { id: 'gemini-3-pro-image-preview', name: 'Gemini Pro 3', provider: 'gemini' },
+  { id: 'gpt-image-1.5', name: 'GPT Image 1.5', provider: 'openai' },
+  { id: 'gpt-image-2', name: 'GPT Image 2', provider: 'openai' },
 ];
 
 export const IMAGE_RATIOS = [
@@ -87,7 +94,7 @@ interface AppState {
   setImageModelId: (id: string) => void;
   imageRatio: string;
   setImageRatio: (ratio: string) => void;
-  generatedImages: string[];
+  imageRecords: ImageRecord[];  // 生图历史记录
 
   // UI
   activeTab: 'chat' | 'image' | 'settings';
@@ -103,8 +110,9 @@ interface AppState {
   addMessage: (content: string, role: 'user' | 'assistant', imageUrl?: string) => void;
   clearConversation: () => void;
   deleteConversation: (id: string) => void;
-  addGeneratedImage: (url: string) => void;
-  clearImages: () => void;
+  addImageRecord: (record: Omit<ImageRecord, 'id' | 'createdAt'>) => void;
+  deleteImageRecord: (id: string) => void;
+  clearImageRecords: () => void;
 }
 
 export const useAppStore = create<AppState>()(
@@ -125,7 +133,7 @@ export const useAppStore = create<AppState>()(
       setImageModelId: (id) => set({ imageModelId: id }),
       imageRatio: '1:1',
       setImageRatio: (ratio) => set({ imageRatio: ratio }),
-      generatedImages: [],
+      imageRecords: [],
 
       // UI
       activeTab: 'chat',
@@ -200,11 +208,20 @@ export const useAppStore = create<AppState>()(
         });
       },
 
-      addGeneratedImage: (url) => {
-        set((state) => ({ generatedImages: [url, ...state.generatedImages].slice(0, 20) }));
+      addImageRecord: (record) => {
+        const newRecord: ImageRecord = {
+          ...record,
+          id: Date.now().toString(),
+          createdAt: Date.now(),
+        };
+        set((state) => ({ imageRecords: [newRecord, ...state.imageRecords].slice(0, 50) }));
       },
 
-      clearImages: () => set({ generatedImages: [] }),
+      deleteImageRecord: (id) => {
+        set((state) => ({ imageRecords: state.imageRecords.filter((r) => r.id !== id) }));
+      },
+
+      clearImageRecords: () => set({ imageRecords: [] }),
     }),
     {
       name: 'ai-assistant-storage',
@@ -216,7 +233,7 @@ export const useAppStore = create<AppState>()(
         chatModelId: state.chatModelId,
         imageModelId: state.imageModelId,
         imageRatio: state.imageRatio,
-        generatedImages: state.generatedImages,
+        imageRecords: state.imageRecords,
       }),
     }
   )

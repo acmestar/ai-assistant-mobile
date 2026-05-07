@@ -1,10 +1,10 @@
 import { useState, useRef } from 'react';
-import { Image as ImageIcon, Sparkles, Loader2, Trash2, Download, ZoomIn, Upload, X, Maximize2 } from 'lucide-react';
+import { Image as ImageIcon, Sparkles, Loader2, Trash2, Download, Upload, X, Maximize2, Clock } from 'lucide-react';
 import { useAppStore, IMAGE_MODELS, IMAGE_RATIOS } from './store';
 import { generateImage } from './api';
 
 export default function ImageTab() {
-  const { imageModelId, setImageModelId, imageRatio, setImageRatio, generatedImages, isImageLoading, clearImages } = useAppStore();
+  const { imageModelId, setImageModelId, imageRatio, setImageRatio, imageRecords, isImageLoading, deleteImageRecord, clearImageRecords } = useAppStore();
   const [prompt, setPrompt] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
@@ -80,7 +80,7 @@ export default function ImageTab() {
         background: 'var(--bg-secondary)',
         borderBottom: '1px solid var(--border)',
       }}>
-        <button onClick={clearImages} className="btn-secondary" style={{ padding: 8 }}>
+        <button onClick={clearImageRecords} className="btn-secondary" style={{ padding: 8 }}>
           <Trash2 size={18} />
         </button>
 
@@ -244,12 +244,12 @@ export default function ImageTab() {
           </div>
         )}
 
-        {generatedImages.length > 0 ? (
+        {imageRecords.length > 0 ? (
           <div className="image-grid">
-            {generatedImages.map((url, i) => (
+            {imageRecords.map((record) => (
               <div
-                key={i}
-                onClick={() => setSelectedImage(url)}
+                key={record.id}
+                onClick={() => setSelectedImage(record.imageUrl)}
                 style={{
                   position: 'relative',
                   borderRadius: 12,
@@ -257,19 +257,43 @@ export default function ImageTab() {
                   cursor: 'pointer',
                 }}
               >
-                <img src={url} alt="" style={{ width: '100%', aspectRatio: 1, objectFit: 'cover' }} />
+                <img src={record.imageUrl} alt={record.prompt} style={{ width: '100%', aspectRatio: 1, objectFit: 'cover' }} />
                 <div style={{
                   position: 'absolute',
                   bottom: 0,
                   left: 0,
                   right: 0,
                   padding: 8,
-                  background: 'linear-gradient(transparent, rgba(0,0,0,0.6))',
-                  display: 'flex',
-                  justifyContent: 'center',
+                  background: 'linear-gradient(transparent, rgba(0,0,0,0.7))',
                 }}>
-                  <ZoomIn size={20} color="white" />
+                  <p style={{ fontSize: 11, color: 'white', marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {record.prompt}
+                  </p>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: 'rgba(255,255,255,0.7)' }}>
+                    <Clock size={10} />
+                    {new Date(record.createdAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                  </div>
                 </div>
+                <button
+                  onClick={(e) => { e.stopPropagation(); deleteImageRecord(record.id); }}
+                  style={{
+                    position: 'absolute',
+                    top: 4,
+                    right: 4,
+                    width: 24,
+                    height: 24,
+                    borderRadius: '50%',
+                    background: 'rgba(0,0,0,0.5)',
+                    border: 'none',
+                    color: 'white',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <X size={12} />
+                </button>
               </div>
             ))}
           </div>

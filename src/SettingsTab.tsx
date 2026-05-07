@@ -3,7 +3,7 @@ import { Key, Info, Check, Eye, EyeOff, Trash2 } from 'lucide-react';
 import { useAppStore, CHAT_MODELS, IMAGE_MODELS } from './store';
 
 export default function SettingsTab() {
-  const { apiKey, setApiKey, chatModelId, imageModelId, conversations, generatedImages } = useAppStore();
+  const { apiKey, setApiKey, chatModelId, imageModelId, conversations, imageRecords } = useAppStore();
   const [showKey, setShowKey] = useState(false);
   const [tempKey, setTempKey] = useState(apiKey);
   const [saved, setSaved] = useState(false);
@@ -95,7 +95,7 @@ export default function SettingsTab() {
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span style={{ color: 'var(--text-secondary)' }}>生成图片</span>
-            <span>{generatedImages.length}</span>
+            <span>{imageRecords.length}</span>
           </div>
         </div>
       </div>
