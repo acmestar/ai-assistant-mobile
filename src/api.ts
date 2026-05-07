@@ -407,29 +407,25 @@ async function generateGeminiImage(
   _quality: string,
   referenceImage?: string
 ): Promise<string> {
-  // 构建 Gemini 请求格式
-  const contents: any[] = [];
-  const parts: any[] = [{ text: prompt }];
+  // Gemini 通过 /v1/chat/completions 端点调用
+  const messages: Array<{ role: string; content: any }> = [];
 
+  // 构建消息内容
   if (referenceImage) {
     const m = referenceImage.match(/^data:([^;]+);base64,(.+)$/);
-    if (m) {
-      parts.push({ inlineData: { mimeType: m[1], data: m[2] } });
-    }
+    messages.push({
+      role: 'user',
+      content: [
+        { type: 'text', text: prompt },
+        { type: 'image_url', image_url: { url: referenceImage } },
+      ],
+    });
+  } else {
+    messages.push({ role: 'user', content: prompt });
   }
 
-  contents.push({ role: 'user', parts });
-
-  let aspectRatio = 'square';
-  if (ratio !== 'auto') {
-    const [w, h] = ratio.split(':').map(Number);
-    if (w > h) aspectRatio = 'wide';
-    else if (w < h) aspectRatio = 'tall';
-  }
-
-  // 使用中转站的 Gemini API 格式：/v1beta/models/xxx:generateContent
   const resp = await fetchWithTimeout(
-    `https://api.acmestar.top/v1beta/models/${modelId}:generateContent`,
+    `${API_BASE}/chat/completions`,
     {
       method: 'POST',
       headers: {
@@ -437,11 +433,9 @@ async function generateGeminiImage(
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        contents,
-        generationConfig: {
-          responseModalities: ['IMAGE'],
-          aspectRatio,
-        },
+        model: modelId,
+        messages,
+        max_tokens: 4096,
       }),
     },
     120000
@@ -453,10 +447,40 @@ async function generateGeminiImage(
   }
 
   const data = await resp.json();
-  // Gemini 返回格式：candidates[0].content.parts[0].inlineData.data
-  const base64 = data?.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+  console.log('Gemini Image response:', JSON.stringify(data).slice(0, 500));
 
-  if (!base64) throw new Error('未返回图片');
+  // 检查返回格式
+  const content = data?.choices?.[0]?.message?.content;
 
-  return `data:image/png;base64,${base64}`;
+  if (!content) {
+    throw new Error('未返回内容');
+  }
+
+  // 如果返回的是图片 URL
+  if (typeof content === 'string' && content.startsWith('http')) {
+    return content;
+  }
+
+  // 如果返回的是 base64
+  if (typeof content === 'string' && content.startsWith('data:image')) {
+    return content;
+  }
+
+  // 如果返回的是 JSON 格式的图片数据
+  if (typeof content === 'object' && content?.url) {
+    return content.url;
+  }
+
+  if (typeof content === 'object' && content?.b64_json) {
+    return `data:image/png;base64,${content.b64_json}`;
+  }
+
+  // 尝试从响应中提取图片
+  const b64 = data?.data?.[0]?.b64_json;
+  const url = data?.data?.[0]?.url;
+
+  if (b64) return `data:image/png;base64,${b64}`;
+  if (url) return url;
+
+  throw new Error('未返回图片，返回内容: ' + (typeof content === 'string' ? content.slice(0, 100) : JSON.stringify(content).slice(0, 100)));
 }
