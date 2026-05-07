@@ -60,23 +60,119 @@ export const CHAT_MODELS: ChatModel[] = [
 export interface ImageModel {
   id: string;
   name: string;
+  tag: string;
   provider: 'openai' | 'gemini';
+  qualities: string[];
+  defaultQuality: string;
+  ratios: string[];
+  defaultRatio: string;
 }
 
 export const IMAGE_MODELS: ImageModel[] = [
-  { id: 'gemini-3.1-flash-image-preview', name: 'Gemini Flash 3.1', provider: 'gemini' },
-  { id: 'gemini-3-pro-image-preview', name: 'Gemini Pro 3', provider: 'gemini' },
-  { id: 'gpt-image-1.5', name: 'GPT Image 1.5', provider: 'openai' },
-  { id: 'gpt-image-2', name: 'GPT Image 2', provider: 'openai' },
+  {
+    id: 'gemini-3.1-flash-image-preview',
+    name: 'Flash 3.1',
+    tag: 'Flash',
+    provider: 'gemini',
+    qualities: ['0.5K', '1K', '2K', '4K'],
+    defaultQuality: '1K',
+    ratios: ['auto', '1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '4:5', '5:4', '21:9', '1:4', '1:8', '4:1', '8:1'],
+    defaultRatio: '1:1',
+  },
+  {
+    id: 'gemini-3-pro-image-preview',
+    name: 'Pro 3',
+    tag: 'Pro',
+    provider: 'gemini',
+    qualities: ['1K', '2K', '4K'],
+    defaultQuality: '1K',
+    ratios: ['auto', '1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '4:5', '5:4', '21:9'],
+    defaultRatio: '1:1',
+  },
+  {
+    id: 'gpt-image-1.5',
+    name: 'GPT Image 1.5',
+    tag: 'OpenAI',
+    provider: 'openai',
+    qualities: ['0.5K', '1K', '2K'],
+    defaultQuality: '1K',
+    ratios: ['auto', '1:1', '3:2', '2:3'],
+    defaultRatio: '1:1',
+  },
+  {
+    id: 'gpt-image-2',
+    name: 'GPT Image 2',
+    tag: 'GPT2',
+    provider: 'openai',
+    qualities: ['auto', 'low', 'medium', 'high'],
+    defaultQuality: 'auto',
+    ratios: ['auto', '1:1', '3:2', '2:3', '2K-1:1', '2K-16:9', '4K-16:9', '4K-9:16'],
+    defaultRatio: 'auto',
+  },
 ];
 
-export const IMAGE_RATIOS = [
-  { id: '1:1', label: '1:1', width: 1024, height: 1024 },
-  { id: '3:4', label: '3:4', width: 768, height: 1024 },
-  { id: '4:3', label: '4:3', width: 1024, height: 768 },
-  { id: '9:16', label: '9:16', width: 576, height: 1024 },
-  { id: '16:9', label: '16:9', width: 1024, height: 576 },
-] as const;
+// GPT2 比例中文标签
+export const GPT2_RATIO_LABELS: Record<string, string> = {
+  'auto': '自动',
+  '1:1': '1K正方',
+  '3:2': '1K横版',
+  '2:3': '1K竖版',
+  '2K-1:1': '2K正方',
+  '2K-16:9': '2K横版',
+  '4K-16:9': '4K横版',
+  '4K-9:16': '4K竖版',
+};
+
+export const GPT2_QUALITY_LABELS: Record<string, string> = {
+  'auto': '自动',
+  'low': '快速',
+  'medium': '标准',
+  'high': '精细',
+};
+
+// OpenAI size map
+export const OPENAI_SIZE_MAP: Record<string, string> = {
+  '1:1': '1024x1024',
+  '3:2': '1536x1024',
+  '2:3': '1024x1536',
+  'auto': '1024x1024',
+};
+
+// GPT2 size map
+export const GPT2_SIZE_MAP: Record<string, string> = {
+  'auto': 'auto',
+  '1:1': '1024x1024',
+  '3:2': '1536x1024',
+  '2:3': '1024x1536',
+  '2K-1:1': '2048x2048',
+  '2K-16:9': '2048x1152',
+  '4K-16:9': '3840x2160',
+  '4K-9:16': '2160x3840',
+};
+
+// GPT2 edit (有参考图时) 只支持 3 种尺寸
+export const GPT2_EDIT_RATIOS: string[] = ['1:1', '3:2', '2:3'];
+
+export const OPENAI_QUALITY_MAP: Record<string, string> = {
+  '0.5K': 'low',
+  '1K': 'medium',
+  '2K': 'high',
+};
+
+export function getImageModelDef(modelId: string): ImageModel {
+  return IMAGE_MODELS.find((m) => m.id === modelId) || IMAGE_MODELS[0];
+}
+
+export function constrainImageSettings(
+  newModelId: string,
+  currentQuality: string,
+  currentRatio: string,
+): { quality: string; ratio: string } {
+  const def = getImageModelDef(newModelId);
+  const quality = def.qualities.includes(currentQuality) ? currentQuality : def.defaultQuality;
+  const ratio = def.ratios.includes(currentRatio) ? currentRatio : def.defaultRatio;
+  return { quality, ratio };
+}
 
 interface AppState {
   // API
@@ -94,6 +190,8 @@ interface AppState {
   setImageModelId: (id: string) => void;
   imageRatio: string;
   setImageRatio: (ratio: string) => void;
+  imageQuality: string;
+  setImageQuality: (quality: string) => void;
   imageRecords: ImageRecord[];  // 生图历史记录
 
   // UI
@@ -130,9 +228,15 @@ export const useAppStore = create<AppState>()(
 
       // Image
       imageModelId: IMAGE_MODELS[0].id,
-      setImageModelId: (id) => set({ imageModelId: id }),
-      imageRatio: '1:1',
+      setImageModelId: (id) => {
+        const def = getImageModelDef(id);
+        const { quality, ratio } = constrainImageSettings(id, get().imageQuality, get().imageRatio);
+        set({ imageModelId: id, imageQuality: quality, imageRatio: ratio });
+      },
+      imageRatio: IMAGE_MODELS[0].defaultRatio,
       setImageRatio: (ratio) => set({ imageRatio: ratio }),
+      imageQuality: IMAGE_MODELS[0].defaultQuality,
+      setImageQuality: (quality) => set({ imageQuality: quality }),
       imageRecords: [],
 
       // UI
@@ -233,6 +337,7 @@ export const useAppStore = create<AppState>()(
         chatModelId: state.chatModelId,
         imageModelId: state.imageModelId,
         imageRatio: state.imageRatio,
+        imageQuality: state.imageQuality,
         imageRecords: state.imageRecords,
       }),
     }

@@ -1,20 +1,41 @@
 import { useState, useRef } from 'react';
-import { Image as ImageIcon, Sparkles, Loader2, Trash2, Download, Upload, X, Maximize2, Clock } from 'lucide-react';
-import { useAppStore, IMAGE_MODELS, IMAGE_RATIOS } from './store';
+import { Image as ImageIcon, Sparkles, Loader2, Trash2, Download, Upload, X, Maximize2, Clock, Sliders } from 'lucide-react';
+import { useAppStore, IMAGE_MODELS, GPT2_RATIO_LABELS, GPT2_QUALITY_LABELS, getImageModelDef } from './store';
 import { generateImage } from './api';
 
 export default function ImageTab() {
-  const { imageModelId, setImageModelId, imageRatio, setImageRatio, imageRecords, isImageLoading, deleteImageRecord, clearImageRecords } = useAppStore();
+  const { imageModelId, setImageModelId, imageRatio, setImageRatio, imageQuality, setImageQuality, imageRecords, isImageLoading, deleteImageRecord, clearImageRecords } = useAppStore();
   const [prompt, setPrompt] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [showModelPicker, setShowModelPicker] = useState(false);
   const [showRatioPicker, setShowRatioPicker] = useState(false);
+  const [showQualityPicker, setShowQualityPicker] = useState(false);
   const [referenceImage, setReferenceImage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const currentModel = IMAGE_MODELS.find((m) => m.id === imageModelId);
-  const currentRatio = IMAGE_RATIOS.find((r) => r.id === imageRatio) || IMAGE_RATIOS[0];
+  const currentModel = getImageModelDef(imageModelId);
+
+  // 获取比例显示标签
+  const getRatioLabel = (ratio: string): string => {
+    if (imageModelId === 'gpt-image-2') {
+      return GPT2_RATIO_LABELS[ratio] || ratio;
+    }
+    return ratio === 'auto' ? '自动' : ratio;
+  };
+
+  // 获取分辨率显示标签
+  const getQualityLabel = (quality: string): string => {
+    if (imageModelId === 'gpt-image-2') {
+      return GPT2_QUALITY_LABELS[quality] || quality;
+    }
+    return quality;
+  };
+
+  // GPT2 有参考图时限制比例选项
+  const availableRatios = imageModelId === 'gpt-image-2' && referenceImage
+    ? currentModel.ratios.filter(r => ['1:1', '3:2', '2:3'].includes(r))
+    : currentModel.ratios;
 
   const handleGenerate = async () => {
     if (!prompt.trim() || isImageLoading) return;
@@ -25,7 +46,6 @@ export default function ImageTab() {
 
     try {
       await generateImage(promptText, referenceImage || undefined);
-      // 生成成功后清除参考图
       setReferenceImage(null);
     } catch (e) {
       setError(String(e));
@@ -36,13 +56,11 @@ export default function ImageTab() {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // 检查文件类型
     if (!file.type.startsWith('image/')) {
       setError('请选择图片文件');
       return;
     }
 
-    // 检查文件大小（最大 10MB）
     if (file.size > 10 * 1024 * 1024) {
       setError('图片大小不能超过 10MB');
       return;
@@ -53,10 +71,12 @@ export default function ImageTab() {
       const result = event.target?.result as string;
       setReferenceImage(result);
       setError(null);
+      // GPT2 有参考图时自动切换到支持的比例
+      if (imageModelId === 'gpt-image-2' && !['1:1', '3:2', '2:3'].includes(imageRatio)) {
+        setImageRatio('1:1');
+      }
     };
     reader.readAsDataURL(file);
-
-    // 清除 input，允许重复选择同一文件
     e.target.value = '';
   };
 
@@ -85,6 +105,16 @@ export default function ImageTab() {
         </button>
 
         <div style={{ display: 'flex', gap: 8 }}>
+          {/* 分辨率选择 */}
+          <button
+            onClick={() => setShowQualityPicker(!showQualityPicker)}
+            className="model-chip"
+            style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
+          >
+            <Sliders size={14} style={{ marginRight: 4 }} />
+            {getQualityLabel(imageQuality)}
+          </button>
+
           {/* 比例选择 */}
           <button
             onClick={() => setShowRatioPicker(!showRatioPicker)}
@@ -92,7 +122,7 @@ export default function ImageTab() {
             style={{ border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
           >
             <Maximize2 size={14} style={{ marginRight: 4 }} />
-            {currentRatio.label}
+            {getRatioLabel(imageRatio)}
           </button>
 
           {/* 模型选择 */}
@@ -101,12 +131,46 @@ export default function ImageTab() {
             className="model-chip"
             style={{ border: '1px solid var(--accent)', color: 'var(--accent)' }}
           >
-            {currentModel?.name || '选择模型'}
+            {currentModel.name}
           </button>
         </div>
 
         <div style={{ width: 36 }} />
       </div>
+
+      {/* Quality Picker */}
+      {showQualityPicker && (
+        <div style={{
+          position: 'absolute',
+          top: 60,
+          left: 16,
+          right: 16,
+          background: 'var(--bg-tertiary)',
+          borderRadius: 16,
+          padding: 12,
+          zIndex: 100,
+          border: '1px solid var(--border)',
+        }}>
+          <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 8 }}>分辨率</div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {currentModel.qualities.map((q) => (
+              <button
+                key={q}
+                onClick={() => { setImageQuality(q); setShowQualityPicker(false); }}
+                style={{
+                  padding: '10px 16px',
+                  background: imageQuality === q ? 'var(--accent-dim)' : 'var(--bg-secondary)',
+                  border: '1px solid ' + (imageQuality === q ? 'var(--accent)' : 'var(--border)'),
+                  borderRadius: 10,
+                  color: imageQuality === q ? 'var(--accent)' : 'var(--text-secondary)',
+                }}
+              >
+                {getQualityLabel(q)}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Ratio Picker */}
       {showRatioPicker && (
@@ -120,23 +184,29 @@ export default function ImageTab() {
           padding: 12,
           zIndex: 100,
           border: '1px solid var(--border)',
+          maxHeight: 300,
+          overflow: 'auto',
         }}>
-          <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 8 }}>图片比例</div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            {IMAGE_RATIOS.map((r) => (
+          <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 8 }}>
+            图片比例
+            {imageModelId === 'gpt-image-2' && referenceImage && (
+              <span style={{ color: 'var(--accent)', marginLeft: 8 }}>（参考图模式）</span>
+            )}
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {availableRatios.map((r) => (
               <button
-                key={r.id}
-                onClick={() => { setImageRatio(r.id); setShowRatioPicker(false); }}
+                key={r}
+                onClick={() => { setImageRatio(r); setShowRatioPicker(false); }}
                 style={{
                   padding: '10px 16px',
-                  background: imageRatio === r.id ? 'var(--accent-dim)' : 'var(--bg-secondary)',
-                  border: '1px solid ' + (imageRatio === r.id ? 'var(--accent)' : 'var(--border)'),
+                  background: imageRatio === r ? 'var(--accent-dim)' : 'var(--bg-secondary)',
+                  border: '1px solid ' + (imageRatio === r ? 'var(--accent)' : 'var(--border)'),
                   borderRadius: 10,
-                  color: imageRatio === r.id ? 'var(--accent)' : 'var(--text-secondary)',
-                  flex: 1,
+                  color: imageRatio === r ? 'var(--accent)' : 'var(--text-secondary)',
                 }}
               >
-                {r.label}
+                {getRatioLabel(r)}
               </button>
             ))}
           </div>
@@ -169,8 +239,17 @@ export default function ImageTab() {
                   borderRadius: 10,
                   color: imageModelId === m.id ? 'var(--accent)' : 'var(--text-secondary)',
                   textAlign: 'left',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
                 }}
               >
+                <span style={{
+                  padding: '2px 8px',
+                  background: 'var(--bg-tertiary)',
+                  borderRadius: 6,
+                  fontSize: 12,
+                }}>{m.tag}</span>
                 {m.name}
               </button>
             ))}
@@ -195,7 +274,6 @@ export default function ImageTab() {
               margin: '0 auto 16px',
               position: 'relative',
             }}>
-              {/* 外圈旋转 */}
               <div style={{
                 position: 'absolute',
                 top: 0,
@@ -207,7 +285,6 @@ export default function ImageTab() {
                 borderRadius: '50%',
                 animation: 'spin 1s linear infinite',
               }} />
-              {/* 内圈脉冲 */}
               <div style={{
                 position: 'absolute',
                 top: 10,
@@ -226,7 +303,6 @@ export default function ImageTab() {
             </div>
             <p style={{ color: 'var(--text-primary)', fontWeight: 500, marginBottom: 8 }}>正在生成图片</p>
             <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>AI 正在创作中，请稍候...</p>
-            {/* 进度条动画 */}
             <div style={{
               marginTop: 16,
               height: 4,
@@ -360,7 +436,6 @@ export default function ImageTab() {
       {/* Input */}
       <div style={{ padding: 12, background: 'var(--bg-secondary)', borderTop: '1px solid var(--border)' }}>
         <div style={{ display: 'flex', gap: 8 }}>
-          {/* 上传按钮 */}
           <input
             ref={fileInputRef}
             type="file"

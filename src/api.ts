@@ -1,4 +1,4 @@
-import { useAppStore, CHAT_MODELS, IMAGE_MODELS, IMAGE_RATIOS } from './store';
+import { useAppStore, CHAT_MODELS, IMAGE_MODELS, OPENAI_SIZE_MAP, GPT2_SIZE_MAP, OPENAI_QUALITY_MAP, getImageModelDef } from './store';
 
 const API_BASE = 'https://api.acmestar.top/v1';
 
@@ -166,29 +166,29 @@ async function callGeminiChat(
 }
 
 export async function generateImage(prompt: string, referenceImage?: string): Promise<string> {
-  const { apiKey, imageModelId, imageRatio, addImageRecord, setIsImageLoading } = useAppStore.getState();
+  const { apiKey, imageModelId, imageRatio, imageQuality, addImageRecord, setIsImageLoading } = useAppStore.getState();
 
   if (!apiKey) throw new Error('请先设置 API Key');
 
-  const model = IMAGE_MODELS.find((m) => m.id === imageModelId) || IMAGE_MODELS[0];
-  const ratio = IMAGE_RATIOS.find((r) => r.id === imageRatio) || IMAGE_RATIOS[0];
+  const model = getImageModelDef(imageModelId);
   setIsImageLoading(true);
 
   try {
     let imageUrl: string;
 
     if (model.provider === 'gemini') {
-      imageUrl = await generateGeminiImage(apiKey, model.id, prompt, ratio, referenceImage);
+      imageUrl = await generateGeminiImage(apiKey, model.id, prompt, imageRatio, imageQuality, referenceImage);
+    } else if (model.id === 'gpt-image-2') {
+      imageUrl = await generateGPT2Image(apiKey, prompt, imageRatio, imageQuality, referenceImage);
     } else {
-      imageUrl = await generateOpenAIImage(apiKey, model.id, prompt, ratio);
+      imageUrl = await generateOpenAIImage(apiKey, model.id, prompt, imageRatio, imageQuality);
     }
 
-    // 保存生图记录
     addImageRecord({
       prompt,
       imageUrl,
       modelId: model.id,
-      ratio: ratio.id,
+      ratio: imageRatio,
       referenceImage,
     });
 
@@ -202,15 +202,148 @@ async function generateOpenAIImage(
   apiKey: string,
   modelId: string,
   prompt: string,
-  ratio: { width: number; height: number },
-  _referenceImage?: string
+  ratio: string,
+  quality: string
 ): Promise<string> {
+  const size = OPENAI_SIZE_MAP[ratio] || '1024x1024';
+  const qualityLevel = OPENAI_QUALITY_MAP[quality] || 'medium';
+
+  try {
+    const resp = await fetch(`${API_BASE}/images/generations`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: modelId,
+        prompt,
+        n: 1,
+        size,
+        quality: qualityLevel,
+      }),
+    });
+
+    if (!resp.ok) {
+      const err = await resp.text();
+      throw new Error(`生成失败: ${resp.status} ${err.slice(0, 200)}`);
+    }
+
+    const data = await resp.json();
+    const b64 = data?.data?.[0]?.b64_json;
+    const url = data?.data?.[0]?.url;
+
+    if (b64) {
+      return `data:image/png;base64,${b64}`;
+    }
+
+    if (url) {
+      try {
+        const imgResp = await fetch(url);
+        const imgBlob = await imgResp.blob();
+        const dataUrl = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.readAsDataURL(imgBlob);
+        });
+        return dataUrl;
+      } catch {
+        return url;
+      }
+    }
+
+    throw new Error('未返回图片');
+  } catch (e) {
+    if (e instanceof TypeError && e.message.includes('fetch')) {
+      throw new Error('网络请求失败，请检查网络连接或尝试使用 Gemini 模型');
+    }
+    throw e;
+  }
+}
+
+async function generateGPT2Image(
+  apiKey: string,
+  prompt: string,
+  ratio: string,
+  quality: string,
+  referenceImage?: string
+): Promise<string> {
+  const size = GPT2_SIZE_MAP[ratio] || 'auto';
+
+  // 有参考图时使用 edits 端点
+  if (referenceImage) {
+    const formData = new FormData();
+
+    // 将 base64 转换为 blob
+    const m = referenceImage.match(/^data:([^;]+);base64,(.+)$/);
+    if (!m) throw new Error('无效的参考图格式');
+
+    const byteString = atob(m[2]);
+    const mimeString = m[1];
+    const ab = new ArrayBuffer(byteString.length);
+    const ia = new Uint8Array(ab);
+    for (let i = 0; i < byteString.length; i++) {
+      ia[i] = byteString.charCodeAt(i);
+    }
+    const blob = new Blob([ab], { type: mimeString });
+
+    formData.append('image', blob, 'reference.png');
+    formData.append('prompt', prompt);
+    formData.append('model', 'gpt-image-2');
+
+    // GPT2 edit 只支持特定尺寸
+    const editSize = ratio === '3:2' ? '1792x1024' : ratio === '2:3' ? '1024x1792' : '1024x1024';
+    formData.append('size', editSize);
+
+    const resp = await fetch(`${API_BASE}/images/edits`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: formData,
+    });
+
+    if (!resp.ok) {
+      const err = await resp.text();
+      throw new Error(`GPT2 编辑失败: ${resp.status} ${err.slice(0, 200)}`);
+    }
+
+    const data = await resp.json();
+    const b64 = data?.data?.[0]?.b64_json;
+    const url = data?.data?.[0]?.url;
+
+    if (b64) return `data:image/png;base64,${b64}`;
+    if (url) {
+      try {
+        const imgResp = await fetch(url);
+        const imgBlob = await imgResp.blob();
+        const dataUrl = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.readAsDataURL(imgBlob);
+        });
+        return dataUrl;
+      } catch {
+        return url;
+      }
+    }
+    throw new Error('未返回图片');
+  }
+
+  // 无参考图时使用 generations 端点
   const body: any = {
-    model: modelId,
+    model: 'gpt-image-2',
     prompt,
     n: 1,
-    size: `${ratio.width}x${ratio.height}`,
   };
+
+  if (size !== 'auto') {
+    body.size = size;
+  }
+
+  if (quality !== 'auto') {
+    body.quality = quality;
+  }
 
   const resp = await fetch(`${API_BASE}/images/generations`, {
     method: 'POST',
@@ -223,21 +356,15 @@ async function generateOpenAIImage(
 
   if (!resp.ok) {
     const err = await resp.text();
-    throw new Error(`生成失败: ${resp.status} ${err.slice(0, 200)}`);
+    throw new Error(`GPT2 生成失败: ${resp.status} ${err.slice(0, 200)}`);
   }
 
   const data = await resp.json();
-
-  // 支持 b64_json 和 url 两种返回格式
   const b64 = data?.data?.[0]?.b64_json;
   const url = data?.data?.[0]?.url;
 
-  if (b64) {
-    return `data:image/png;base64,${b64}`;
-  }
-
+  if (b64) return `data:image/png;base64,${b64}`;
   if (url) {
-    // 如果返回的是 URL，需要下载并转换为 base64
     try {
       const imgResp = await fetch(url);
       const imgBlob = await imgResp.blob();
@@ -248,7 +375,6 @@ async function generateOpenAIImage(
       });
       return dataUrl;
     } catch {
-      // 如果下载失败，直接返回 URL（可能无法显示）
       return url;
     }
   }
@@ -260,7 +386,8 @@ async function generateGeminiImage(
   apiKey: string,
   modelId: string,
   prompt: string,
-  ratio: { width: number; height: number },
+  ratio: string,
+  quality: string,
   referenceImage?: string
 ): Promise<string> {
   const instances: any[] = [{ prompt }];
@@ -273,6 +400,18 @@ async function generateGeminiImage(
     }
   }
 
+  // 解析分辨率
+  const qualityNum = parseInt(quality.replace('K', ''));
+  const baseSize = qualityNum === 4 ? 2048 : qualityNum === 2 ? 1024 : qualityNum === 0 ? 512 : 1024;
+
+  // 解析比例
+  let aspectRatio = 'square';
+  if (ratio !== 'auto') {
+    const [w, h] = ratio.split(':').map(Number);
+    if (w > h) aspectRatio = 'wide';
+    else if (w < h) aspectRatio = 'tall';
+  }
+
   const resp = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:predict?key=${apiKey}`,
     {
@@ -282,7 +421,7 @@ async function generateGeminiImage(
         instances,
         parameters: {
           sampleCount: 1,
-          aspectRatio: ratio.width > ratio.height ? 'wide' : ratio.width < ratio.height ? 'tall' : 'square',
+          aspectRatio,
         },
       }),
     }
