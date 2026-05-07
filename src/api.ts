@@ -310,13 +310,18 @@ async function generateGPT2Image(
     const editSize = ratio === '3:2' ? '1792x1024' : ratio === '2:3' ? '1024x1792' : '1024x1024';
     formData.append('size', editSize);
 
-    const resp = await fetch(`${API_BASE}/images/edits`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
+    // GPT2 编辑可能需要更长时间
+    const resp = await fetchWithTimeout(
+      `${API_BASE}/images/edits`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: formData,
       },
-      body: formData,
-    });
+      180000  // 3分钟超时
+    );
 
     if (!resp.ok) {
       const err = await resp.text();
@@ -349,14 +354,19 @@ async function generateGPT2Image(
     body.quality = quality;
   }
 
-  const resp = await fetch(`${API_BASE}/images/generations`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
+  // GPT2 生成可能需要更长时间
+  const resp = await fetchWithTimeout(
+    `${API_BASE}/images/generations`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(body),
     },
-    body: JSON.stringify(body),
-  });
+    180000  // 3分钟超时
+  );
 
   if (!resp.ok) {
     const err = await resp.text();
