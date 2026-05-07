@@ -278,10 +278,10 @@ export const useAppStore = create<AppState>()(
       setIsChatLoading: (loading) => set({ isChatLoading: loading }),
       isImageLoading: false,
       setIsImageLoading: (loading) => set({ isImageLoading: loading }),
-      theme: 'dark',
+      theme: 'light',
       setTheme: (theme) => {
         set({ theme });
-        document.documentElement.classList.toggle('light', theme === 'light');
+        document.documentElement.classList.toggle('dark', theme === 'dark');
       },
 
       // Actions

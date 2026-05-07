@@ -17,7 +17,7 @@ export default function App() {
 
   // 初始化主题
   useEffect(() => {
-    document.documentElement.classList.toggle('light', theme === 'light');
+    document.documentElement.classList.toggle('dark', theme === 'dark');
   }, [theme]);
 
   return (
