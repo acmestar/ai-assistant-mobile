@@ -3,6 +3,25 @@ import { useAppStore, CHAT_MODELS, OPENAI_SIZE_MAP, GPT2_SIZE_MAP, OPENAI_QUALIT
 // 通过 Cloudflare Worker 代理，解决 CORS 问题
 const API_BASE = 'https://ai.acmestar.top/api';
 
+// 超时包装函数
+function fetchWithTimeout(url: string, options: RequestInit, timeout: number = 120000): Promise<Response> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error('请求超时，请稍后重试'));
+    }, timeout);
+
+    fetch(url, options)
+      .then((response) => {
+        clearTimeout(timer);
+        resolve(response);
+      })
+      .catch((error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+  });
+}
+
 export async function sendChatMessage(userMessage: string, imageBase64?: string): Promise<string> {
   const { apiKey, chatModelId, addMessage, setIsChatLoading } = useAppStore.getState();
 
@@ -122,15 +141,12 @@ async function callGeminiChat(
     });
   }
 
-  // 通过代理调用 Gemini API
+  // Gemini 直接调用 Google API（支持 CORS）
   const resp = await fetch(
-    `${API_BASE}/beta/models/${modelId}:streamGenerateContent?alt=sse`,
+    `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:streamGenerateContent?key=${apiKey}&alt=sse`,
     {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ contents }),
     }
   );
@@ -413,15 +429,12 @@ async function generateGeminiImage(
     else if (w < h) aspectRatio = 'tall';
   }
 
-  // 通过代理调用 Gemini API
+  // Gemini 直接调用 Google API（支持 CORS）
   const resp = await fetch(
-    `${API_BASE}/beta/models/${modelId}:predict`,
+    `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:predict?key=${apiKey}`,
     {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         instances,
         parameters: {
