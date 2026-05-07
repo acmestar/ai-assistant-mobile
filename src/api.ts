@@ -1,4 +1,4 @@
-import { useAppStore, CHAT_MODELS, IMAGE_MODELS } from './store';
+import { useAppStore, CHAT_MODELS, IMAGE_MODELS, IMAGE_RATIOS } from './store';
 
 const API_BASE = 'https://api.acmestar.top/v1';
 
@@ -165,21 +165,22 @@ async function callGeminiChat(
   return result;
 }
 
-export async function generateImage(prompt: string): Promise<string> {
-  const { apiKey, imageModelId, addGeneratedImage, setIsLoading } = useAppStore.getState();
+export async function generateImage(prompt: string, referenceImage?: string): Promise<string> {
+  const { apiKey, imageModelId, imageRatio, addGeneratedImage, setIsLoading } = useAppStore.getState();
 
   if (!apiKey) throw new Error('请先设置 API Key');
 
   const model = IMAGE_MODELS.find((m) => m.id === imageModelId) || IMAGE_MODELS[0];
+  const ratio = IMAGE_RATIOS.find((r) => r.id === imageRatio) || IMAGE_RATIOS[0];
   setIsLoading(true);
 
   try {
     let imageUrl: string;
 
     if (model.provider === 'gemini') {
-      imageUrl = await generateGeminiImage(apiKey, model.id, prompt);
+      imageUrl = await generateGeminiImage(apiKey, model.id, prompt, ratio, referenceImage);
     } else {
-      imageUrl = await generateOpenAIImage(apiKey, model.id, prompt);
+      imageUrl = await generateOpenAIImage(apiKey, model.id, prompt, ratio, referenceImage);
     }
 
     addGeneratedImage(imageUrl);
@@ -189,19 +190,32 @@ export async function generateImage(prompt: string): Promise<string> {
   }
 }
 
-async function generateOpenAIImage(apiKey: string, modelId: string, prompt: string): Promise<string> {
+async function generateOpenAIImage(
+  apiKey: string,
+  modelId: string,
+  prompt: string,
+  ratio: { width: number; height: number },
+  referenceImage?: string
+): Promise<string> {
+  const body: any = {
+    model: modelId,
+    prompt,
+    n: 1,
+    size: `${ratio.width}x${ratio.height}`,
+  };
+
+  // 添加参考图（如果支持）
+  if (referenceImage) {
+    body.reference_image = referenceImage;
+  }
+
   const resp = await fetch(`${API_BASE}/images/generations`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${apiKey}`,
     },
-    body: JSON.stringify({
-      model: modelId,
-      prompt,
-      n: 1,
-      size: '1024x1024',
-    }),
+    body: JSON.stringify(body),
   });
 
   if (!resp.ok) {
@@ -217,15 +231,34 @@ async function generateOpenAIImage(apiKey: string, modelId: string, prompt: stri
   return url.startsWith('data:') ? url : `data:image/png;base64,${url}`;
 }
 
-async function generateGeminiImage(apiKey: string, modelId: string, prompt: string): Promise<string> {
+async function generateGeminiImage(
+  apiKey: string,
+  modelId: string,
+  prompt: string,
+  ratio: { width: number; height: number },
+  referenceImage?: string
+): Promise<string> {
+  const instances: any[] = [{ prompt }];
+
+  // 添加参考图
+  if (referenceImage) {
+    const m = referenceImage.match(/^data:([^;]+);base64,(.+)$/);
+    if (m) {
+      instances[0].image = { mimeType: m[1], data: m[2] };
+    }
+  }
+
   const resp = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:predict?key=${apiKey}`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        instances: [{ prompt }],
-        parameters: { sampleCount: 1 },
+        instances,
+        parameters: {
+          sampleCount: 1,
+          aspectRatio: ratio.width > ratio.height ? 'wide' : ratio.width < ratio.height ? 'tall' : 'square',
+        },
       }),
     }
   );

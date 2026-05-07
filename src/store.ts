@@ -45,20 +45,31 @@ export interface ChatModel {
 export const CHAT_MODELS: ChatModel[] = [
   { id: 'kimi-k2.5', name: 'Kimi K2.5', provider: 'openai', maxTokens: 131072 },
   { id: 'grok-4.2', name: 'Grok 4.2', provider: 'openai', maxTokens: 131072 },
+  { id: 'gpt-5.5', name: 'GPT-5.5', provider: 'openai', maxTokens: 131072 },
+  { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', provider: 'openai', maxTokens: 131072 },
 ];
 
 export interface ImageModel {
   id: string;
   name: string;
   provider: 'openai' | 'gemini';
+  supportsReference?: boolean;  // 是否支持参考图
 }
 
 export const IMAGE_MODELS: ImageModel[] = [
-  { id: 'gemini-3.1-flash-image-preview', name: 'Gemini Flash 3.1', provider: 'gemini' },
-  { id: 'gemini-3-pro-image-preview', name: 'Gemini Pro 3', provider: 'gemini' },
-  { id: 'gpt-image-1.5', name: 'GPT Image 1.5', provider: 'openai' },
-  { id: 'gpt-image-2', name: 'GPT Image 2', provider: 'openai' },
+  { id: 'gemini-3.1-flash-image-preview', name: 'Gemini Flash 3.1', provider: 'gemini', supportsReference: true },
+  { id: 'gemini-3-pro-image-preview', name: 'Gemini Pro 3', provider: 'gemini', supportsReference: true },
+  { id: 'gpt-image-1.5', name: 'GPT Image 1.5', provider: 'openai', supportsReference: true },
+  { id: 'gpt-image-2', name: 'GPT Image 2', provider: 'openai', supportsReference: true },
 ];
+
+export const IMAGE_RATIOS = [
+  { id: '1:1', label: '1:1', width: 1024, height: 1024 },
+  { id: '3:4', label: '3:4', width: 768, height: 1024 },
+  { id: '4:3', label: '4:3', width: 1024, height: 768 },
+  { id: '9:16', label: '9:16', width: 576, height: 1024 },
+  { id: '16:9', label: '16:9', width: 1024, height: 576 },
+] as const;
 
 interface AppState {
   // API
@@ -74,6 +85,8 @@ interface AppState {
   // Image
   imageModelId: string;
   setImageModelId: (id: string) => void;
+  imageRatio: string;
+  setImageRatio: (ratio: string) => void;
   generatedImages: string[];
 
   // UI
@@ -108,6 +121,8 @@ export const useAppStore = create<AppState>()(
       // Image
       imageModelId: IMAGE_MODELS[0].id,
       setImageModelId: (id) => set({ imageModelId: id }),
+      imageRatio: '1:1',
+      setImageRatio: (ratio) => set({ imageRatio: ratio }),
       generatedImages: [],
 
       // UI
@@ -196,6 +211,7 @@ export const useAppStore = create<AppState>()(
         currentConversationId: state.currentConversationId,
         chatModelId: state.chatModelId,
         imageModelId: state.imageModelId,
+        imageRatio: state.imageRatio,
         generatedImages: state.generatedImages,
       }),
     }
