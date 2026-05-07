@@ -34,18 +34,7 @@ export default defineConfig({
             purpose: 'any maskable'
           }
         ]
-      },
-      workbox: {
-        // 网络请求不缓存，始终从网络获取
-        runtimeCaching: [
-          {
-            urlPattern: /^https:\/\/ai\.acmestar\.top\/api\/.*/,
-            handler: 'NetworkOnly',
-          },
-        ],
-        // 静态资源缓存策略
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
-      },
+      }
     })
   ],
   server: {

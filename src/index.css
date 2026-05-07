@@ -3,7 +3,6 @@
   padding: 0;
   box-sizing: border-box;
   -webkit-tap-highlight-color: transparent;
-  touch-action: manipulation; /* 防止双击缩放 */
 }
 
 :root {
@@ -17,27 +16,21 @@
   --accent-dim: rgba(34, 197, 94, 0.2);
   --border: rgba(255, 255, 255, 0.08);
   --danger: #ef4444;
-  --safe-area-top: env(safe-area-inset-top, 0px);
-  --safe-area-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 html, body, #root {
   height: 100%;
   width: 100%;
   overflow: hidden;
-  overscroll-behavior: none; /* 防止橡皮筋效果 */
-  -webkit-overflow-scrolling: touch;
 }
 
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   background: var(--bg-primary);
   color: var(--text-primary);
-  font-size: 16px; /* 防止 iOS 输入框缩放 */
+  font-size: 16px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
-  padding-top: var(--safe-area-top);
-  padding-bottom: var(--safe-area-bottom);
 }
 
 /* Safe area padding for notch devices */
@@ -283,35 +276,4 @@ input[type="range"]::-webkit-slider-thumb {
   background: var(--accent);
   border-radius: 50%;
   cursor: pointer;
-}
-
-/* 防止滚动穿透 */
-.no-scroll {
-  overflow: hidden;
-  position: fixed;
-  width: 100%;
-  height: 100%;
-}
-
-/* 弹窗背景滚动锁定 */
-.modal-open {
-  overflow: hidden;
-}
-
-/* GPU 加速动画 */
-.animate-spin {
-  animation: spin 1s linear infinite;
-  will-change: transform;
-}
-
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
-/* 平滑滚动 */
-.scroll-container {
-  overflow: auto;
-  -webkit-overflow-scrolling: touch;
-  overscroll-behavior: contain;
 }

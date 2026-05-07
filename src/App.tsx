@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 import { MessageSquare, Image, Settings } from 'lucide-react';
 import { useAppStore } from './store';
 import ChatTab from './ChatTab';
@@ -7,7 +7,6 @@ import SettingsTab from './SettingsTab';
 
 export default function App() {
   const { activeTab, setActiveTab, apiKey, createConversation, currentConversationId } = useAppStore();
-  const appRef = useRef<HTMLDivElement>(null);
 
   // Auto-create conversation if none exists
   useEffect(() => {
@@ -16,29 +15,8 @@ export default function App() {
     }
   }, [currentConversationId, apiKey, createConversation]);
 
-  // 处理键盘弹出时的视口变化
-  useEffect(() => {
-    const handleResize = () => {
-      if (appRef.current && window.visualViewport) {
-        const viewportHeight = window.visualViewport.height;
-        appRef.current.style.height = `${viewportHeight}px`;
-      }
-    };
-
-    const vv = window.visualViewport;
-    if (vv) {
-      vv.addEventListener('resize', handleResize);
-      vv.addEventListener('scroll', handleResize);
-      handleResize();
-      return () => {
-        vv.removeEventListener('resize', handleResize);
-        vv.removeEventListener('scroll', handleResize);
-      };
-    }
-  }, []);
-
   return (
-    <div ref={appRef} style={{
+    <div style={{
       height: '100%',
       display: 'flex',
       flexDirection: 'column',
