@@ -72,11 +72,14 @@ export async function sendChatMessage(userMessage: string, imageBase64?: string)
 }
 
 export async function generateImage(prompt: string, referenceImage?: string): Promise<string> {
-  const { apiKey, imageModelId, imageRatio, imageQuality, addImageRecord, setIsImageLoading } = useAppStore.getState();
+  const { apiKey, imageModelId, imageRatio, imageQuality, addImageRecord, setIsImageLoading, setPendingImageRequest } = useAppStore.getState();
   if (!apiKey) throw new Error('请先设置 API Key');
 
   const model = getImageModelDef(imageModelId);
   setIsImageLoading(true);
+
+  // 保存请求状态
+  setPendingImageRequest({ prompt, referenceImage });
 
   try {
     let imageUrl: string;
@@ -90,7 +93,16 @@ export async function generateImage(prompt: string, referenceImage?: string): Pr
     }
 
     addImageRecord({ prompt, imageUrl, modelId: model.id, ratio: imageRatio, referenceImage });
+    setPendingImageRequest(null);
     return imageUrl;
+  } catch (error) {
+    // 请求中断时不清除状态
+    if (error instanceof Error && (error.name === 'AbortError' || error.message.includes('abort') || error.message.includes('network'))) {
+      console.log('图片生成请求被中断，等待页面恢复');
+      return '';
+    }
+    setPendingImageRequest(null);
+    throw error;
   } finally {
     setIsImageLoading(false);
   }

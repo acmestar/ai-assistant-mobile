@@ -217,7 +217,9 @@ interface AppState {
   setImageRatio: (ratio: string) => void;
   imageQuality: string;
   setImageQuality: (quality: string) => void;
-  imageRecords: ImageRecord[];  // 生图历史记录
+  imageRecords: ImageRecord[];
+  pendingImageRequest: { prompt: string; referenceImage?: string } | null;
+  setPendingImageRequest: (req: { prompt: string; referenceImage?: string } | null) => void;  // 生图历史记录
 
   // UI
   activeTab: 'chat' | 'image' | 'settings';
@@ -264,6 +266,8 @@ export const useAppStore = create<AppState>()(
       imageQuality: IMAGE_MODELS[0].defaultQuality,
       setImageQuality: (quality) => set({ imageQuality: quality }),
       imageRecords: [],
+      pendingImageRequest: null,
+      setPendingImageRequest: (req) => set({ pendingImageRequest: req }),
 
       // UI
       activeTab: 'chat',

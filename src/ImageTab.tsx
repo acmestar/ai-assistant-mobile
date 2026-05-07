@@ -1,10 +1,10 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Image as ImageIcon, Sparkles, Loader2, Trash2, Download, Upload, X, Maximize2, Clock, Sliders, AlertCircle } from 'lucide-react';
 import { useAppStore, IMAGE_MODELS, GPT2_RATIO_LABELS, GPT2_QUALITY_LABELS, getImageModelDef } from './store';
 import { generateImage } from './api';
 
 export default function ImageTab() {
-  const { imageModelId, setImageModelId, imageRatio, setImageRatio, imageQuality, setImageQuality, imageRecords, isImageLoading, deleteImageRecord, clearImageRecords } = useAppStore();
+  const { imageModelId, setImageModelId, imageRatio, setImageRatio, imageQuality, setImageQuality, imageRecords, isImageLoading, deleteImageRecord, clearImageRecords, pendingImageRequest, setPendingImageRequest } = useAppStore();
   const [prompt, setPrompt] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
@@ -16,6 +16,34 @@ export default function ImageTab() {
 
   const currentModel = getImageModelDef(imageModelId);
   const storageWarning = imageRecords.length >= 15;
+
+  // 页面恢复时检查是否有未完成的请求
+  useEffect(() => {
+    const handleVisibilityChange = async () => {
+      if (document.visibilityState === 'visible' && pendingImageRequest && !isImageLoading) {
+        const { prompt, referenceImage } = pendingImageRequest;
+        setPendingImageRequest(null);
+        setError(null);
+        try {
+          await generateImage(prompt, referenceImage);
+        } catch (e) {
+          setError(String(e));
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [pendingImageRequest, isImageLoading]);
+
+  // 组件挂载时也检查
+  useEffect(() => {
+    if (pendingImageRequest && !isImageLoading) {
+      const { prompt, referenceImage } = pendingImageRequest;
+      setPendingImageRequest(null);
+      generateImage(prompt, referenceImage).catch((e) => setError(String(e)));
+    }
+  }, []);
 
   const getRatioLabel = (ratio: string): string => {
     if (imageModelId === 'gpt-image-2') {

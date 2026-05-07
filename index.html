@@ -11,6 +11,17 @@
     <meta name="theme-color" content="#0a0a0f" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.svg" />
     <title>AI 助手</title>
+    <style>
+      /* 防止 iOS 橡皮筋效果 */
+      html, body {
+        overscroll-behavior: none;
+        -webkit-overflow-scrolling: touch;
+      }
+      /* 防止 iOS 双击缩放 */
+      * {
+        touch-action: manipulation;
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>
