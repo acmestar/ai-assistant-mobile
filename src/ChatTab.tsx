@@ -179,7 +179,7 @@ export default function ChatTab() {
 
   return (
     <div className="chat-container" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-      {/* Header */}
+      {/* Header - 固定不动 */}
       <div style={{
         display: 'flex',
         alignItems: 'center',
@@ -187,6 +187,7 @@ export default function ChatTab() {
         padding: '12px 16px',
         background: 'var(--bg-secondary)',
         borderBottom: '1px solid var(--border)',
+        flexShrink: 0,
       }}>
         <button className="btn-secondary" onClick={() => setShowSidebar(true)} style={{ padding: 8 }}>
           <MessageSquare size={20} />
@@ -291,8 +292,8 @@ export default function ChatTab() {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input */}
-      <div style={{ padding: 12, background: 'var(--bg-secondary)', borderTop: '1px solid var(--border)' }}>
+      {/* Input - 固定在底部 */}
+      <div style={{ padding: 12, background: 'var(--bg-secondary)', borderTop: '1px solid var(--border)', flexShrink: 0 }}>
         {attachedImage && (
           <div style={{ marginBottom: 8, position: 'relative', display: 'inline-block' }}>
             <img src={attachedImage} alt="" style={{ height: 60, borderRadius: 12 }} />
