@@ -52,6 +52,13 @@ export async function sendChatMessage(userMessage: string, imageBase64?: string)
     const responseText = data.choices?.[0]?.message?.content || '';
     addMessage(responseText, 'assistant');
     return responseText;
+  } catch (error) {
+    // 用户主动离开页面导致的请求中断，静默处理
+    if (error instanceof Error && (error.name === 'AbortError' || error.message.includes('abort') || error.message.includes('network'))) {
+      console.log('请求被中断');
+      return '';
+    }
+    throw error;
   } finally {
     setIsChatLoading(false);
   }
