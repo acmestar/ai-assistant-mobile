@@ -22,7 +22,22 @@ export default function SettingsTab() {
     setNetworkStatus('idle');
     setNetworkError(null);
 
+    // 收集诊断信息
+    const diagnostics: string[] = [];
+    diagnostics.push(`User-Agent: ${navigator.userAgent}`);
+    diagnostics.push(`平台: ${navigator.platform}`);
+
     try {
+      // 先测试简单的 GET 请求
+      diagnostics.push('测试 1: 基础连接...');
+      await fetch('https://ai.acmestar.top', { method: 'HEAD', mode: 'no-cors' });
+      diagnostics.push('基础连接成功');
+    } catch (e) {
+      diagnostics.push(`基础连接失败: ${e instanceof Error ? e.message : String(e)}`);
+    }
+
+    try {
+      diagnostics.push('测试 2: API 端点...');
       const resp = await fetch('https://ai.acmestar.top/api/chat/completions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -32,17 +47,19 @@ export default function SettingsTab() {
       });
 
       if (resp.ok || resp.status === 401) {
-        // 401 表示服务器正常，只是没有认证
         setNetworkStatus('success');
+        diagnostics.push('API 连接正常');
       } else {
         const text = await resp.text();
         setNetworkStatus('error');
-        setNetworkError(`服务器响应: ${resp.status} ${text.slice(0, 100)}`);
+        diagnostics.push(`服务器响应: ${resp.status}`);
+        setNetworkError(`${text.slice(0, 100)}\n\n诊断信息:\n${diagnostics.join('\n')}`);
       }
     } catch (e) {
       setNetworkStatus('error');
       const msg = e instanceof Error ? e.message : String(e);
-      setNetworkError(msg);
+      diagnostics.push(`API 请求失败: ${msg}`);
+      setNetworkError(`${msg}\n\n诊断信息:\n${diagnostics.join('\n')}`);
     } finally {
       setTestingNetwork(false);
     }
@@ -143,7 +160,10 @@ export default function SettingsTab() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
               <AlertCircle size={16} /> 网络连接失败
             </div>
-            <div style={{ fontSize: 12, opacity: 0.8, wordBreak: 'break-all' }}>{networkError}</div>
+            <div style={{ fontSize: 12, opacity: 0.8, wordBreak: 'break-all', whiteSpace: 'pre-wrap' }}>{networkError}</div>
+            <div style={{ marginTop: 8, fontSize: 12, color: 'var(--text-muted)' }}>
+              建议：请尝试使用 Chrome 浏览器打开，或将链接添加到主屏幕使用
+            </div>
           </div>
         )}
       </div>
