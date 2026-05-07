@@ -37,23 +37,16 @@ export default function ChatTab() {
   const saveScrollPosition = useCallback(() => {
     if (messagesContainerRef.current && currentConversationId) {
       const scrollTop = messagesContainerRef.current.scrollTop;
-      sessionStorage.setItem(`${SCROLL_POSITION_KEY}-${currentConversationId}`, String(scrollTop));
+      localStorage.setItem(`${SCROLL_POSITION_KEY}-${currentConversationId}`, String(scrollTop));
     }
   }, [currentConversationId]);
 
   // 恢复滚动位置
   const restoreScrollPosition = useCallback(() => {
     if (messagesContainerRef.current && currentConversationId) {
-      const saved = sessionStorage.getItem(`${SCROLL_POSITION_KEY}-${currentConversationId}`);
+      const saved = localStorage.getItem(`${SCROLL_POSITION_KEY}-${currentConversationId}`);
       if (saved !== null) {
-        // 使用 requestAnimationFrame 确保 DOM 已渲染
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            if (messagesContainerRef.current) {
-              messagesContainerRef.current.scrollTop = parseInt(saved, 10);
-            }
-          });
-        });
+        messagesContainerRef.current.scrollTop = parseInt(saved, 10);
       }
     }
   }, [currentConversationId]);
