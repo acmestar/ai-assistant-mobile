@@ -388,7 +388,7 @@ async function generateGeminiImage(
   modelId: string,
   prompt: string,
   ratio: string,
-  quality: string,
+  _quality: string,
   referenceImage?: string
 ): Promise<string> {
   const instances: any[] = [{ prompt }];
