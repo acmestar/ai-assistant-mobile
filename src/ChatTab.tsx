@@ -1,8 +1,10 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { MessageSquare, Send, Trash2, Plus, ChevronLeft, Image as ImageIcon, X, Loader2 } from 'lucide-react';
 import { useAppStore, CHAT_MODELS } from './store';
 import { sendChatMessage } from './api';
 import ReactMarkdown from 'react-markdown';
+
+const SCROLL_POSITION_KEY = 'chat-scroll-position';
 
 export default function ChatTab() {
   const {
@@ -23,13 +25,65 @@ export default function ChatTab() {
   const [attachedImage, setAttachedImage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const prevMessagesLengthRef = useRef(0);
+  const shouldScrollToBottomRef = useRef(false);
 
   const conversation = getCurrentConversation();
   const currentModel = CHAT_MODELS.find((m) => m.id === chatModelId);
 
+  // 保存滚动位置
+  const saveScrollPosition = useCallback(() => {
+    if (messagesContainerRef.current && currentConversationId) {
+      const scrollTop = messagesContainerRef.current.scrollTop;
+      sessionStorage.setItem(`${SCROLL_POSITION_KEY}-${currentConversationId}`, String(scrollTop));
+    }
+  }, [currentConversationId]);
+
+  // 恢复滚动位置
+  const restoreScrollPosition = useCallback(() => {
+    if (messagesContainerRef.current && currentConversationId) {
+      const saved = sessionStorage.getItem(`${SCROLL_POSITION_KEY}-${currentConversationId}`);
+      if (saved !== null) {
+        messagesContainerRef.current.scrollTop = parseInt(saved, 10);
+      }
+    }
+  }, [currentConversationId]);
+
+  // 监听滚动，保存位置
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const container = messagesContainerRef.current;
+    if (!container) return;
+
+    const handleScroll = () => saveScrollPosition();
+    container.addEventListener('scroll', handleScroll);
+    return () => container.removeEventListener('scroll', handleScroll);
+  }, [saveScrollPosition]);
+
+  // 组件挂载时恢复滚动位置
+  useEffect(() => {
+    restoreScrollPosition();
+  }, [restoreScrollPosition]);
+
+  // 切换对话时恢复滚动位置
+  useEffect(() => {
+    prevMessagesLengthRef.current = conversation?.messages.length || 0;
+    restoreScrollPosition();
+  }, [currentConversationId, restoreScrollPosition]);
+
+  // 只在发送新消息时滚动到底部
+  useEffect(() => {
+    if (!conversation) return;
+    const currentLength = conversation.messages.length;
+    const prevLength = prevMessagesLengthRef.current;
+
+    // 只有消息数量增加且是用户发送时才滚动
+    if (currentLength > prevLength && shouldScrollToBottomRef.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      shouldScrollToBottomRef.current = false;
+    }
+    prevMessagesLengthRef.current = currentLength;
   }, [conversation?.messages]);
 
   const handleSend = async () => {
@@ -41,6 +95,9 @@ export default function ChatTab() {
     setInput('');
     const imageToSend = attachedImage;
     setAttachedImage(null);
+
+    // 标记需要滚动到底部
+    shouldScrollToBottomRef.current = true;
 
     try {
       await sendChatMessage(messageText || '请描述这张图片', imageToSend || undefined);
@@ -147,7 +204,7 @@ export default function ChatTab() {
       )}
 
       {/* Messages */}
-      <div style={{ flex: 1, overflow: 'auto', padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div ref={messagesContainerRef} style={{ flex: 1, overflow: 'auto', padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
         {conversation.messages.length === 0 && (
           <div style={{ textAlign: 'center', color: 'var(--text-muted)', marginTop: 40 }}>
             <p style={{ marginBottom: 8 }}>发送消息开始对话</p>
