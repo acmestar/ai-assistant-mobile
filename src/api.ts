@@ -1,4 +1,4 @@
-import { useAppStore, CHAT_MODELS, IMAGE_MODELS, OPENAI_SIZE_MAP, GPT2_SIZE_MAP, OPENAI_QUALITY_MAP, getImageModelDef } from './store';
+import { useAppStore, CHAT_MODELS, OPENAI_SIZE_MAP, GPT2_SIZE_MAP, OPENAI_QUALITY_MAP, getImageModelDef } from './store';
 
 // 通过 Cloudflare Worker 代理，解决 CORS 问题
 const API_BASE = 'https://ai.acmestar.top/api';
@@ -400,10 +400,6 @@ async function generateGeminiImage(
       instances[0].image = { mimeType: m[1], data: m[2] };
     }
   }
-
-  // 解析分辨率
-  const qualityNum = parseInt(quality.replace('K', ''));
-  const baseSize = qualityNum === 4 ? 2048 : qualityNum === 2 ? 1024 : qualityNum === 0 ? 512 : 1024;
 
   // 解析比例
   let aspectRatio = 'square';

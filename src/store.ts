@@ -229,7 +229,6 @@ export const useAppStore = create<AppState>()(
       // Image
       imageModelId: IMAGE_MODELS[0].id,
       setImageModelId: (id) => {
-        const def = getImageModelDef(id);
         const { quality, ratio } = constrainImageSettings(id, get().imageQuality, get().imageRatio);
         set({ imageModelId: id, imageQuality: quality, imageRatio: ratio });
       },
