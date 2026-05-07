@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Key, Info, Check, Eye, EyeOff, Trash2 } from 'lucide-react';
+import { Key, Info, Check, Eye, EyeOff, Trash2, Wifi, AlertCircle } from 'lucide-react';
 import { useAppStore, CHAT_MODELS, IMAGE_MODELS } from './store';
 
 export default function SettingsTab() {
@@ -7,11 +7,45 @@ export default function SettingsTab() {
   const [showKey, setShowKey] = useState(false);
   const [tempKey, setTempKey] = useState(apiKey);
   const [saved, setSaved] = useState(false);
+  const [testingNetwork, setTestingNetwork] = useState(false);
+  const [networkStatus, setNetworkStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [networkError, setNetworkError] = useState<string | null>(null);
 
   const handleSave = () => {
     setApiKey(tempKey);
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
+  };
+
+  const handleTestNetwork = async () => {
+    setTestingNetwork(true);
+    setNetworkStatus('idle');
+    setNetworkError(null);
+
+    try {
+      const resp = await fetch('https://ai.acmestar.top/api/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: 'gpt-4o-mini', messages: [{ role: 'user', content: 'Hi' }], max_tokens: 5 }),
+        mode: 'cors',
+        cache: 'no-cache',
+      });
+
+      if (resp.ok || resp.status === 401) {
+        // 401 表示服务器正常，只是没有认证
+        setNetworkStatus('success');
+      } else {
+        const text = await resp.text();
+        setNetworkStatus('error');
+        setNetworkError(`服务器响应: ${resp.status} ${text.slice(0, 100)}`);
+      }
+    } catch (e) {
+      setNetworkStatus('error');
+      const msg = e instanceof Error ? e.message : String(e);
+      setNetworkError(msg);
+    } finally {
+      setTestingNetwork(false);
+    }
   };
 
   const handleClearAll = () => {
@@ -80,6 +114,38 @@ export default function SettingsTab() {
         <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 12 }}>
           密钥将安全存储在本地，不会上传到服务器
         </p>
+      </div>
+
+      {/* Network Test */}
+      <div className="settings-section">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+          <Wifi size={18} color="var(--accent)" />
+          <span style={{ fontWeight: 500 }}>网络测试</span>
+        </div>
+
+        <button
+          onClick={handleTestNetwork}
+          disabled={testingNetwork}
+          className="btn-secondary"
+          style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
+        >
+          {testingNetwork ? '测试中...' : '测试网络连接'}
+        </button>
+
+        {networkStatus === 'success' && (
+          <div style={{ marginTop: 12, padding: 12, background: 'rgba(34, 197, 94, 0.1)', borderRadius: 12, color: 'var(--accent)', fontSize: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Check size={16} /> 网络连接正常
+          </div>
+        )}
+
+        {networkStatus === 'error' && (
+          <div style={{ marginTop: 12, padding: 12, background: 'rgba(239, 68, 68, 0.1)', borderRadius: 12, color: 'var(--danger)', fontSize: 14 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+              <AlertCircle size={16} /> 网络连接失败
+            </div>
+            <div style={{ fontSize: 12, opacity: 0.8, wordBreak: 'break-all' }}>{networkError}</div>
+          </div>
+        )}
       </div>
 
       {/* Current Models */}

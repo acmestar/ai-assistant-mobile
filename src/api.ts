@@ -6,7 +6,6 @@ function fetchWithTimeout(url: string, options: RequestInit, timeout: number = 1
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('请求超时')), timeout);
 
-    // 微信浏览器添加额外配置
     const fetchOptions: RequestInit = {
       ...options,
       mode: 'cors',
@@ -15,7 +14,18 @@ function fetchWithTimeout(url: string, options: RequestInit, timeout: number = 1
 
     fetch(url, fetchOptions)
       .then((response) => { clearTimeout(timer); resolve(response); })
-      .catch((error) => { clearTimeout(timer); reject(error); });
+      .catch((error) => {
+        clearTimeout(timer);
+        // 提供更详细的错误信息
+        const errorMsg = error.message || String(error);
+        if (errorMsg.includes('Failed to fetch') || errorMsg.includes('NetworkError') || errorMsg.includes('Network request failed')) {
+          reject(new Error('网络连接失败，请检查网络设置或尝试切换网络'));
+        } else if (errorMsg.includes('CORS') || errorMsg.includes('cross-origin')) {
+          reject(new Error('跨域请求被拦截，请尝试使用其他浏览器'));
+        } else {
+          reject(new Error(`网络错误: ${errorMsg}`));
+        }
+      });
   });
 }
 
