@@ -291,7 +291,6 @@ async function generateGPT2Image(
   if (referenceImage) {
     const formData = new FormData();
 
-    // 将 base64 转换为 blob
     const m = referenceImage.match(/^data:([^;]+);base64,(.+)$/);
     if (!m) throw new Error('无效的参考图格式');
 
@@ -308,7 +307,6 @@ async function generateGPT2Image(
     formData.append('prompt', prompt);
     formData.append('model', 'gpt-image-2');
 
-    // GPT2 edit 只支持特定尺寸
     const editSize = ratio === '3:2' ? '1792x1024' : ratio === '2:3' ? '1024x1792' : '1024x1024';
     formData.append('size', editSize);
 
@@ -326,24 +324,13 @@ async function generateGPT2Image(
     }
 
     const data = await resp.json();
+    console.log('GPT2 Edit response:', JSON.stringify(data).slice(0, 500));
+
     const b64 = data?.data?.[0]?.b64_json;
     const url = data?.data?.[0]?.url;
 
     if (b64) return `data:image/png;base64,${b64}`;
-    if (url) {
-      try {
-        const imgResp = await fetch(url);
-        const imgBlob = await imgResp.blob();
-        const dataUrl = await new Promise<string>((resolve) => {
-          const reader = new FileReader();
-          reader.onloadend = () => resolve(reader.result as string);
-          reader.readAsDataURL(imgBlob);
-        });
-        return dataUrl;
-      } catch {
-        return url;
-      }
-    }
+    if (url) return url;
     throw new Error('未返回图片');
   }
 
@@ -377,11 +364,15 @@ async function generateGPT2Image(
   }
 
   const data = await resp.json();
+  console.log('GPT2 Generate response:', JSON.stringify(data).slice(0, 500));
+
   const b64 = data?.data?.[0]?.b64_json;
   const url = data?.data?.[0]?.url;
 
   if (b64) return `data:image/png;base64,${b64}`;
-  if (url) {
+  if (url) return url;
+  throw new Error('未返回图片');
+}
     try {
       const imgResp = await fetch(url);
       const imgBlob = await imgResp.blob();
