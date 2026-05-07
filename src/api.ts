@@ -5,7 +5,15 @@ const API_BASE = 'https://ai.acmestar.top/api';
 function fetchWithTimeout(url: string, options: RequestInit, timeout: number = 120000): Promise<Response> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('请求超时')), timeout);
-    fetch(url, options)
+
+    // 微信浏览器添加额外配置
+    const fetchOptions: RequestInit = {
+      ...options,
+      mode: 'cors',
+      cache: 'no-cache',
+    };
+
+    fetch(url, fetchOptions)
       .then((response) => { clearTimeout(timer); resolve(response); })
       .catch((error) => { clearTimeout(timer); reject(error); });
   });
@@ -46,6 +54,8 @@ export async function sendChatMessage(userMessage: string, imageBase64?: string)
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({ model: model.id, messages, max_tokens: 8192 }),
+      mode: 'cors',
+      cache: 'no-cache',
     });
 
     if (!resp.ok) {
@@ -116,6 +126,8 @@ async function generateOpenAIImage(apiKey: string, modelId: string, prompt: stri
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({ model: modelId, prompt, n: 1, size, quality: qualityLevel }),
+    mode: 'cors',
+    cache: 'no-cache',
   });
 
   if (!resp.ok) {
@@ -206,6 +218,8 @@ async function generateGeminiImage(apiKey: string, modelId: string, prompt: stri
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({ model: modelId, messages, max_tokens: 4096 }),
+    mode: 'cors',
+    cache: 'no-cache',
   }, 180000);
 
   if (!resp.ok) {
