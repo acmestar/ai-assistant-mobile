@@ -3,7 +3,7 @@ import { useAppStore, CHAT_MODELS, IMAGE_MODELS, IMAGE_RATIOS } from './store';
 const API_BASE = 'https://api.acmestar.top/v1';
 
 export async function sendChatMessage(userMessage: string, imageBase64?: string): Promise<string> {
-  const { apiKey, chatModelId, addMessage, setIsLoading } = useAppStore.getState();
+  const { apiKey, chatModelId, addMessage, setIsChatLoading } = useAppStore.getState();
 
   if (!apiKey) throw new Error('请先设置 API Key');
 
@@ -11,7 +11,7 @@ export async function sendChatMessage(userMessage: string, imageBase64?: string)
 
   // Add user message
   addMessage(userMessage, 'user', imageBase64);
-  setIsLoading(true);
+  setIsChatLoading(true);
 
   try {
     const conversation = useAppStore.getState().getCurrentConversation();
@@ -57,7 +57,7 @@ export async function sendChatMessage(userMessage: string, imageBase64?: string)
     addMessage(responseText, 'assistant');
     return responseText;
   } finally {
-    setIsLoading(false);
+    setIsChatLoading(false);
   }
 }
 
@@ -166,13 +166,13 @@ async function callGeminiChat(
 }
 
 export async function generateImage(prompt: string, referenceImage?: string): Promise<string> {
-  const { apiKey, imageModelId, imageRatio, addGeneratedImage, setIsLoading } = useAppStore.getState();
+  const { apiKey, imageModelId, imageRatio, addGeneratedImage, setIsImageLoading } = useAppStore.getState();
 
   if (!apiKey) throw new Error('请先设置 API Key');
 
   const model = IMAGE_MODELS.find((m) => m.id === imageModelId) || IMAGE_MODELS[0];
   const ratio = IMAGE_RATIOS.find((r) => r.id === imageRatio) || IMAGE_RATIOS[0];
-  setIsLoading(true);
+  setIsImageLoading(true);
 
   try {
     let imageUrl: string;
@@ -186,7 +186,7 @@ export async function generateImage(prompt: string, referenceImage?: string): Pr
     addGeneratedImage(imageUrl);
     return imageUrl;
   } finally {
-    setIsLoading(false);
+    setIsImageLoading(false);
   }
 }
 

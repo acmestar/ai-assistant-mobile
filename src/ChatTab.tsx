@@ -10,7 +10,7 @@ export default function ChatTab() {
     currentConversationId,
     chatModelId,
     setChatModelId,
-    isLoading,
+    isChatLoading,
     createConversation,
     getCurrentConversation,
     clearConversation,
@@ -34,7 +34,7 @@ export default function ChatTab() {
 
   const handleSend = async () => {
     if (!input.trim() && !attachedImage) return;
-    if (isLoading) return;
+    if (isChatLoading) return;
 
     setError(null);
     const messageText = input.trim();
@@ -170,7 +170,7 @@ export default function ChatTab() {
           </div>
         ))}
 
-        {isLoading && (
+        {isChatLoading && (
           <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
             <div className="message assistant">
               <div className="loading-dots">
@@ -243,11 +243,11 @@ export default function ChatTab() {
 
           <button
             onClick={handleSend}
-            disabled={isLoading || (!input.trim() && !attachedImage)}
+            disabled={isChatLoading || (!input.trim() && !attachedImage)}
             className="btn-primary"
             style={{ padding: 12 }}
           >
-            {isLoading ? <Loader2 size={20} className="animate-spin" /> : <Send size={20} />}
+            {isChatLoading ? <Loader2 size={20} className="animate-spin" /> : <Send size={20} />}
           </button>
         </div>
       </div>

@@ -92,8 +92,10 @@ interface AppState {
   // UI
   activeTab: 'chat' | 'image' | 'settings';
   setActiveTab: (tab: 'chat' | 'image' | 'settings') => void;
-  isLoading: boolean;
-  setIsLoading: (loading: boolean) => void;
+  isChatLoading: boolean;
+  setIsChatLoading: (loading: boolean) => void;
+  isImageLoading: boolean;
+  setIsImageLoading: (loading: boolean) => void;
 
   // Actions
   createConversation: () => string;
@@ -128,8 +130,10 @@ export const useAppStore = create<AppState>()(
       // UI
       activeTab: 'chat',
       setActiveTab: (tab) => set({ activeTab: tab }),
-      isLoading: false,
-      setIsLoading: (loading) => set({ isLoading: loading }),
+      isChatLoading: false,
+      setIsChatLoading: (loading) => set({ isChatLoading: loading }),
+      isImageLoading: false,
+      setIsImageLoading: (loading) => set({ isImageLoading: loading }),
 
       // Actions
       createConversation: () => {

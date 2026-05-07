@@ -4,7 +4,7 @@ import { useAppStore, IMAGE_MODELS, IMAGE_RATIOS } from './store';
 import { generateImage } from './api';
 
 export default function ImageTab() {
-  const { imageModelId, setImageModelId, imageRatio, setImageRatio, generatedImages, isLoading, clearImages } = useAppStore();
+  const { imageModelId, setImageModelId, imageRatio, setImageRatio, generatedImages, isImageLoading, clearImages } = useAppStore();
   const [prompt, setPrompt] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
@@ -17,7 +17,7 @@ export default function ImageTab() {
   const currentRatio = IMAGE_RATIOS.find((r) => r.id === imageRatio) || IMAGE_RATIOS[0];
 
   const handleGenerate = async () => {
-    if (!prompt.trim() || isLoading) return;
+    if (!prompt.trim() || isImageLoading) return;
 
     setError(null);
     const promptText = prompt.trim();
@@ -297,11 +297,11 @@ export default function ImageTab() {
 
           <button
             onClick={handleGenerate}
-            disabled={isLoading || !prompt.trim()}
+            disabled={isImageLoading || !prompt.trim()}
             className="btn-primary"
             style={{ padding: 12 }}
           >
-            {isLoading ? <Loader2 size={20} className="animate-spin" /> : <Sparkles size={20} />}
+            {isImageLoading ? <Loader2 size={20} className="animate-spin" /> : <Sparkles size={20} />}
           </button>
         </div>
       </div>
