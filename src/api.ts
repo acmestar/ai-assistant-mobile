@@ -413,7 +413,6 @@ async function generateGeminiImage(
 ): Promise<string> {
   const instances: any[] = [{ prompt }];
 
-  // 添加参考图
   if (referenceImage) {
     const m = referenceImage.match(/^data:([^;]+);base64,(.+)$/);
     if (m) {
@@ -421,7 +420,6 @@ async function generateGeminiImage(
     }
   }
 
-  // 解析比例
   let aspectRatio = 'square';
   if (ratio !== 'auto') {
     const [w, h] = ratio.split(':').map(Number);
@@ -429,12 +427,15 @@ async function generateGeminiImage(
     else if (w < h) aspectRatio = 'tall';
   }
 
-  // Gemini 直接调用 Google API（支持 CORS）
-  const resp = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:predict?key=${apiKey}`,
+  // 通过中转站代理调用 Gemini
+  const resp = await fetchWithTimeout(
+    `${API_BASE}/beta/models/${modelId}:predict`,
     {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
       body: JSON.stringify({
         instances,
         parameters: {
@@ -442,7 +443,8 @@ async function generateGeminiImage(
           aspectRatio,
         },
       }),
-    }
+    },
+    120000
   );
 
   if (!resp.ok) {
