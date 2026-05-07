@@ -252,6 +252,10 @@ async function generateOpenAIImage(
     }
 
     const data = await resp.json();
+
+    // 调试：打印返回数据结构
+    console.log('GPT Image response:', JSON.stringify(data).slice(0, 500));
+
     const b64 = data?.data?.[0]?.b64_json;
     const url = data?.data?.[0]?.url;
 
@@ -260,24 +264,15 @@ async function generateOpenAIImage(
     }
 
     if (url) {
-      try {
-        const imgResp = await fetch(url);
-        const imgBlob = await imgResp.blob();
-        const dataUrl = await new Promise<string>((resolve) => {
-          const reader = new FileReader();
-          reader.onloadend = () => resolve(reader.result as string);
-          reader.readAsDataURL(imgBlob);
-        });
-        return dataUrl;
-      } catch {
-        return url;
-      }
+      // 直接返回 URL，让前端显示
+      // 如果 URL 是外部链接，可能因为 CORS 无法下载转换
+      return url;
     }
 
-    throw new Error('未返回图片');
+    throw new Error('未返回图片，请检查 API 返回格式');
   } catch (e) {
     if (e instanceof TypeError && e.message.includes('fetch')) {
-      throw new Error('网络请求失败，请检查网络连接或尝试使用 Gemini 模型');
+      throw new Error('网络请求失败，请检查网络连接');
     }
     throw e;
   }
