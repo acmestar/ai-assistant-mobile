@@ -46,19 +46,33 @@ export default function ChatTab() {
     if (messagesContainerRef.current && currentConversationId) {
       const saved = sessionStorage.getItem(`${SCROLL_POSITION_KEY}-${currentConversationId}`);
       if (saved !== null) {
-        messagesContainerRef.current.scrollTop = parseInt(saved, 10);
+        // 使用 requestAnimationFrame 确保 DOM 已渲染
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            if (messagesContainerRef.current) {
+              messagesContainerRef.current.scrollTop = parseInt(saved, 10);
+            }
+          });
+        });
       }
     }
   }, [currentConversationId]);
 
-  // 监听滚动，保存位置
+  // 监听滚动，保存位置（带防抖）
   useEffect(() => {
     const container = messagesContainerRef.current;
     if (!container) return;
 
-    const handleScroll = () => saveScrollPosition();
-    container.addEventListener('scroll', handleScroll);
-    return () => container.removeEventListener('scroll', handleScroll);
+    let rafId: number;
+    const handleScroll = () => {
+      cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => saveScrollPosition());
+    };
+    container.addEventListener('scroll', handleScroll, { passive: true });
+    return () => {
+      cancelAnimationFrame(rafId);
+      container.removeEventListener('scroll', handleScroll);
+    };
   }, [saveScrollPosition]);
 
   // 组件挂载时恢复滚动位置
