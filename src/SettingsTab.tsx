@@ -65,6 +65,18 @@ export default function SettingsTab() {
           {saved ? <><Check size={18} /> 已保存</> : '保存密钥'}
         </button>
 
+        <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+          <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>没有密钥？</span>
+          <a
+            href="https://api.acmestar.top"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ fontSize: 13, color: 'var(--accent)', textDecoration: 'underline' }}
+          >
+            点击获取
+          </a>
+        </div>
+
         <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 12 }}>
           密钥将安全存储在本地，不会上传到服务器
         </p>
