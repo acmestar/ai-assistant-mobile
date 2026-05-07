@@ -184,13 +184,63 @@ export default function ImageTab() {
         {isImageLoading && (
           <div style={{
             textAlign: 'center',
-            padding: 20,
+            padding: 30,
             background: 'var(--bg-tertiary)',
-            borderRadius: 12,
+            borderRadius: 16,
             marginBottom: 16,
           }}>
-            <Loader2 size={32} className="animate-spin" style={{ color: 'var(--accent)', marginBottom: 8 }} />
-            <p style={{ color: 'var(--text-secondary)' }}>正在生成图片...</p>
+            <div style={{
+              width: 80,
+              height: 80,
+              margin: '0 auto 16px',
+              position: 'relative',
+            }}>
+              {/* 外圈旋转 */}
+              <div style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: 80,
+                height: 80,
+                border: '3px solid transparent',
+                borderTopColor: 'var(--accent)',
+                borderRadius: '50%',
+                animation: 'spin 1s linear infinite',
+              }} />
+              {/* 内圈脉冲 */}
+              <div style={{
+                position: 'absolute',
+                top: 10,
+                left: 10,
+                width: 60,
+                height: 60,
+                background: 'var(--accent-dim)',
+                borderRadius: '50%',
+                animation: 'pulse 1.5s ease-in-out infinite',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}>
+                <Sparkles size={28} style={{ color: 'var(--accent)' }} />
+              </div>
+            </div>
+            <p style={{ color: 'var(--text-primary)', fontWeight: 500, marginBottom: 8 }}>正在生成图片</p>
+            <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>AI 正在创作中，请稍候...</p>
+            {/* 进度条动画 */}
+            <div style={{
+              marginTop: 16,
+              height: 4,
+              background: 'var(--bg-secondary)',
+              borderRadius: 2,
+              overflow: 'hidden',
+            }}>
+              <div style={{
+                height: '100%',
+                background: 'var(--accent)',
+                borderRadius: 2,
+                animation: 'progress 2s ease-in-out infinite',
+              }} />
+            </div>
           </div>
         )}
 

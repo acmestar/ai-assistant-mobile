@@ -195,7 +195,7 @@ async function generateOpenAIImage(
   modelId: string,
   prompt: string,
   ratio: { width: number; height: number },
-  referenceImage?: string
+  _referenceImage?: string
 ): Promise<string> {
   const body: any = {
     model: modelId,
@@ -203,11 +203,6 @@ async function generateOpenAIImage(
     n: 1,
     size: `${ratio.width}x${ratio.height}`,
   };
-
-  // 添加参考图（如果支持）
-  if (referenceImage) {
-    body.reference_image = referenceImage;
-  }
 
   const resp = await fetch(`${API_BASE}/images/generations`, {
     method: 'POST',
@@ -224,11 +219,33 @@ async function generateOpenAIImage(
   }
 
   const data = await resp.json();
-  const url = data.data?.[0]?.url || data.data?.[0]?.b64_json;
 
-  if (!url) throw new Error('未返回图片');
+  // 支持 b64_json 和 url 两种返回格式
+  const b64 = data?.data?.[0]?.b64_json;
+  const url = data?.data?.[0]?.url;
 
-  return url.startsWith('data:') ? url : `data:image/png;base64,${url}`;
+  if (b64) {
+    return `data:image/png;base64,${b64}`;
+  }
+
+  if (url) {
+    // 如果返回的是 URL，需要下载并转换为 base64
+    try {
+      const imgResp = await fetch(url);
+      const imgBlob = await imgResp.blob();
+      const dataUrl = await new Promise<string>((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.readAsDataURL(imgBlob);
+      });
+      return dataUrl;
+    } catch {
+      // 如果下载失败，直接返回 URL（可能无法显示）
+      return url;
+    }
+  }
+
+  throw new Error('未返回图片');
 }
 
 async function generateGeminiImage(

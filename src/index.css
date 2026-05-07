@@ -190,6 +190,29 @@ button {
   40% { transform: scale(1); }
 }
 
+/* Spin animation */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Pulse animation */
+@keyframes pulse {
+  0%, 100% { transform: scale(1); opacity: 0.8; }
+  50% { transform: scale(1.1); opacity: 1; }
+}
+
+/* Progress animation */
+@keyframes progress {
+  0% { width: 0%; margin-left: 0%; }
+  50% { width: 50%; margin-left: 25%; }
+  100% { width: 0%; margin-left: 100%; }
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+
 /* Image grid */
 .image-grid {
   display: grid;
