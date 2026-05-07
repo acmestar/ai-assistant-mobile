@@ -180,6 +180,20 @@ export default function ImageTab() {
 
       {/* Images Grid */}
       <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
+        {/* Loading indicator */}
+        {isImageLoading && (
+          <div style={{
+            textAlign: 'center',
+            padding: 20,
+            background: 'var(--bg-tertiary)',
+            borderRadius: 12,
+            marginBottom: 16,
+          }}>
+            <Loader2 size={32} className="animate-spin" style={{ color: 'var(--accent)', marginBottom: 8 }} />
+            <p style={{ color: 'var(--text-secondary)' }}>正在生成图片...</p>
+          </div>
+        )}
+
         {generatedImages.length > 0 ? (
           <div className="image-grid">
             {generatedImages.map((url, i) => (
@@ -210,11 +224,13 @@ export default function ImageTab() {
             ))}
           </div>
         ) : (
-          <div style={{ textAlign: 'center', color: 'var(--text-muted)', marginTop: 60 }}>
-            <ImageIcon size={48} style={{ marginBottom: 16, opacity: 0.3 }} />
-            <p>输入描述生成图片</p>
-            <p style={{ fontSize: 12, marginTop: 8 }}>可上传参考图辅助生成</p>
-          </div>
+          !isImageLoading && (
+            <div style={{ textAlign: 'center', color: 'var(--text-muted)', marginTop: 60 }}>
+              <ImageIcon size={48} style={{ marginBottom: 16, opacity: 0.3 }} />
+              <p>输入描述生成图片</p>
+              <p style={{ fontSize: 12, marginTop: 8 }}>可上传参考图辅助生成</p>
+            </div>
+          )
         )}
 
         {error && (
