@@ -56,13 +56,13 @@ export default function ChatTab() {
   const conversation = getCurrentConversation();
   const currentModel = CHAT_MODELS.find((m) => m.id === chatModelId);
 
-  // 语音输入初始化（只创建一次）
-  useEffect(() => {
-    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) return;
+  // 创建新的 SpeechRecognition 实例
+  const createRecognition = () => {
+    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) return null;
 
     const SpeechRecognition = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
     const recognition = new SpeechRecognition();
-    recognition.continuous = true; // 持续识别
+    recognition.continuous = true;
     recognition.interimResults = true;
     recognition.lang = 'zh-CN';
 
@@ -79,7 +79,6 @@ export default function ChatTab() {
         }
       }
 
-      // 实时更新语音文字
       setVoiceText(prev => {
         const newText = finalTranscript || interimTranscript || prev;
         return newText;
@@ -88,30 +87,31 @@ export default function ChatTab() {
 
     recognition.onerror = (event: any) => {
       console.error('语音识别错误:', event.error);
+      // not-allowed 错误表示权限被拒绝
+      if (event.error === 'not-allowed') {
+        alert(language === 'zh' ? '请允许麦克风权限以使用语音功能' : 'Please allow microphone access to use voice input');
+      }
       isRecordingRef.current = false;
       setIsRecording(false);
     };
 
     recognition.onend = () => {
-      // 只有在用户没有主动停止时才更新状态
       if (isRecordingRef.current) {
         isRecordingRef.current = false;
         setIsRecording(false);
       }
     };
 
-    recognitionRef.current = recognition;
-
-    return () => {
-      recognition.abort();
-    };
-  }, []);
+    return recognition;
+  };
 
   // 进入语音模式
   const enterVoiceMode = () => {
     setIsVoiceMode(true);
     setVoiceText('');
     isRecordingRef.current = false;
+    // 每次进入语音模式时创建新实例
+    recognitionRef.current = createRecognition();
   };
 
   // 退出语音模式
