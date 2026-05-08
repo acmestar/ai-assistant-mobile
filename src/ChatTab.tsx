@@ -49,11 +49,12 @@ export default function ChatTab() {
   const prevMessagesLengthRef = useRef(0);
   const shouldScrollToBottomRef = useRef(false);
   const recognitionRef = useRef<any>(null);
+  const recordingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const conversation = getCurrentConversation();
   const currentModel = CHAT_MODELS.find((m) => m.id === chatModelId);
 
-  // 语音输入
+  // 语音输入初始化（只创建一次）
   useEffect(() => {
     if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) return;
 
@@ -70,16 +71,25 @@ export default function ChatTab() {
 
     recognition.onerror = (event: any) => {
       console.error('语音识别错误:', event.error);
-      setIsRecording(false);
+      // 延迟关闭动画，让用户看到反馈
+      if (recordingTimeoutRef.current) clearTimeout(recordingTimeoutRef.current);
+      recordingTimeoutRef.current = setTimeout(() => {
+        setIsRecording(false);
+      }, 500);
     };
 
     recognition.onend = () => {
-      setIsRecording(false);
+      // 延迟关闭动画，让用户看到声纹效果至少持续1秒
+      if (recordingTimeoutRef.current) clearTimeout(recordingTimeoutRef.current);
+      recordingTimeoutRef.current = setTimeout(() => {
+        setIsRecording(false);
+      }, 800);
     };
 
     recognitionRef.current = recognition;
 
     return () => {
+      if (recordingTimeoutRef.current) clearTimeout(recordingTimeoutRef.current);
       recognition.abort();
     };
   }, []);
@@ -92,10 +102,24 @@ export default function ChatTab() {
 
     if (isRecording) {
       recognitionRef.current.stop();
-      setIsRecording(false);
     } else {
-      recognitionRef.current.start();
+      // 清除之前的定时器
+      if (recordingTimeoutRef.current) clearTimeout(recordingTimeoutRef.current);
       setIsRecording(true);
+      try {
+        recognitionRef.current.start();
+      } catch (e) {
+        // 如果已经在运行，先停止再开始
+        recognitionRef.current.stop();
+        setTimeout(() => {
+          try {
+            recognitionRef.current.start();
+          } catch (err) {
+            console.error('无法启动语音识别:', err);
+            setIsRecording(false);
+          }
+        }, 100);
+      }
     }
   };
 
