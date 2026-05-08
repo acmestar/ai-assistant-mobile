@@ -1,9 +1,10 @@
 import { useState, useRef } from 'react';
-import { Key, Info, Check, Eye, EyeOff, Trash2, Wifi, AlertCircle, Sun, Moon, Download, Upload, BarChart2 } from 'lucide-react';
+import { Key, Info, Check, Eye, EyeOff, Trash2, Wifi, AlertCircle, Sun, Moon, Download, Upload, BarChart2, Globe } from 'lucide-react';
 import { useAppStore, CHAT_MODELS, IMAGE_MODELS } from './store';
+import { t, Language } from './i18n';
 
 export default function SettingsTab() {
-  const { apiKey, setApiKey, chatModelId, imageModelId, conversations, imageRecords, theme, setTheme, totalInputTokens, totalOutputTokens, exportData, importData } = useAppStore();
+  const { apiKey, setApiKey, chatModelId, imageModelId, conversations, imageRecords, theme, setTheme, totalInputTokens, totalOutputTokens, exportData, importData, language, setLanguage } = useAppStore();
   const [showKey, setShowKey] = useState(false);
   const [tempKey, setTempKey] = useState(apiKey);
   const [saved, setSaved] = useState(false);
@@ -11,6 +12,8 @@ export default function SettingsTab() {
   const [networkStatus, setNetworkStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [networkError, setNetworkError] = useState<string | null>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
+
+  const T = (key: string) => t(key, language as Language);
 
   const handleSave = () => {
     setApiKey(tempKey);
@@ -36,7 +39,7 @@ export default function SettingsTab() {
     reader.onload = () => {
       const data = reader.result as string;
       importData(data);
-      alert('数据导入成功');
+      alert(T('importSuccess'));
     };
     reader.readAsText(file);
     e.target.value = '';
@@ -89,7 +92,7 @@ export default function SettingsTab() {
   };
 
   const handleClearAll = () => {
-    if (confirm('确定要清除所有数据吗？这将删除所有对话和生成的图片。')) {
+    if (confirm(T('clearConfirm'))) {
       localStorage.removeItem('ai-assistant-storage');
       window.location.reload();
     }
@@ -105,7 +108,7 @@ export default function SettingsTab() {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             {theme === 'dark' ? <Moon size={18} color="var(--accent)" /> : <Sun size={18} color="var(--accent)" />}
-            <span style={{ fontWeight: 500 }}>外观主题</span>
+            <span style={{ fontWeight: 500 }}>{T('theme')}</span>
           </div>
           <button
             onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
@@ -113,7 +116,24 @@ export default function SettingsTab() {
             style={{ padding: '8px 16px', display: 'flex', alignItems: 'center', gap: 6 }}
           >
             {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
-            {theme === 'dark' ? '浅色' : '深色'}
+            {theme === 'dark' ? T('light') : T('dark')}
+          </button>
+        </div>
+      </div>
+
+      {/* Language Toggle */}
+      <div className="settings-section">
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Globe size={18} color="var(--accent)" />
+            <span style={{ fontWeight: 500 }}>语言</span>
+          </div>
+          <button
+            onClick={() => setLanguage(language === 'zh' ? 'en' : 'zh')}
+            className="btn-secondary"
+            style={{ padding: '8px 16px', display: 'flex', alignItems: 'center', gap: 6 }}
+          >
+            {language === 'zh' ? 'English' : '中文'}
           </button>
         </div>
       </div>
@@ -122,7 +142,7 @@ export default function SettingsTab() {
       <div className="settings-section">
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
           <Key size={18} color="var(--accent)" />
-          <span style={{ fontWeight: 600, fontSize: 16 }}>API 密钥</span>
+          <span style={{ fontWeight: 600, fontSize: 16 }}>{T('apiKey')}</span>
         </div>
 
         <div style={{ position: 'relative', marginBottom: 12 }}>
@@ -130,7 +150,7 @@ export default function SettingsTab() {
             type={showKey ? 'text' : 'password'}
             value={tempKey}
             onChange={(e) => setTempKey(e.target.value)}
-            placeholder="输入你的 API Key"
+            placeholder={T('inputApiKey')}
             style={{ paddingRight: 44 }}
           />
           <button
@@ -154,23 +174,23 @@ export default function SettingsTab() {
           className="btn-primary"
           style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
         >
-          {saved ? <><Check size={18} /> 已保存</> : '保存密钥'}
+          {saved ? <><Check size={18} /> {T('saved')}</> : T('saveApiKey')}
         </button>
 
         <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-          <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>没有密钥？</span>
+          <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>{T('noApiKey')}</span>
           <a
             href="https://api.acmestar.top"
             target="_blank"
             rel="noopener noreferrer"
             style={{ fontSize: 13, color: 'var(--accent)', textDecoration: 'underline' }}
           >
-            点击获取
+            {T('getApiKey')}
           </a>
         </div>
 
         <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 12, textAlign: 'center' }}>
-          密钥将安全存储在本地，不会上传到服务器
+          {T('apiKeySecure')}
         </p>
       </div>
 
@@ -178,7 +198,7 @@ export default function SettingsTab() {
       <div className="settings-section">
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
           <Wifi size={18} color="var(--accent)" />
-          <span style={{ fontWeight: 600, fontSize: 16 }}>网络测试</span>
+          <span style={{ fontWeight: 600, fontSize: 16 }}>{T('networkTest')}</span>
         </div>
 
         <button
@@ -187,23 +207,23 @@ export default function SettingsTab() {
           className="btn-secondary"
           style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
         >
-          {testingNetwork ? '测试中...' : '测试网络连接'}
+          {testingNetwork ? T('testing') : T('testNetwork')}
         </button>
 
         {networkStatus === 'success' && (
           <div style={{ marginTop: 12, padding: 12, background: 'var(--accent-dim)', borderRadius: 12, color: 'var(--accent)', fontSize: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Check size={16} /> 网络连接正常
+            <Check size={16} /> {T('networkSuccess')}
           </div>
         )}
 
         {networkStatus === 'error' && (
           <div style={{ marginTop: 12, padding: 12, background: 'rgba(239, 68, 68, 0.1)', borderRadius: 12, color: 'var(--danger)', fontSize: 14 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-              <AlertCircle size={16} /> 网络连接失败
+              <AlertCircle size={16} /> {T('networkFailed')}
             </div>
             <div style={{ fontSize: 12, opacity: 0.8, wordBreak: 'break-all', whiteSpace: 'pre-wrap' }}>{networkError}</div>
             <div style={{ marginTop: 8, fontSize: 12, color: 'var(--text-muted)' }}>
-              建议：请尝试使用 Chrome 浏览器打开，或将链接添加到主屏幕使用
+              {language === 'zh' ? '建议：请尝试使用 Chrome 浏览器打开，或将链接添加到主屏幕使用' : 'Tip: Try using Chrome browser or add to home screen'}
             </div>
           </div>
         )}
@@ -211,14 +231,14 @@ export default function SettingsTab() {
 
       {/* Current Models - 双列布局 */}
       <div className="settings-section">
-        <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12, fontWeight: 500 }}>当前模型</div>
+        <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12, fontWeight: 500 }}>{T('currentModels')}</div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
           <div style={{ background: 'var(--bg-tertiary)', borderRadius: 12, padding: 12 }}>
-            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>聊天模型</div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>{T('chatModel')}</div>
             <div style={{ color: 'var(--accent)', fontWeight: 500, fontSize: 14 }}>{currentChatModel?.name}</div>
           </div>
           <div style={{ background: 'var(--bg-tertiary)', borderRadius: 12, padding: 12 }}>
-            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>生图模型</div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>{T('imageModel')}</div>
             <div style={{ color: 'var(--accent)', fontWeight: 500, fontSize: 14 }}>{currentImageModel?.name}</div>
           </div>
         </div>
@@ -226,15 +246,15 @@ export default function SettingsTab() {
 
       {/* Stats */}
       <div className="settings-section">
-        <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12, fontWeight: 500 }}>数据统计</div>
+        <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12, fontWeight: 500 }}>{T('dataStats')}</div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
           <div style={{ background: 'var(--bg-tertiary)', borderRadius: 12, padding: 12, textAlign: 'center' }}>
             <div style={{ fontSize: 24, fontWeight: 600, color: 'var(--text-primary)' }}>{conversations.length}</div>
-            <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>对话数量</div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{T('conversationCount')}</div>
           </div>
           <div style={{ background: 'var(--bg-tertiary)', borderRadius: 12, padding: 12, textAlign: 'center' }}>
             <div style={{ fontSize: 24, fontWeight: 600, color: 'var(--text-primary)' }}>{imageRecords.length}</div>
-            <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>生成图片</div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{T('generatedImages')}</div>
           </div>
         </div>
       </div>
@@ -243,20 +263,20 @@ export default function SettingsTab() {
       <div className="settings-section">
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
           <BarChart2 size={18} color="var(--accent)" />
-          <span style={{ fontWeight: 600, fontSize: 16 }}>Token 使用统计</span>
+          <span style={{ fontWeight: 600, fontSize: 16 }}>{T('tokenUsage')}</span>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
           <div style={{ background: 'var(--bg-tertiary)', borderRadius: 12, padding: 12, textAlign: 'center' }}>
             <div style={{ fontSize: 20, fontWeight: 600, color: 'var(--accent-blue)' }}>{(totalInputTokens / 1000).toFixed(1)}K</div>
-            <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>输入 Token</div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{T('inputTokens')}</div>
           </div>
           <div style={{ background: 'var(--bg-tertiary)', borderRadius: 12, padding: 12, textAlign: 'center' }}>
             <div style={{ fontSize: 20, fontWeight: 600, color: 'var(--accent)' }}>{(totalOutputTokens / 1000).toFixed(1)}K</div>
-            <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>输出 Token</div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{T('outputTokens')}</div>
           </div>
         </div>
         <div style={{ marginTop: 12, textAlign: 'center', fontSize: 12, color: 'var(--text-muted)' }}>
-          总计: {((totalInputTokens + totalOutputTokens) / 1000).toFixed(1)}K Token
+          {T('totalTokens')}: {((totalInputTokens + totalOutputTokens) / 1000).toFixed(1)}K Token
         </div>
       </div>
 
@@ -264,15 +284,15 @@ export default function SettingsTab() {
       <div className="settings-section">
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
           <Download size={18} color="var(--accent)" />
-          <span style={{ fontWeight: 600, fontSize: 16 }}>数据管理</span>
+          <span style={{ fontWeight: 600, fontSize: 16 }}>{T('dataManagement')}</span>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button onClick={handleExport} className="btn-secondary" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-            <Download size={18} /> 导出备份
+            <Download size={18} /> {T('exportBackup')}
           </button>
           <input ref={importInputRef} type="file" accept=".json" onChange={handleImport} style={{ display: 'none' }} />
           <button onClick={() => importInputRef.current?.click()} className="btn-secondary" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-            <Upload size={18} /> 导入数据
+            <Upload size={18} /> {T('importData')}
           </button>
         </div>
       </div>
@@ -281,11 +301,11 @@ export default function SettingsTab() {
       <div className="settings-section">
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
           <Info size={18} color="var(--accent)" />
-          <span style={{ fontWeight: 600, fontSize: 16 }}>可用模型</span>
+          <span style={{ fontWeight: 600, fontSize: 16 }}>{T('availableModels')}</span>
         </div>
 
         <div style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 8, fontWeight: 500 }}>聊天模型</div>
+          <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 8, fontWeight: 500 }}>{T('chatModel')}</div>
           {CHAT_MODELS.map((m) => (
             <div
               key={m.id}
@@ -299,14 +319,14 @@ export default function SettingsTab() {
             >
               <span style={{ color: 'var(--text-primary)', fontWeight: 500 }}>{m.name}</span>
               <span style={{ fontSize: 12, color: 'var(--text-muted)', background: 'var(--bg-tertiary)', padding: '4px 8px', borderRadius: 6 }}>
-                {m.maxTokens >= 100000 ? '超长上下文' : `${Math.round(m.maxTokens / 1000)}K`}
+                {m.maxTokens >= 100000 ? T('longContext') : `${Math.round(m.maxTokens / 1000)}K`}
               </span>
             </div>
           ))}
         </div>
 
         <div>
-          <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 8, fontWeight: 500 }}>生图模型</div>
+          <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 8, fontWeight: 500 }}>{T('imageModel')}</div>
           {IMAGE_MODELS.map((m) => (
             <div
               key={m.id}
@@ -343,12 +363,12 @@ export default function SettingsTab() {
         }}
       >
         <Trash2 size={18} />
-        清除所有数据
+        {T('clearAllData')}
       </button>
 
       {/* Version */}
       <div style={{ textAlign: 'center', marginTop: 24, color: 'var(--text-muted)', fontSize: 12 }}>
-        AI 助手 v1.0.0
+        {T('appName')} v1.0.0
       </div>
     </div>
   );

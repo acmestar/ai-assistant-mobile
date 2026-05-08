@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { MessageSquare, Send, Trash2, Plus, ChevronLeft, Image as ImageIcon, X, Copy, Edit2, Check, Pencil, Search, StopCircle, Pin, PinOff, Download } from 'lucide-react';
+import { MessageSquare, Send, Trash2, Plus, ChevronLeft, Image as ImageIcon, X, Copy, Edit2, Check, Pencil, Search, StopCircle, Pin, PinOff, Download, Mic, MicOff } from 'lucide-react';
 import { useAppStore, CHAT_MODELS } from './store';
 import { sendChatMessageStream, cancelChatRequest } from './api';
+import { t, Language } from './i18n';
 import ReactMarkdown from 'react-markdown';
 
 const SCROLL_POSITION_KEY = 'chat-scroll-position';
@@ -24,7 +25,10 @@ export default function ChatTab() {
     pinConversation,
     saveDraft,
     exportData,
+    language,
   } = useAppStore();
+
+  const T = (key: string) => t(key, language as Language);
 
   const [input, setInput] = useState('');
   const [showSidebar, setShowSidebar] = useState(false);
@@ -38,14 +42,62 @@ export default function ChatTab() {
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [streamingContent, setStreamingContent] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [isRecording, setIsRecording] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const prevMessagesLengthRef = useRef(0);
   const shouldScrollToBottomRef = useRef(false);
+  const recognitionRef = useRef<any>(null);
 
   const conversation = getCurrentConversation();
   const currentModel = CHAT_MODELS.find((m) => m.id === chatModelId);
+
+  // 语音输入
+  useEffect(() => {
+    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) return;
+
+    const SpeechRecognition = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
+    const recognition = new SpeechRecognition();
+    recognition.continuous = false;
+    recognition.interimResults = true;
+    recognition.lang = 'zh-CN';
+
+    recognition.onresult = (event: any) => {
+      const transcript = event.results[0][0].transcript;
+      setInput(transcript);
+    };
+
+    recognition.onerror = (event: any) => {
+      console.error('语音识别错误:', event.error);
+      setIsRecording(false);
+    };
+
+    recognition.onend = () => {
+      setIsRecording(false);
+    };
+
+    recognitionRef.current = recognition;
+
+    return () => {
+      recognition.abort();
+    };
+  }, []);
+
+  const toggleRecording = () => {
+    if (!recognitionRef.current) {
+      alert(T('voiceNotSupported'));
+      return;
+    }
+
+    if (isRecording) {
+      recognitionRef.current.stop();
+      setIsRecording(false);
+    } else {
+      recognitionRef.current.start();
+      setIsRecording(true);
+    }
+  };
 
   // 草稿自动保存
   useEffect(() => {
@@ -172,7 +224,7 @@ export default function ChatTab() {
     shouldScrollToBottomRef.current = true;
 
     try {
-      await sendChatMessageStream(messageText || '请描述这张图片', imageToSend || undefined, (chunk) => {
+      await sendChatMessageStream(messageText || (language === 'zh' ? '请描述这张图片' : 'Describe this image'), imageToSend || undefined, (chunk) => {
         setStreamingContent(prev => prev + chunk);
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
       });
@@ -232,7 +284,7 @@ export default function ChatTab() {
   };
 
   const handleDeleteMessage = (messageId: string) => {
-    if (confirm('确定删除这条消息？')) {
+    if (confirm(T('deleteConfirm'))) {
       deleteMessage(messageId);
     }
   };
@@ -289,7 +341,7 @@ export default function ChatTab() {
           className="model-chip"
           style={{ border: '1px solid var(--accent)', color: 'var(--accent)' }}
         >
-          {currentModel?.name || '选择模型'}
+          {currentModel?.name || T('selectModel')}
         </button>
 
         <button className="btn-secondary" onClick={clearConversation} style={{ padding: 8 }}>
@@ -310,7 +362,7 @@ export default function ChatTab() {
           zIndex: 100,
           border: '1px solid var(--border)',
         }}>
-          <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 8 }}>选择模型</div>
+          <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 8 }}>{T('selectModel')}</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {CHAT_MODELS.map((m) => (
               <button
@@ -329,7 +381,7 @@ export default function ChatTab() {
               >
                 <span>{m.name}</span>
                 <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                  {m.maxTokens >= 100000 ? '超长上下文' : `${Math.round(m.maxTokens / 1000)}K`}
+                  {m.maxTokens >= 100000 ? T('longContext') : `${Math.round(m.maxTokens / 1000)}K`}
                 </span>
               </button>
             ))}
@@ -396,7 +448,7 @@ export default function ChatTab() {
                     style={{ padding: 4, background: 'transparent', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4, fontSize: 11 }}
                   >
                     {copiedMessageId === msg.id ? <Check size={12} /> : <Copy size={12} />}
-                    {copiedMessageId === msg.id ? '已复制' : '复制'}
+                    {copiedMessageId === msg.id ? T('copied') : T('copy')}
                   </button>
                 )}
                 {msg.role === 'user' && (
@@ -404,14 +456,14 @@ export default function ChatTab() {
                     onClick={() => handleStartEdit(msg.id, msg.content)}
                     style={{ padding: 4, background: 'transparent', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4, fontSize: 11 }}
                   >
-                    <Edit2 size={12} /> 编辑
+                    <Edit2 size={12} /> {T('edit')}
                   </button>
                 )}
                 <button
                   onClick={() => handleDeleteMessage(msg.id)}
                   style={{ padding: 4, background: 'transparent', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4, fontSize: 11 }}
                 >
-                  <Trash2 size={12} /> 删除
+                  <Trash2 size={12} /> {T('delete')}
                 </button>
               </div>
             )}
@@ -497,11 +549,28 @@ export default function ChatTab() {
             <ImageIcon size={20} />
           </button>
 
+          {/* 语音输入按钮 */}
+          <button
+            onClick={toggleRecording}
+            style={{
+              padding: 12,
+              background: isRecording ? 'var(--accent)' : 'var(--bg-tertiary)',
+              border: '1px solid var(--border)',
+              borderRadius: 12,
+              color: isRecording ? 'white' : 'var(--text-secondary)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            {isRecording ? <MicOff size={20} /> : <Mic size={20} />}
+          </button>
+
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSend()}
-            placeholder="输入消息..."
+            placeholder={T('inputMessage')}
             style={{ flex: 1, borderRadius: 20 }}
           />
 
@@ -570,7 +639,7 @@ export default function ChatTab() {
               <input
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="搜索对话..."
+                placeholder={T('searchConversation')}
                 style={{ paddingLeft: 36, borderRadius: 10 }}
               />
             </div>

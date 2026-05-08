@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
+import { Language } from './i18n';
 
 // 自定义存储，优先使用 localStorage，失败则用内存
 const customStorage = createJSONStorage(() => {
@@ -266,6 +267,8 @@ interface AppState {
   setIsImageLoading: (loading: boolean) => void;
   theme: 'dark' | 'light';
   setTheme: (theme: 'dark' | 'light') => void;
+  language: Language;
+  setLanguage: (lang: Language) => void;
 
   // Actions
   createConversation: () => string;
@@ -338,6 +341,8 @@ export const useAppStore = create<AppState>()(
         set({ theme });
         document.documentElement.classList.toggle('dark', theme === 'dark');
       },
+      language: 'zh',
+      setLanguage: (language) => set({ language }),
 
       // Actions
       createConversation: () => {
@@ -532,6 +537,7 @@ export const useAppStore = create<AppState>()(
         imageRecords: state.imageRecords,
         theme: state.theme,
         tokenUsage: state.tokenUsage.slice(0, 50), // 只保留最近50条
+        language: state.language,
       }),
     }
   )

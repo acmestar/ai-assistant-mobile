@@ -1,12 +1,15 @@
 import { useEffect } from 'react';
 import { MessageSquare, Image, Settings } from 'lucide-react';
 import { useAppStore } from './store';
+import { t, Language } from './i18n';
 import ChatTab from './ChatTab';
 import ImageTab from './ImageTab';
 import SettingsTab from './SettingsTab';
 
 export default function App() {
-  const { activeTab, setActiveTab, apiKey, createConversation, currentConversationId, theme } = useAppStore();
+  const { activeTab, setActiveTab, apiKey, createConversation, currentConversationId, theme, language } = useAppStore();
+
+  const T = (key: string) => t(key, language as Language);
 
   // Auto-create conversation if none exists
   useEffect(() => {
@@ -38,15 +41,15 @@ export default function App() {
       <div className="tab-bar safe-area-bottom">
         <button className={`tab-item ${activeTab === 'chat' ? 'active' : ''}`} onClick={() => setActiveTab('chat')}>
           <MessageSquare size={22} />
-          <span>聊天</span>
+          <span>{T('chat')}</span>
         </button>
         <button className={`tab-item ${activeTab === 'image' ? 'active' : ''}`} onClick={() => setActiveTab('image')}>
           <Image size={22} />
-          <span>生图</span>
+          <span>{T('image')}</span>
         </button>
         <button className={`tab-item ${activeTab === 'settings' ? 'active' : ''}`} onClick={() => setActiveTab('settings')}>
           <Settings size={22} />
-          <span>设置</span>
+          <span>{T('settings')}</span>
         </button>
       </div>
     </div>

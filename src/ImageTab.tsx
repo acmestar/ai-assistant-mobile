@@ -2,9 +2,12 @@ import { useState, useRef, useEffect } from 'react';
 import { Image as ImageIcon, Sparkles, Trash2, Download, Upload, X, Maximize2, Clock, Sliders, AlertCircle, ZoomIn, ZoomOut, RotateCw, StopCircle, Wand2 } from 'lucide-react';
 import { useAppStore, IMAGE_MODELS, GPT2_RATIO_LABELS, GPT2_QUALITY_LABELS, getImageModelDef, PROMPT_TEMPLATES } from './store';
 import { generateImage, cancelImageRequest } from './api';
+import { t, Language } from './i18n';
 
 export default function ImageTab() {
-  const { imageModelId, setImageModelId, imageRatio, setImageRatio, imageQuality, setImageQuality, imageRecords, isImageLoading, deleteImageRecord, clearImageRecords, pendingImageRequest, setPendingImageRequest } = useAppStore();
+  const { imageModelId, setImageModelId, imageRatio, setImageRatio, imageQuality, setImageQuality, imageRecords, isImageLoading, deleteImageRecord, clearImageRecords, pendingImageRequest, setPendingImageRequest, language } = useAppStore();
+
+  const T = (key: string) => t(key, language as Language);
   const [prompt, setPrompt] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
@@ -53,7 +56,7 @@ export default function ImageTab() {
     if (imageModelId === 'gpt-image-2') {
       return GPT2_RATIO_LABELS[ratio] || ratio;
     }
-    return ratio === 'auto' ? '自动' : ratio;
+    return ratio === 'auto' ? (language === 'zh' ? '自动' : 'Auto') : ratio;
   };
 
   const getQualityLabel = (quality: string): string => {
@@ -84,11 +87,11 @@ export default function ImageTab() {
     const file = e.target.files?.[0];
     if (!file) return;
     if (!file.type.startsWith('image/')) {
-      setError('请选择图片文件');
+      setError(language === 'zh' ? '请选择图片文件' : 'Please select an image file');
       return;
     }
     if (file.size > 10 * 1024 * 1024) {
-      setError('图片大小不能超过 10MB');
+      setError(language === 'zh' ? '图片大小不能超过 10MB' : 'Image size cannot exceed 10MB');
       return;
     }
     const reader = new FileReader();
@@ -166,13 +169,13 @@ export default function ImageTab() {
             {currentModel.name}
           </button>
         </div>
-        <button onClick={handleDownloadAll} className="btn-secondary" style={{ padding: 8 }} title="批量下载"><Download size={18} /></button>
+        <button onClick={handleDownloadAll} className="btn-secondary" style={{ padding: 8 }} title={T('downloadAll')}><Download size={18} /></button>
       </div>
 
       {/* Quality Picker */}
       {showQualityPicker && (
         <div style={{ position: 'absolute', top: 60, left: 16, right: 16, background: 'var(--bg-tertiary)', borderRadius: 16, padding: 12, zIndex: 100, border: '1px solid var(--border)' }}>
-          <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 8 }}>分辨率</div>
+          <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 8 }}>{T('quality')}</div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {currentModel.qualities.map((q) => (
               <button key={q} onClick={() => { setImageQuality(q); setShowQualityPicker(false); }} style={{ padding: '10px 16px', background: imageQuality === q ? 'var(--accent-dim)' : 'var(--bg-secondary)', border: '1px solid ' + (imageQuality === q ? 'var(--accent)' : 'var(--border)'), borderRadius: 10, color: imageQuality === q ? 'var(--accent)' : 'var(--text-secondary)' }}>
@@ -186,7 +189,7 @@ export default function ImageTab() {
       {/* Ratio Picker */}
       {showRatioPicker && (
         <div style={{ position: 'absolute', top: 60, left: 16, right: 16, background: 'var(--bg-tertiary)', borderRadius: 16, padding: 12, zIndex: 100, border: '1px solid var(--border)', maxHeight: 300, overflow: 'auto' }}>
-          <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 8 }}>图片比例{imageModelId === 'gpt-image-2' && referenceImage && <span style={{ color: 'var(--accent)', marginLeft: 8 }}>（参考图模式）</span>}</div>
+          <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 8 }}>{T('ratio')}{imageModelId === 'gpt-image-2' && referenceImage && <span style={{ color: 'var(--accent)', marginLeft: 8 }}>（{T('referenceMode')}）</span>}</div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {availableRatios.map((r) => (
               <button key={r} onClick={() => { setImageRatio(r); setShowRatioPicker(false); }} style={{ padding: '10px 16px', background: imageRatio === r ? 'var(--accent-dim)' : 'var(--bg-secondary)', border: '1px solid ' + (imageRatio === r ? 'var(--accent)' : 'var(--border)'), borderRadius: 10, color: imageRatio === r ? 'var(--accent)' : 'var(--text-secondary)' }}>
@@ -218,14 +221,14 @@ export default function ImageTab() {
           <input
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="搜索图片描述..."
+            placeholder={language === 'zh' ? '搜索图片描述...' : 'Search image descriptions...'}
             style={{ marginBottom: 12, borderRadius: 12 }}
           />
         )}
 
         {storageWarning && (
           <div style={{ padding: 12, background: 'rgba(245, 158, 11, 0.1)', borderRadius: 12, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8, color: 'var(--accent-orange)', fontSize: 13 }}>
-            <AlertCircle size={16} /><span>存储空间即将满（{imageRecords.length}/20），请及时下载保存重要图片</span>
+            <AlertCircle size={16} /><span>{T('storageWarning')} ({imageRecords.length}/20)</span>
           </div>
         )}
 
@@ -237,8 +240,8 @@ export default function ImageTab() {
                 <Sparkles size={28} style={{ color: 'var(--accent)' }} />
               </div>
             </div>
-            <p style={{ color: 'var(--text-primary)', fontWeight: 500, marginBottom: 8 }}>正在生成图片</p>
-            <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>AI 正在创作中，请稍候...</p>
+            <p style={{ color: 'var(--text-primary)', fontWeight: 500, marginBottom: 8 }}>{T('generateImage')}</p>
+            <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>{language === 'zh' ? 'AI 正在创作中，请稍候...' : 'AI is creating, please wait...'}</p>
             <div style={{ marginTop: 16, height: 4, background: 'var(--bg-secondary)', borderRadius: 2, overflow: 'hidden' }}>
               <div style={{ height: '100%', background: 'var(--accent)', borderRadius: 2, animation: 'progress 2s ease-in-out infinite' }} />
             </div>
@@ -264,7 +267,7 @@ export default function ImageTab() {
           </div>
         ) : imageRecords.length > 0 && searchQuery ? (
           <div style={{ textAlign: 'center', color: 'var(--text-muted)', marginTop: 40 }}>
-            <p>未找到匹配的图片</p>
+            <p>{T('noMatchingImages')}</p>
           </div>
         ) : !isImageLoading && (
           <div style={{ textAlign: 'center', marginTop: 80, padding: 40 }}>
@@ -280,10 +283,10 @@ export default function ImageTab() {
             }}>
               <ImageIcon size={36} strokeWidth={1.5} style={{ color: 'var(--accent)' }} />
             </div>
-            <p style={{ marginBottom: 12, fontSize: 18, fontWeight: 500, color: 'var(--text-primary)' }}>生成图片</p>
+            <p style={{ marginBottom: 12, fontSize: 18, fontWeight: 500, color: 'var(--text-primary)' }}>{T('generateImage')}</p>
             <p style={{ fontSize: 14, color: 'var(--text-muted)', lineHeight: 1.6 }}>
-              输入描述让 AI 为你创作<br />
-              可上传参考图辅助生成
+              {T('inputDescription')}<br />
+              {T('uploadReference')}
             </p>
           </div>
         )}
@@ -297,12 +300,12 @@ export default function ImageTab() {
       {referenceImage && (
         <div style={{ padding: '8px 16px', background: 'var(--bg-tertiary)', borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 12 }}>
           <div style={{ position: 'relative', width: 60, height: 60, borderRadius: 8, overflow: 'hidden' }}>
-            <img src={referenceImage} alt="参考图" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            <img src={referenceImage} alt={T('referenceImage')} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
             <button onClick={() => setReferenceImage(null)} style={{ position: 'absolute', top: 2, right: 2, width: 20, height: 20, borderRadius: '50%', background: 'rgba(0,0,0,0.6)', border: 'none', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
               <X size={12} />
             </button>
           </div>
-          <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>参考图已上传</span>
+          <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>{T('referenceImage')}</span>
         </div>
       )}
 
@@ -341,8 +344,8 @@ export default function ImageTab() {
 
         <div style={{ display: 'flex', gap: 8 }}>
           <input ref={fileInputRef} type="file" accept="image/*" onChange={handleFileSelect} style={{ display: 'none' }} />
-          <button onClick={() => fileInputRef.current?.click()} className="btn-secondary" style={{ padding: 12 }} title="上传参考图"><Upload size={20} /></button>
-          <input value={prompt} onChange={(e) => setPrompt(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleGenerate()} placeholder="描述你想生成的图片..." style={{ flex: 1 }} />
+          <button onClick={() => fileInputRef.current?.click()} className="btn-secondary" style={{ padding: 12 }} title={T('uploadReference')}><Upload size={20} /></button>
+          <input value={prompt} onChange={(e) => setPrompt(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleGenerate()} placeholder={T('describeImage')} style={{ flex: 1 }} />
           {isImageLoading ? (
             <button
               onClick={cancelImageRequest}
