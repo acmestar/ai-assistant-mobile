@@ -508,3 +508,154 @@ async function generateGeminiImage(apiKey: string, modelId: string, prompt: stri
     throw new Error('网络请求失败');
   }
 }
+
+// 模型对比 - 同时向多个模型发送相同消息
+export async function compareChatModels(
+  userMessage: string | Array<{ type: string; text?: string; image_url?: { url: string } }>,
+  modelIds: string[],
+  onProgress?: (modelId: string, content: string) => void
+): Promise<Record<string, string>> {
+  const { apiKey, setIsCompareLoading, setCompareResults } = useAppStore.getState();
+  if (!apiKey) throw new Error('请先设置 API Key');
+
+  setIsCompareLoading(true);
+  const results: Record<string, string> = {};
+
+  try {
+    const promises = modelIds.map(async (modelId) => {
+      try {
+        const resp = await fetch(`${API_BASE}/chat/completions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+          body: JSON.stringify({
+            model: modelId,
+            messages: [{ role: 'user', content: userMessage }],
+            max_tokens: 4096,
+            stream: true,
+          }),
+        });
+
+        if (!resp.ok) throw new Error(`API 错误: ${resp.status}`);
+
+        const reader = resp.body?.getReader();
+        if (!reader) throw new Error('无法读取响应');
+
+        const decoder = new TextDecoder();
+        let content = '';
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const data = line.slice(6);
+              if (data === '[DONE]') continue;
+              try {
+                const parsed = JSON.parse(data);
+                const chunk = parsed.choices?.[0]?.delta?.content || '';
+                if (chunk) {
+                  content += chunk;
+                  onProgress?.(modelId, content);
+                }
+              } catch {}
+            }
+          }
+        }
+
+        results[modelId] = content;
+        return { modelId, content };
+      } catch (e) {
+        results[modelId] = `错误: ${e instanceof Error ? e.message : '请求失败'}`;
+        return { modelId, content: results[modelId] };
+      }
+    });
+
+    await Promise.all(promises);
+    setCompareResults(results);
+    return results;
+  } finally {
+    setIsCompareLoading(false);
+  }
+}
+
+// 图片模型对比
+export async function compareImageModels(
+  prompt: string,
+  modelIds: string[],
+  onProgress?: (modelId: string, status: string) => void
+): Promise<Record<string, string>> {
+  const { apiKey, imageRatio, imageQuality } = useAppStore.getState();
+  if (!apiKey) throw new Error('请先设置 API Key');
+
+  const results: Record<string, string> = {};
+
+  const promises = modelIds.map(async (modelId) => {
+    try {
+      onProgress?.(modelId, '生成中...');
+
+      if (modelId === 'gpt-image-2' || modelId === 'gpt-image-1.5') {
+        const size = modelId === 'gpt-image-2'
+          ? (GPT2_SIZE_MAP[imageRatio] || 'auto')
+          : (OPENAI_SIZE_MAP[imageRatio] || '1024x1024');
+        const qualityLevel = OPENAI_QUALITY_MAP[imageQuality] || 'medium';
+
+        const body: any = { model: modelId, prompt, n: 1 };
+        if (modelId === 'gpt-image-2') {
+          if (size !== 'auto') body.size = size;
+          if (imageQuality !== 'auto') body.quality = imageQuality;
+        } else {
+          body.size = size;
+          body.quality = qualityLevel;
+        }
+
+        const resp = await fetchWithTimeout(`${API_BASE}/images/generations`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+          body: JSON.stringify(body),
+        }, 180000);
+
+        if (!resp.ok) throw new Error(`生成失败: ${resp.status}`);
+        const data = await resp.json();
+        const b64 = data?.data?.[0]?.b64_json;
+        const url = data?.data?.[0]?.url;
+        results[modelId] = b64 ? `data:image/png;base64,${b64}` : url || '未返回图片';
+      } else {
+        // Gemini 模型
+        const resp = await fetchWithTimeout(`${API_BASE}/chat/completions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+          body: JSON.stringify({ model: modelId, messages: [{ role: 'user', content: prompt }], max_tokens: 4096 }),
+        }, 180000);
+
+        if (!resp.ok) throw new Error(`生成失败: ${resp.status}`);
+        const data = await resp.json();
+        const content = data?.choices?.[0]?.message?.content;
+
+        if (typeof content === 'string') {
+          if (content.startsWith('http') || content.startsWith('data:image')) {
+            results[modelId] = content;
+          } else {
+            const mdMatch = content.match(/!\[.*?\]\((data:image\/[^)]+)\)/s) || content.match(/!\[.*?\]\((https?:\/\/[^)]+)\)/s);
+            results[modelId] = mdMatch?.[1] || '未返回图片';
+          }
+        } else {
+          results[modelId] = '未返回图片';
+        }
+      }
+
+      onProgress?.(modelId, '完成');
+    } catch (e) {
+      results[modelId] = `错误: ${e instanceof Error ? e.message : '生成失败'}`;
+      onProgress?.(modelId, '失败');
+    }
+  });
+
+  await Promise.all(promises);
+  return results;
+}

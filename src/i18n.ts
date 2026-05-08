@@ -99,6 +99,12 @@ export const translations: Record<Language, Record<string, string>> = {
     messageMultiSelect: '多选消息',
     copySelected: '复制选中',
     selectMessages: '选择消息',
+    modelCompare: '模型对比',
+    selectModelsToCompare: '选择对比模型',
+    comparing: '对比中...',
+    compareResults: '对比结果',
+    swipeToDelete: '滑动删除',
+    doubleTapToZoom: '双击放大',
   },
   en: {
     appName: 'AI Assistant',
@@ -198,6 +204,12 @@ export const translations: Record<Language, Record<string, string>> = {
     messageMultiSelect: 'Select Messages',
     copySelected: 'Copy Selected',
     selectMessages: 'Select messages',
+    modelCompare: 'Model Compare',
+    selectModelsToCompare: 'Select models to compare',
+    comparing: 'Comparing...',
+    compareResults: 'Compare Results',
+    swipeToDelete: 'Swipe to delete',
+    doubleTapToZoom: 'Double tap to zoom',
   },
 };
 

@@ -315,6 +315,16 @@ interface AppState {
   elderMode: boolean; // 长辈模式
   setElderMode: (enabled: boolean) => void;
 
+  // 模型对比
+  compareMode: boolean;
+  setCompareMode: (enabled: boolean) => void;
+  compareModelIds: string[];
+  setCompareModelIds: (ids: string[]) => void;
+  compareResults: Record<string, string>; // modelId -> response
+  setCompareResults: (results: Record<string, string>) => void;
+  isCompareLoading: boolean;
+  setIsCompareLoading: (loading: boolean) => void;
+
   // Actions
   createConversation: () => string;
   getCurrentConversation: () => Conversation | null;
@@ -392,6 +402,16 @@ export const useAppStore = create<AppState>()(
       setLanguage: (language) => set({ language }),
       elderMode: false,
       setElderMode: (elderMode) => set({ elderMode }),
+
+      // 模型对比
+      compareMode: false,
+      setCompareMode: (compareMode) => set({ compareMode, compareResults: {} }),
+      compareModelIds: [],
+      setCompareModelIds: (compareModelIds) => set({ compareModelIds }),
+      compareResults: {},
+      setCompareResults: (compareResults) => set({ compareResults }),
+      isCompareLoading: false,
+      setIsCompareLoading: (isCompareLoading) => set({ isCompareLoading }),
 
       // Actions
       createConversation: () => {
