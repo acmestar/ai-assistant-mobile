@@ -51,6 +51,7 @@ export default function ChatTab() {
   const prevMessagesLengthRef = useRef(0);
   const shouldScrollToBottomRef = useRef(false);
   const recognitionRef = useRef<any>(null);
+  const isRecordingRef = useRef(false); // 用于防止重复触发
 
   const conversation = getCurrentConversation();
   const currentModel = CHAT_MODELS.find((m) => m.id === chatModelId);
@@ -119,10 +120,12 @@ export default function ChatTab() {
 
   // 开始录音（长按）
   const startRecording = () => {
+    if (isRecordingRef.current) return; // 防止重复调用
     if (!recognitionRef.current) {
       alert(T('voiceNotSupported'));
       return;
     }
+    isRecordingRef.current = true;
     setVoiceText('');
     setIsRecording(true);
     try {
@@ -138,6 +141,7 @@ export default function ChatTab() {
         } catch (err) {
           console.error('无法启动语音识别:', err);
           setIsRecording(false);
+          isRecordingRef.current = false;
         }
       }, 100);
     }
@@ -145,6 +149,8 @@ export default function ChatTab() {
 
   // 停止录音（松开）
   const stopRecording = () => {
+    if (!isRecordingRef.current) return; // 防止重复调用
+    isRecordingRef.current = false;
     if (recognitionRef.current) {
       recognitionRef.current.stop();
     }
@@ -641,9 +647,20 @@ export default function ChatTab() {
                 onTouchStart={(e) => { e.preventDefault(); startRecording(); }}
                 onTouchEnd={(e) => { e.preventDefault(); stopRecording(); }}
                 onTouchCancel={stopRecording}
-                onMouseDown={startRecording}
-                onMouseUp={stopRecording}
-                onMouseLeave={() => isRecording && stopRecording()}
+                onMouseDown={(e) => {
+                  // 只在非触摸设备上响应鼠标事件
+                  if (!('ontouchstart' in window)) {
+                    e.preventDefault();
+                    startRecording();
+                  }
+                }}
+                onMouseUp={(e) => {
+                  if (!('ontouchstart' in window)) {
+                    e.preventDefault();
+                    stopRecording();
+                  }
+                }}
+                onMouseLeave={() => isRecordingRef.current && stopRecording()}
                 style={{
                   flex: 1,
                   padding: 14,
@@ -659,6 +676,7 @@ export default function ChatTab() {
                   gap: 8,
                   userSelect: 'none',
                   WebkitUserSelect: 'none',
+                  touchAction: 'manipulation',
                 }}
               >
                 <Mic size={20} />
