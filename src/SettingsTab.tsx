@@ -64,17 +64,21 @@ export default function SettingsTab() {
 
     try {
       diagnostics.push('测试 2: API 端点...');
+      // 只测试端点可达性，不发送实际请求（避免消耗 Token）
       const resp = await fetch('https://ai.acmestar.top/api/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: 'gpt-4o-mini', messages: [{ role: 'user', content: 'Hi' }], max_tokens: 5 }),
+        method: 'OPTIONS', // 使用 OPTIONS 方法，只检查端点是否可用
         mode: 'cors',
         cache: 'no-cache',
       });
 
-      if (resp.ok || resp.status === 401) {
+      // OPTIONS 请求成功或返回 204/200 表示端点可达
+      if (resp.ok || resp.status === 204 || resp.status === 200) {
         setNetworkStatus('success');
-        diagnostics.push('API 连接正常');
+        diagnostics.push('API 端点可达');
+      } else if (resp.status === 401 || resp.status === 403) {
+        // 401/403 也表示端点正常，只是需要认证
+        setNetworkStatus('success');
+        diagnostics.push('API 端点正常（需要认证）');
       } else {
         const text = await resp.text();
         setNetworkStatus('error');
