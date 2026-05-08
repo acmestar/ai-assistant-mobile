@@ -64,9 +64,17 @@ export default function ImageTab() {
     recognition.onerror = (event: any) => {
       console.error('语音识别错误:', event.error);
       if (event.error === 'not-allowed') {
-        const msg = language === 'zh'
-          ? '请允许麦克风权限以使用语音功能。\n\n提示：将应用添加到主屏幕可持久化权限，避免每次重新授权。'
-          : 'Please allow microphone access to use voice input.\n\nTip: Add to home screen to persist permissions.';
+        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+        let msg: string;
+        if (isIOS && language === 'zh') {
+          msg = '请允许麦克风权限以使用语音功能。\n\niOS 用户提示：\n1. 在 Safari 中使用一次语音功能并授权\n2. 保持 Safari 在后台运行\n3. 或在系统设置 → 隐私 → 麦克风中为 Safari 永久授权';
+        } else if (isIOS) {
+          msg = 'Please allow microphone access.\n\niOS Tips:\n1. Use voice in Safari first and grant permission\n2. Keep Safari running in background\n3. Or grant permanent access in Settings → Privacy → Microphone';
+        } else if (language === 'zh') {
+          msg = '请允许麦克风权限以使用语音功能。\n\n提示：将应用添加到主屏幕可持久化权限。';
+        } else {
+          msg = 'Please allow microphone access.\n\nTip: Add to home screen to persist permissions.';
+        }
         alert(msg);
       }
       isRecordingRef.current = false;
