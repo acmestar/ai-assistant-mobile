@@ -31,7 +31,7 @@ export default function ImageTab() {
   const isPressingRef = useRef(false);
 
   const currentModel = getImageModelDef(imageModelId);
-  const storageWarning = imageRecords.length >= 15;
+  const storageWarning = imageRecords.length >= 10;
 
   // 创建新的 SpeechRecognition 实例
   const createRecognition = () => {

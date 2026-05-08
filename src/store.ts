@@ -2,6 +2,49 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { Language } from './i18n';
 
+// 检查存储大小并提醒用户（导出供其他模块使用）
+export function checkStorageSize(): boolean {
+  try {
+    const key = 'ai-assistant-storage';
+    const data = localStorage.getItem(key);
+    if (!data) return false;
+
+    const sizeInMB = (new Blob([data]).size) / (1024 * 1024);
+    console.log('存储大小:', sizeInMB.toFixed(2), 'MB');
+
+    // 如果超过 4MB，提醒用户
+    if (sizeInMB > 4) {
+      return true; // 返回 true 表示需要提醒
+    }
+    return false;
+  } catch (e) {
+    console.error('检查存储失败:', e);
+    return false;
+  }
+}
+
+// 清理存储空间（导出供其他模块使用）
+export function cleanStorage(): void {
+  try {
+    const key = 'ai-assistant-storage';
+    const data = localStorage.getItem(key);
+    if (!data) return;
+
+    const parsed = JSON.parse(data);
+    const state = parsed.state;
+
+    // 清理图片记录，只保留最新的 10 张
+    if (state?.imageRecords && state.imageRecords.length > 10) {
+      state.imageRecords = state.imageRecords.slice(0, 10);
+      console.log('清理图片记录，保留最新 10 张');
+    }
+
+    localStorage.setItem(key, JSON.stringify(parsed));
+  } catch (e) {
+    console.error('清理存储失败:', e);
+  }
+}
+
 // 自定义存储，优先使用 localStorage，失败则用内存
 const customStorage = createJSONStorage(() => {
   try {
@@ -472,8 +515,8 @@ export const useAppStore = create<AppState>()(
       },
 
       addImageRecord: async (record) => {
-        // 生成缩略图
-        const thumbnailUrl = await generateThumbnail(record.imageUrl, 200);
+        // 生成缩略图用于列表显示
+        const thumbnailUrl = await generateThumbnail(record.imageUrl, 150);
 
         const newRecord: ImageRecord = {
           ...record,
@@ -482,14 +525,22 @@ export const useAppStore = create<AppState>()(
           thumbnailUrl,
         };
 
-        set((state) => {
-          // 限制最多保存 20 张图片，超出时删除最旧的
-          const records = [newRecord, ...state.imageRecords];
-          if (records.length > 20) {
-            records.pop();
+        try {
+          set((state) => {
+            // 限制最多保存 20 张图片，超出时删除最旧的
+            const records = [newRecord, ...state.imageRecords];
+            while (records.length > 20) {
+              records.pop();
+            }
+            return { imageRecords: records };
+          });
+        } catch (e: any) {
+          // 如果存储失败，提示用户
+          if (e.name === 'QuotaExceededError' || e.message?.includes('quota')) {
+            alert('存储空间已满！请及时下载保存重要图片，然后手动删除旧图片释放空间。');
           }
-          return { imageRecords: records };
-        });
+          throw e;
+        }
       },
 
       deleteImageRecord: (id) => {
