@@ -1,20 +1,45 @@
-import { useState } from 'react';
-import { Key, Info, Check, Eye, EyeOff, Trash2, Wifi, AlertCircle, Sun, Moon } from 'lucide-react';
+import { useState, useRef } from 'react';
+import { Key, Info, Check, Eye, EyeOff, Trash2, Wifi, AlertCircle, Sun, Moon, Download, Upload, BarChart2 } from 'lucide-react';
 import { useAppStore, CHAT_MODELS, IMAGE_MODELS } from './store';
 
 export default function SettingsTab() {
-  const { apiKey, setApiKey, chatModelId, imageModelId, conversations, imageRecords, theme, setTheme } = useAppStore();
+  const { apiKey, setApiKey, chatModelId, imageModelId, conversations, imageRecords, theme, setTheme, totalInputTokens, totalOutputTokens, exportData, importData } = useAppStore();
   const [showKey, setShowKey] = useState(false);
   const [tempKey, setTempKey] = useState(apiKey);
   const [saved, setSaved] = useState(false);
   const [testingNetwork, setTestingNetwork] = useState(false);
   const [networkStatus, setNetworkStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [networkError, setNetworkError] = useState<string | null>(null);
+  const importInputRef = useRef<HTMLInputElement>(null);
 
   const handleSave = () => {
     setApiKey(tempKey);
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
+  };
+
+  const handleExport = () => {
+    const data = exportData();
+    const blob = new Blob([data], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `ai-assistant-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const data = reader.result as string;
+      importData(data);
+      alert('数据导入成功');
+    };
+    reader.readAsText(file);
+    e.target.value = '';
   };
 
   const handleTestNetwork = async () => {
@@ -211,6 +236,44 @@ export default function SettingsTab() {
             <div style={{ fontSize: 24, fontWeight: 600, color: 'var(--text-primary)' }}>{imageRecords.length}</div>
             <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>生成图片</div>
           </div>
+        </div>
+      </div>
+
+      {/* Token 统计 */}
+      <div className="settings-section">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+          <BarChart2 size={18} color="var(--accent)" />
+          <span style={{ fontWeight: 600, fontSize: 16 }}>Token 使用统计</span>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div style={{ background: 'var(--bg-tertiary)', borderRadius: 12, padding: 12, textAlign: 'center' }}>
+            <div style={{ fontSize: 20, fontWeight: 600, color: 'var(--accent-blue)' }}>{(totalInputTokens / 1000).toFixed(1)}K</div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>输入 Token</div>
+          </div>
+          <div style={{ background: 'var(--bg-tertiary)', borderRadius: 12, padding: 12, textAlign: 'center' }}>
+            <div style={{ fontSize: 20, fontWeight: 600, color: 'var(--accent)' }}>{(totalOutputTokens / 1000).toFixed(1)}K</div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>输出 Token</div>
+          </div>
+        </div>
+        <div style={{ marginTop: 12, textAlign: 'center', fontSize: 12, color: 'var(--text-muted)' }}>
+          总计: {((totalInputTokens + totalOutputTokens) / 1000).toFixed(1)}K Token
+        </div>
+      </div>
+
+      {/* 数据导入导出 */}
+      <div className="settings-section">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+          <Download size={18} color="var(--accent)" />
+          <span style={{ fontWeight: 600, fontSize: 16 }}>数据管理</span>
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={handleExport} className="btn-secondary" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+            <Download size={18} /> 导出备份
+          </button>
+          <input ref={importInputRef} type="file" accept=".json" onChange={handleImport} style={{ display: 'none' }} />
+          <button onClick={() => importInputRef.current?.click()} className="btn-secondary" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+            <Upload size={18} /> 导入数据
+          </button>
         </div>
       </div>
 

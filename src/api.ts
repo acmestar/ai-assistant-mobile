@@ -2,6 +2,30 @@ import { useAppStore, CHAT_MODELS, OPENAI_SIZE_MAP, GPT2_SIZE_MAP, OPENAI_QUALIT
 
 const API_BASE = 'https://ai.acmestar.top/api';
 
+// 全局 AbortController 用于取消请求
+let chatAbortController: AbortController | null = null;
+let imageAbortController: AbortController | null = null;
+
+// 取消聊天请求
+export function cancelChatRequest(): void {
+  if (chatAbortController) {
+    chatAbortController.abort();
+    chatAbortController = null;
+    useAppStore.getState().setIsChatLoading(false);
+    useAppStore.getState().setPendingChatRequest(null);
+  }
+}
+
+// 取消图片生成请求
+export function cancelImageRequest(): void {
+  if (imageAbortController) {
+    imageAbortController.abort();
+    imageAbortController = null;
+    useAppStore.getState().setIsImageLoading(false);
+    useAppStore.getState().setPendingImageRequest(null);
+  }
+}
+
 // 重试机制
 async function fetchWithRetry(url: string, options: RequestInit, timeout: number = 120000, retries: number = 2): Promise<Response> {
   for (let attempt = 0; attempt <= retries; attempt++) {
@@ -10,7 +34,6 @@ async function fetchWithRetry(url: string, options: RequestInit, timeout: number
       return response;
     } catch (error) {
       if (attempt === retries) throw error;
-      // 等待一段时间后重试
       await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
       console.log(`请求失败，第 ${attempt + 1} 次重试...`);
     }
@@ -18,13 +41,20 @@ async function fetchWithRetry(url: string, options: RequestInit, timeout: number
   throw new Error('请求失败');
 }
 
-function fetchWithTimeout(url: string, options: RequestInit, timeout: number = 120000): Promise<Response> {
+function fetchWithTimeout(url: string, options: RequestInit, timeout: number = 120000, signal?: AbortSignal): Promise<Response> {
   return new Promise((resolve, reject) => {
     const controller = new AbortController();
     const timer = setTimeout(() => {
       controller.abort();
       reject(new Error('请求超时，请检查网络连接'));
     }, timeout);
+
+    // 合并外部 signal 和内部 controller
+    const abortHandler = () => {
+      clearTimeout(timer);
+      reject(new Error('请求已取消'));
+    };
+    signal?.addEventListener('abort', abortHandler);
 
     const fetchOptions: RequestInit = {
       ...options,
@@ -36,13 +66,15 @@ function fetchWithTimeout(url: string, options: RequestInit, timeout: number = 1
     fetch(url, fetchOptions)
       .then((response) => {
         clearTimeout(timer);
+        signal?.removeEventListener('abort', abortHandler);
         resolve(response);
       })
       .catch((error) => {
         clearTimeout(timer);
+        signal?.removeEventListener('abort', abortHandler);
         const errorMsg = error.message || String(error);
         if (error.name === 'AbortError') {
-          reject(new Error('请求超时，请检查网络连接'));
+          reject(new Error('请求已取消'));
         } else if (errorMsg.includes('Failed to fetch') || errorMsg.includes('NetworkError') || errorMsg.includes('Network request failed')) {
           reject(new Error('网络连接失败，请检查网络设置或尝试切换网络'));
         } else if (errorMsg.includes('CORS') || errorMsg.includes('cross-origin')) {
@@ -60,8 +92,14 @@ export async function sendChatMessageStream(
   imageBase64?: string,
   onChunk?: (chunk: string) => void
 ): Promise<string> {
-  const { apiKey, chatModelId, addMessage, setIsChatLoading, setPendingChatRequest, currentConversationId } = useAppStore.getState();
+  const { apiKey, chatModelId, addMessage, setIsChatLoading, setPendingChatRequest, currentConversationId, addTokenUsage } = useAppStore.getState();
   if (!apiKey) throw new Error('请先设置 API Key');
+
+  // 取消之前的请求
+  if (chatAbortController) {
+    chatAbortController.abort();
+  }
+  chatAbortController = new AbortController();
 
   const model = CHAT_MODELS.find((m) => m.id === chatModelId) || CHAT_MODELS[0];
   addMessage(userMessage, 'user', imageBase64);
@@ -93,6 +131,7 @@ export async function sendChatMessageStream(
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({ model: model.id, messages, max_tokens: 8192, stream: true }),
+      signal: chatAbortController.signal,
     });
 
     if (!resp.ok) {
@@ -105,6 +144,8 @@ export async function sendChatMessageStream(
 
     const decoder = new TextDecoder();
     let fullContent = '';
+    let inputTokens = 0;
+    let outputTokens = 0;
 
     while (true) {
       const { done, value } = await reader.read();
@@ -125,6 +166,11 @@ export async function sendChatMessageStream(
               fullContent += content;
               onChunk?.(content);
             }
+            // 统计 token
+            if (parsed.usage) {
+              inputTokens = parsed.usage.prompt_tokens || 0;
+              outputTokens = parsed.usage.completion_tokens || 0;
+            }
           } catch {
             // 忽略解析错误
           }
@@ -132,15 +178,30 @@ export async function sendChatMessageStream(
       }
     }
 
+    // 估算 token 数量（如果 API 没有返回）
+    if (inputTokens === 0) {
+      inputTokens = Math.ceil(JSON.stringify(messages).length / 4);
+    }
+    if (outputTokens === 0) {
+      outputTokens = Math.ceil(fullContent.length / 4);
+    }
+    addTokenUsage(inputTokens, outputTokens);
+
     addMessage(fullContent, 'assistant');
     setPendingChatRequest(null);
+    chatAbortController = null;
     return fullContent;
   } catch (error) {
+    if (error instanceof Error && error.message === '请求已取消') {
+      console.log('用户取消了请求');
+      return '';
+    }
     if (error instanceof Error && (error.name === 'AbortError' || error.message.includes('abort') || error.message.includes('network'))) {
       console.log('请求被中断，等待页面恢复');
       return '';
     }
     setPendingChatRequest(null);
+    chatAbortController = null;
     throw error;
   } finally {
     setIsChatLoading(false);
@@ -148,14 +209,19 @@ export async function sendChatMessageStream(
 }
 
 export async function sendChatMessage(userMessage: string, imageBase64?: string): Promise<string> {
-  const { apiKey, chatModelId, addMessage, setIsChatLoading, setPendingChatRequest, currentConversationId } = useAppStore.getState();
+  const { apiKey, chatModelId, addMessage, setIsChatLoading, setPendingChatRequest, currentConversationId, addTokenUsage } = useAppStore.getState();
   if (!apiKey) throw new Error('请先设置 API Key');
+
+  // 取消之前的请求
+  if (chatAbortController) {
+    chatAbortController.abort();
+  }
+  chatAbortController = new AbortController();
 
   const model = CHAT_MODELS.find((m) => m.id === chatModelId) || CHAT_MODELS[0];
   addMessage(userMessage, 'user', imageBase64);
   setIsChatLoading(true);
 
-  // 保存请求状态，以便页面恢复时继续
   if (currentConversationId) {
     setPendingChatRequest({ conversationId: currentConversationId, userMessage, imageBase64 });
   }
@@ -191,16 +257,23 @@ export async function sendChatMessage(userMessage: string, imageBase64?: string)
 
     const data = await resp.json();
     const responseText = data.choices?.[0]?.message?.content || '';
+
+    // 统计 token
+    const inputTokens = data.usage?.prompt_tokens || Math.ceil(JSON.stringify(messages).length / 4);
+    const outputTokens = data.usage?.completion_tokens || Math.ceil(responseText.length / 4);
+    addTokenUsage(inputTokens, outputTokens);
+
     addMessage(responseText, 'assistant');
-    setPendingChatRequest(null); // 清除请求状态
+    setPendingChatRequest(null);
+    chatAbortController = null;
     return responseText;
   } catch (error) {
-    // 用户主动离开页面导致的请求中断，不清除请求状态，等页面恢复时继续
-    if (error instanceof Error && (error.name === 'AbortError' || error.message.includes('abort') || error.message.includes('network'))) {
-      console.log('请求被中断，等待页面恢复');
+    if (error instanceof Error && error.message === '请求已取消') {
+      console.log('用户取消了请求');
       return '';
     }
     setPendingChatRequest(null);
+    chatAbortController = null;
     throw error;
   } finally {
     setIsChatLoading(false);
@@ -211,10 +284,15 @@ export async function generateImage(prompt: string, referenceImage?: string): Pr
   const { apiKey, imageModelId, imageRatio, imageQuality, addImageRecord, setIsImageLoading, setPendingImageRequest } = useAppStore.getState();
   if (!apiKey) throw new Error('请先设置 API Key');
 
+  // 取消之前的请求
+  if (imageAbortController) {
+    imageAbortController.abort();
+  }
+  imageAbortController = new AbortController();
+
   const model = getImageModelDef(imageModelId);
   setIsImageLoading(true);
 
-  // 保存请求状态
   setPendingImageRequest({ prompt, referenceImage });
 
   try {
@@ -230,14 +308,15 @@ export async function generateImage(prompt: string, referenceImage?: string): Pr
 
     addImageRecord({ prompt, imageUrl, modelId: model.id, ratio: imageRatio, referenceImage });
     setPendingImageRequest(null);
+    imageAbortController = null;
     return imageUrl;
   } catch (error) {
-    // 请求中断时不清除状态
-    if (error instanceof Error && (error.name === 'AbortError' || error.message.includes('abort') || error.message.includes('network'))) {
-      console.log('图片生成请求被中断，等待页面恢复');
+    if (error instanceof Error && error.message === '请求已取消') {
+      console.log('用户取消了图片生成');
       return '';
     }
     setPendingImageRequest(null);
+    imageAbortController = null;
     throw error;
   } finally {
     setIsImageLoading(false);
@@ -254,6 +333,7 @@ async function generateOpenAIImage(apiKey: string, modelId: string, prompt: stri
     body: JSON.stringify({ model: modelId, prompt, n: 1, size, quality: qualityLevel }),
     mode: 'cors',
     cache: 'no-cache',
+    signal: imageAbortController?.signal,
   });
 
   if (!resp.ok) {
@@ -293,7 +373,7 @@ async function generateGPT2Image(apiKey: string, prompt: string, ratio: string, 
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}` },
       body: formData,
-    }, 180000);
+    }, 180000, imageAbortController?.signal);
 
     if (!resp.ok) {
       const err = await resp.text();
@@ -316,7 +396,7 @@ async function generateGPT2Image(apiKey: string, prompt: string, ratio: string, 
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify(body),
-  }, 180000);
+  }, 180000, imageAbortController?.signal);
 
   if (!resp.ok) {
     const err = await resp.text();
@@ -346,7 +426,7 @@ async function generateGeminiImage(apiKey: string, modelId: string, prompt: stri
     body: JSON.stringify({ model: modelId, messages, max_tokens: 4096 }),
     mode: 'cors',
     cache: 'no-cache',
-  }, 180000);
+  }, 180000, imageAbortController?.signal);
 
   if (!resp.ok) {
     const err = await resp.text();

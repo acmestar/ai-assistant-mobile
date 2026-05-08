@@ -31,6 +31,9 @@ export interface Conversation {
   title: string;
   messages: Message[];
   createdAt: number;
+  pinned?: boolean;  // 置顶
+  draft?: string;    // 草稿
+  draftImage?: string; // 草稿图片
 }
 
 export interface ImageRecord {
@@ -42,6 +45,19 @@ export interface ImageRecord {
   ratio: string;
   referenceImage?: string;
   createdAt: number;
+}
+
+export interface TokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+  timestamp: number;
+}
+
+export interface PromptTemplate {
+  id: string;
+  name: string;
+  prompt: string;
+  category: string;
 }
 
 // 生成缩略图
@@ -197,6 +213,20 @@ export function constrainImageSettings(
   return { quality, ratio };
 }
 
+// 提示词模板
+export const PROMPT_TEMPLATES: PromptTemplate[] = [
+  { id: '1', name: '写实人像', prompt: '一张写实风格的人像照片，细节丰富，光影自然', category: '人像' },
+  { id: '2', name: '动漫角色', prompt: '一个可爱的动漫角色，色彩鲜艳，线条清晰', category: '动漫' },
+  { id: '3', name: '风景摄影', prompt: '壮丽的自然风景，专业摄影，高清画质', category: '风景' },
+  { id: '4', name: '建筑设计', prompt: '现代建筑设计效果图，干净简洁，专业渲染', category: '建筑' },
+  { id: '5', name: '产品渲染', prompt: '高品质产品渲染图，白色背景，商业摄影风格', category: '产品' },
+  { id: '6', name: '概念艺术', prompt: '科幻概念艺术，未来感，电影级视觉效果', category: '艺术' },
+  { id: '7', name: '水彩画', prompt: '水彩画风格，柔和色彩，艺术感', category: '艺术' },
+  { id: '8', name: '油画风格', prompt: '油画风格，古典艺术，厚重质感', category: '艺术' },
+  { id: '9', name: '简约图标', prompt: '简约风格的图标设计，扁平化，现代感', category: '设计' },
+  { id: '10', name: 'Logo设计', prompt: '简洁现代的Logo设计，品牌标识', category: '设计' },
+];
+
 interface AppState {
   // API
   apiKey: string;
@@ -209,6 +239,12 @@ interface AppState {
   setChatModelId: (id: string) => void;
   pendingChatRequest: { conversationId: string; userMessage: string; imageBase64?: string } | null;
   setPendingChatRequest: (req: { conversationId: string; userMessage: string; imageBase64?: string } | null) => void;
+
+  // Token 统计
+  tokenUsage: TokenUsage[];
+  addTokenUsage: (inputTokens: number, outputTokens: number) => void;
+  totalInputTokens: number;
+  totalOutputTokens: number;
 
   // Image
   imageModelId: string;
@@ -240,9 +276,13 @@ interface AppState {
   renameConversation: (id: string, title: string) => void;
   clearConversation: () => void;
   deleteConversation: (id: string) => void;
+  pinConversation: (id: string, pinned: boolean) => void;
+  saveDraft: (conversationId: string, draft: string, draftImage?: string) => void;
   addImageRecord: (record: Omit<ImageRecord, 'id' | 'createdAt'>) => void;
   deleteImageRecord: (id: string) => void;
   clearImageRecords: () => void;
+  exportData: () => string;
+  importData: (data: string) => void;
 }
 
 export const useAppStore = create<AppState>()(
@@ -259,6 +299,18 @@ export const useAppStore = create<AppState>()(
       setChatModelId: (id) => set({ chatModelId: id }),
       pendingChatRequest: null,
       setPendingChatRequest: (req) => set({ pendingChatRequest: req }),
+
+      // Token 统计
+      tokenUsage: [],
+      addTokenUsage: (inputTokens, outputTokens) => set((state) => {
+        const newUsage: TokenUsage = { inputTokens, outputTokens, timestamp: Date.now() };
+        const usages = [newUsage, ...state.tokenUsage].slice(0, 100); // 保留最近100条
+        const totalInput = usages.reduce((sum, u) => sum + u.inputTokens, 0);
+        const totalOutput = usages.reduce((sum, u) => sum + u.outputTokens, 0);
+        return { tokenUsage: usages, totalInputTokens: totalInput, totalOutputTokens: totalOutput };
+      }),
+      totalInputTokens: 0,
+      totalOutputTokens: 0,
 
       // Image
       imageModelId: IMAGE_MODELS[0].id,
@@ -392,6 +444,22 @@ export const useAppStore = create<AppState>()(
         });
       },
 
+      pinConversation: (id, pinned) => {
+        set({
+          conversations: get().conversations.map((c) =>
+            c.id === id ? { ...c, pinned } : c
+          ),
+        });
+      },
+
+      saveDraft: (conversationId, draft, draftImage) => {
+        set({
+          conversations: get().conversations.map((c) =>
+            c.id === conversationId ? { ...c, draft, draftImage } : c
+          ),
+        });
+      },
+
       addImageRecord: async (record) => {
         // 生成缩略图
         const thumbnailUrl = await generateThumbnail(record.imageUrl, 200);
@@ -418,6 +486,37 @@ export const useAppStore = create<AppState>()(
       },
 
       clearImageRecords: () => set({ imageRecords: [] }),
+
+      exportData: () => {
+        const state = get();
+        const data = {
+          conversations: state.conversations,
+          imageRecords: state.imageRecords,
+          apiKey: state.apiKey,
+          chatModelId: state.chatModelId,
+          imageModelId: state.imageModelId,
+          theme: state.theme,
+          exportedAt: Date.now(),
+        };
+        return JSON.stringify(data, null, 2);
+      },
+
+      importData: (dataStr) => {
+        try {
+          const data = JSON.parse(dataStr);
+          set({
+            conversations: data.conversations || [],
+            imageRecords: data.imageRecords || [],
+            apiKey: data.apiKey || '',
+            chatModelId: data.chatModelId || CHAT_MODELS[0].id,
+            imageModelId: data.imageModelId || IMAGE_MODELS[0].id,
+            theme: data.theme || 'light',
+          });
+          document.documentElement.classList.toggle('dark', data.theme === 'dark');
+        } catch (e) {
+          console.error('导入数据失败:', e);
+        }
+      },
     }),
     {
       name: 'ai-assistant-storage',
@@ -432,6 +531,7 @@ export const useAppStore = create<AppState>()(
         imageQuality: state.imageQuality,
         imageRecords: state.imageRecords,
         theme: state.theme,
+        tokenUsage: state.tokenUsage.slice(0, 50), // 只保留最近50条
       }),
     }
   )

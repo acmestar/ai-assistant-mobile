@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { MessageSquare, Send, Trash2, Plus, ChevronLeft, Image as ImageIcon, X, Loader2, Copy, Edit2, Check, Pencil, Search } from 'lucide-react';
+import { MessageSquare, Send, Trash2, Plus, ChevronLeft, Image as ImageIcon, X, Copy, Edit2, Check, Pencil, Search, StopCircle, Pin, PinOff, Download } from 'lucide-react';
 import { useAppStore, CHAT_MODELS } from './store';
-import { sendChatMessageStream } from './api';
+import { sendChatMessageStream, cancelChatRequest } from './api';
 import ReactMarkdown from 'react-markdown';
 
 const SCROLL_POSITION_KEY = 'chat-scroll-position';
@@ -21,6 +21,9 @@ export default function ChatTab() {
     setPendingChatRequest,
     deleteMessage,
     renameConversation,
+    pinConversation,
+    saveDraft,
+    exportData,
   } = useAppStore();
 
   const [input, setInput] = useState('');
@@ -43,6 +46,24 @@ export default function ChatTab() {
 
   const conversation = getCurrentConversation();
   const currentModel = CHAT_MODELS.find((m) => m.id === chatModelId);
+
+  // 草稿自动保存
+  useEffect(() => {
+    if (currentConversationId && input) {
+      const timer = setTimeout(() => {
+        saveDraft(currentConversationId, input, attachedImage || undefined);
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, [input, attachedImage, currentConversationId, saveDraft]);
+
+  // 恢复草稿
+  useEffect(() => {
+    if (conversation?.draft) {
+      setInput(conversation.draft);
+      setAttachedImage(conversation.draftImage || null);
+    }
+  }, [currentConversationId]);
 
   // 页面恢复时检查是否有未完成的请求
   useEffect(() => {
@@ -484,14 +505,32 @@ export default function ChatTab() {
             style={{ flex: 1, borderRadius: 20 }}
           />
 
-          <button
-            onClick={handleSend}
-            disabled={isChatLoading || (!input.trim() && !attachedImage)}
-            className="btn-primary"
-            style={{ padding: 12, borderRadius: 12 }}
-          >
-            {isChatLoading ? <Loader2 size={20} className="animate-spin" /> : <Send size={20} />}
-          </button>
+          {isChatLoading ? (
+            <button
+              onClick={cancelChatRequest}
+              style={{
+                padding: 12,
+                background: 'var(--danger)',
+                border: 'none',
+                borderRadius: 12,
+                color: 'white',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <StopCircle size={20} />
+            </button>
+          ) : (
+            <button
+              onClick={handleSend}
+              disabled={!input.trim() && !attachedImage}
+              className="btn-primary"
+              style={{ padding: 12, borderRadius: 12 }}
+            >
+              <Send size={20} />
+            </button>
+          )}
         </div>
       </div>
 
@@ -589,6 +628,12 @@ export default function ChatTab() {
                 {renamingConversationId !== conv.id && (
                   <div style={{ display: 'flex', gap: 4 }}>
                     <button
+                      onClick={(e) => { e.stopPropagation(); pinConversation(conv.id, !conv.pinned); }}
+                      style={{ padding: 8, color: conv.pinned ? 'var(--accent)' : 'var(--text-muted)', background: 'transparent' }}
+                    >
+                      {conv.pinned ? <PinOff size={14} /> : <Pin size={14} />}
+                    </button>
+                    <button
                       onClick={(e) => { e.stopPropagation(); handleStartRename(conv.id, conv.title); }}
                       style={{ padding: 8, color: 'var(--text-muted)', background: 'transparent' }}
                     >
@@ -610,6 +655,26 @@ export default function ChatTab() {
                 暂无对话
               </div>
             )}
+          </div>
+
+          {/* 导出按钮 */}
+          <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border)' }}>
+            <button
+              onClick={() => {
+                const data = exportData();
+                const blob = new Blob([data], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `ai-assistant-backup-${new Date().toISOString().slice(0, 10)}.json`;
+                a.click();
+                URL.revokeObjectURL(url);
+              }}
+              className="btn-secondary"
+              style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
+            >
+              <Download size={18} /> 导出数据
+            </button>
           </div>
         </div>
       )}

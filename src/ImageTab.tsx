@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
-import { Image as ImageIcon, Sparkles, Loader2, Trash2, Download, Upload, X, Maximize2, Clock, Sliders, AlertCircle, ZoomIn, ZoomOut, RotateCw } from 'lucide-react';
-import { useAppStore, IMAGE_MODELS, GPT2_RATIO_LABELS, GPT2_QUALITY_LABELS, getImageModelDef } from './store';
-import { generateImage } from './api';
+import { Image as ImageIcon, Sparkles, Trash2, Download, Upload, X, Maximize2, Clock, Sliders, AlertCircle, ZoomIn, ZoomOut, RotateCw, StopCircle, Wand2 } from 'lucide-react';
+import { useAppStore, IMAGE_MODELS, GPT2_RATIO_LABELS, GPT2_QUALITY_LABELS, getImageModelDef, PROMPT_TEMPLATES } from './store';
+import { generateImage, cancelImageRequest } from './api';
 
 export default function ImageTab() {
   const { imageModelId, setImageModelId, imageRatio, setImageRatio, imageQuality, setImageQuality, imageRecords, isImageLoading, deleteImageRecord, clearImageRecords, pendingImageRequest, setPendingImageRequest } = useAppStore();
@@ -11,6 +11,7 @@ export default function ImageTab() {
   const [showModelPicker, setShowModelPicker] = useState(false);
   const [showRatioPicker, setShowRatioPicker] = useState(false);
   const [showQualityPicker, setShowQualityPicker] = useState(false);
+  const [showTemplatePicker, setShowTemplatePicker] = useState(false);
   const [referenceImage, setReferenceImage] = useState<string | null>(null);
   const [imageScale, setImageScale] = useState(1);
   const [imageRotation, setImageRotation] = useState(0);
@@ -307,13 +308,62 @@ export default function ImageTab() {
 
       {/* Input */}
       <div style={{ padding: 12, background: 'var(--bg-secondary)', borderTop: '1px solid var(--border)' }}>
+        {/* 模板选择器 */}
+        <div style={{ marginBottom: 8 }}>
+          <button
+            onClick={() => setShowTemplatePicker(!showTemplatePicker)}
+            className="btn-secondary"
+            style={{ padding: '6px 12px', fontSize: 12, display: 'flex', alignItems: 'center', gap: 4 }}
+          >
+            <Wand2 size={14} /> 提示词模板
+          </button>
+          {showTemplatePicker && (
+            <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {PROMPT_TEMPLATES.map((t) => (
+                <button
+                  key={t.id}
+                  onClick={() => { setPrompt(t.prompt); setShowTemplatePicker(false); }}
+                  style={{
+                    padding: '6px 10px',
+                    background: 'var(--bg-tertiary)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 8,
+                    fontSize: 12,
+                    color: 'var(--text-secondary)',
+                  }}
+                >
+                  {t.name}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
         <div style={{ display: 'flex', gap: 8 }}>
           <input ref={fileInputRef} type="file" accept="image/*" onChange={handleFileSelect} style={{ display: 'none' }} />
           <button onClick={() => fileInputRef.current?.click()} className="btn-secondary" style={{ padding: 12 }} title="上传参考图"><Upload size={20} /></button>
           <input value={prompt} onChange={(e) => setPrompt(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleGenerate()} placeholder="描述你想生成的图片..." style={{ flex: 1 }} />
-          <button onClick={handleGenerate} disabled={isImageLoading || !prompt.trim()} className="btn-primary" style={{ padding: 12 }}>
-            {isImageLoading ? <Loader2 size={20} className="animate-spin" /> : <Sparkles size={20} />}
-          </button>
+          {isImageLoading ? (
+            <button
+              onClick={cancelImageRequest}
+              style={{
+                padding: 12,
+                background: 'var(--danger)',
+                border: 'none',
+                borderRadius: 12,
+                color: 'white',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <StopCircle size={20} />
+            </button>
+          ) : (
+            <button onClick={handleGenerate} disabled={!prompt.trim()} className="btn-primary" style={{ padding: 12 }}>
+              <Sparkles size={20} />
+            </button>
+          )}
         </div>
       </div>
 
