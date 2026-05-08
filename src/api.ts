@@ -365,8 +365,6 @@ async function generateOpenAIImage(apiKey: string, modelId: string, prompt: stri
     }
 
     const data = await resp.json();
-    console.log('OpenAI 图片响应:', data);
-
     const b64 = data?.data?.[0]?.b64_json;
     const url = data?.data?.[0]?.url;
 
@@ -410,7 +408,6 @@ async function generateGPT2Image(apiKey: string, prompt: string, ratio: string, 
     }
 
     const data = await resp.json();
-    console.log('GPT2 编辑响应:', data);
     const b64 = data?.data?.[0]?.b64_json;
     const url = data?.data?.[0]?.url;
     if (b64) return `data:image/png;base64,${b64}`;
@@ -434,7 +431,6 @@ async function generateGPT2Image(apiKey: string, prompt: string, ratio: string, 
   }
 
   const data = await resp.json();
-  console.log('GPT2 生成响应:', data);
   const b64 = data?.data?.[0]?.b64_json;
   const url = data?.data?.[0]?.url;
   if (b64) return `data:image/png;base64,${b64}`;
@@ -464,27 +460,31 @@ async function generateGeminiImage(apiKey: string, modelId: string, prompt: stri
     }
 
     const data = await resp.json();
-    console.log('Gemini 完整响应:', JSON.stringify(data, null, 2));
-
-    // 尝试多种可能的图片位置
     const content = data?.choices?.[0]?.message?.content;
-    console.log('Gemini content:', content);
+
+    if (!content) throw new Error('未返回内容');
 
     // 情况1: content 直接是图片 URL 或 base64
     if (typeof content === 'string') {
+      // 直接是 URL 或 base64
       if (content.startsWith('http')) return content;
       if (content.startsWith('data:image')) return content;
-      // 可能是纯文本，不是图片
-      console.log('Gemini 返回的是文本而非图片:', content);
+
+      // Markdown 格式: ![image](data:image/xxx;base64,...) 或 ![image](https://...)
+      const mdMatch = content.match(/!\[.*?\]\((data:image\/[^)]+)\)/);
+      if (mdMatch && mdMatch[1]) {
+        return mdMatch[1];
+      }
+      const mdUrlMatch = content.match(/!\[.*?\]\((https?:\/\/[^)]+)\)/);
+      if (mdUrlMatch && mdUrlMatch[1]) {
+        return mdUrlMatch[1];
+      }
     }
 
     // 情况2: content 是对象，包含 url 或 b64_json
     if (typeof content === 'object' && content !== null) {
       if (content.url) return content.url;
       if (content.b64_json) return `data:image/png;base64,${content.b64_json}`;
-      // 可能是嵌套结构
-      if (content.image_url) return content.image_url;
-      if (content.image) return content.image;
     }
 
     // 情况3: data.data 数组
@@ -493,18 +493,7 @@ async function generateGeminiImage(apiKey: string, modelId: string, prompt: stri
     if (b64) return `data:image/png;base64,${b64}`;
     if (url) return url;
 
-    // 情况4: 检查是否有其他图片字段
-    const possibleImageFields = ['image', 'image_url', 'imageUrl', 'output', 'result'];
-    for (const field of possibleImageFields) {
-      if (data?.[field] && typeof data[field] === 'string') {
-        if (data[field].startsWith('http') || data[field].startsWith('data:image')) {
-          return data[field];
-        }
-      }
-    }
-
-    console.log('无法从响应中提取图片，完整数据:', JSON.stringify(data, null, 2));
-    throw new Error('未返回图片，请检查控制台日志');
+    throw new Error('未返回图片');
   } catch (error) {
     if (error instanceof Error) throw error;
     throw new Error('网络请求失败');
