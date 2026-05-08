@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Image as ImageIcon, Sparkles, Trash2, Download, Upload, X, Maximize2, Clock, Sliders, AlertCircle, ZoomIn, ZoomOut, RotateCw, StopCircle, Wand2 } from 'lucide-react';
+import { Image as ImageIcon, Sparkles, Trash2, Download, Upload, X, Maximize2, Clock, Sliders, AlertCircle, ZoomIn, ZoomOut, RotateCw, StopCircle, Wand2, Mic } from 'lucide-react';
 import { useAppStore, IMAGE_MODELS, GPT2_RATIO_LABELS, GPT2_QUALITY_LABELS, getImageModelDef, PROMPT_TEMPLATES } from './store';
 import { generateImage, cancelImageRequest } from './api';
 import { t, Language } from './i18n';
@@ -21,8 +21,148 @@ export default function ImageTab() {
   const [searchQuery, setSearchQuery] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // 语音输入状态
+  const [isRecording, setIsRecording] = useState(false);
+  const [isVoiceMode, setIsVoiceMode] = useState(false);
+  const [voiceText, setVoiceText] = useState('');
+  const recognitionRef = useRef<any>(null);
+  const isRecordingRef = useRef(false);
+  const isPressingRef = useRef(false);
+
   const currentModel = getImageModelDef(imageModelId);
   const storageWarning = imageRecords.length >= 15;
+
+  // 创建新的 SpeechRecognition 实例
+  const createRecognition = () => {
+    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) return null;
+
+    const SpeechRecognition = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
+    const recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'zh-CN';
+
+    recognition.onresult = (event: any) => {
+      let finalTranscript = '';
+      let interimTranscript = '';
+
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const transcript = event.results[i][0].transcript;
+        if (event.results[i].isFinal) {
+          finalTranscript += transcript;
+        } else {
+          interimTranscript += transcript;
+        }
+      }
+
+      setVoiceText(prev => {
+        const newText = finalTranscript || interimTranscript || prev;
+        return newText;
+      });
+    };
+
+    recognition.onerror = (event: any) => {
+      console.error('语音识别错误:', event.error);
+      if (event.error === 'not-allowed') {
+        const msg = language === 'zh'
+          ? '请允许麦克风权限以使用语音功能。\n\n提示：将应用添加到主屏幕可持久化权限，避免每次重新授权。'
+          : 'Please allow microphone access to use voice input.\n\nTip: Add to home screen to persist permissions.';
+        alert(msg);
+      }
+      isRecordingRef.current = false;
+      setIsRecording(false);
+    };
+
+    recognition.onend = () => {
+      if (isRecordingRef.current) {
+        isRecordingRef.current = false;
+        setIsRecording(false);
+      }
+    };
+
+    return recognition;
+  };
+
+  // 进入语音模式
+  const enterVoiceMode = () => {
+    setIsVoiceMode(true);
+    setVoiceText('');
+    isRecordingRef.current = false;
+    recognitionRef.current = createRecognition();
+  };
+
+  // 退出语音模式
+  const exitVoiceMode = () => {
+    setIsVoiceMode(false);
+    setVoiceText('');
+    if (isRecordingRef.current && recognitionRef.current) {
+      isRecordingRef.current = false;
+      try {
+        recognitionRef.current.stop();
+      } catch {}
+    }
+    setIsRecording(false);
+  };
+
+  // 开始录音
+  const startRecording = () => {
+    if (isRecordingRef.current) return;
+    if (!recognitionRef.current) {
+      alert(language === 'zh' ? '您的浏览器不支持语音输入' : 'Voice input not supported');
+      return;
+    }
+
+    setVoiceText('');
+    isRecordingRef.current = true;
+    setIsRecording(true);
+
+    try {
+      recognitionRef.current.start();
+    } catch (e: any) {
+      if (e.name === 'InvalidStateError' || e.message?.includes('already started')) {
+        try {
+          recognitionRef.current.stop();
+        } catch {}
+        setTimeout(() => {
+          try {
+            if (isRecordingRef.current && recognitionRef.current) {
+              recognitionRef.current.start();
+            }
+          } catch (err) {
+            console.error('无法启动语音识别:', err);
+            isRecordingRef.current = false;
+            setIsRecording(false);
+          }
+        }, 150);
+      } else {
+        console.error('无法启动语音识别:', e);
+        isRecordingRef.current = false;
+        setIsRecording(false);
+      }
+    }
+  };
+
+  // 停止录音
+  const stopRecording = () => {
+    if (!isRecordingRef.current) return;
+    isRecordingRef.current = false;
+    setIsRecording(false);
+
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch {}
+    }
+  };
+
+  // 确认语音文字
+  const confirmVoiceText = () => {
+    if (voiceText.trim()) {
+      setPrompt(prev => prev ? prev + ' ' + voiceText.trim() : voiceText.trim());
+    }
+    setIsVoiceMode(false);
+    setVoiceText('');
+  };
 
   // 页面恢复时检查是否有未完成的请求
   useEffect(() => {
@@ -342,32 +482,162 @@ export default function ImageTab() {
           )}
         </div>
 
-        <div style={{ display: 'flex', gap: 8 }}>
-          <input ref={fileInputRef} type="file" accept="image/*" onChange={handleFileSelect} style={{ display: 'none' }} />
-          <button onClick={() => fileInputRef.current?.click()} className="btn-secondary" style={{ padding: 12 }} title={T('uploadReference')}><Upload size={20} /></button>
-          <input value={prompt} onChange={(e) => setPrompt(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleGenerate()} placeholder={T('describeImage')} style={{ flex: 1 }} />
-          {isImageLoading ? (
-            <button
-              onClick={cancelImageRequest}
+        {isVoiceMode ? (
+          /* 语音输入模式 */
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {/* 语音识别结果显示区 */}
+            <div
               style={{
-                padding: 12,
-                background: 'var(--danger)',
-                border: 'none',
-                borderRadius: 12,
-                color: 'white',
+                minHeight: 80,
+                padding: 16,
+                background: 'var(--bg-tertiary)',
+                borderRadius: 16,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
+                textAlign: 'center',
+                fontSize: voiceText ? 16 : 14,
+                color: voiceText ? 'var(--text-primary)' : 'var(--text-muted)',
               }}
             >
-              <StopCircle size={20} />
-            </button>
-          ) : (
-            <button onClick={handleGenerate} disabled={!prompt.trim()} className="btn-primary" style={{ padding: 12 }}>
-              <Sparkles size={20} />
-            </button>
-          )}
-        </div>
+              {isRecording ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <div className="voice-wave-container">
+                    <div className="voice-wave-bar" />
+                    <div className="voice-wave-bar" />
+                    <div className="voice-wave-bar" />
+                    <div className="voice-wave-bar" />
+                    <div className="voice-wave-bar" />
+                  </div>
+                  <span>{voiceText || (language === 'zh' ? '正在聆听...' : 'Listening...')}</span>
+                </div>
+              ) : (
+                voiceText || (language === 'zh' ? '长按下方按钮开始录音' : 'Long press the button below to start recording')
+              )}
+            </div>
+
+            {/* 操作按钮 */}
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
+              <button
+                onClick={exitVoiceMode}
+                style={{
+                  padding: '12px 24px',
+                  background: 'var(--bg-tertiary)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 12,
+                  color: 'var(--text-secondary)',
+                  fontSize: 14,
+                }}
+              >
+                {T('cancel')}
+              </button>
+
+              {/* 长按录音按钮 */}
+              <button
+                onTouchStart={(e) => {
+                  e.preventDefault();
+                  isPressingRef.current = true;
+                  startRecording();
+                }}
+                onTouchEnd={(e) => {
+                  e.preventDefault();
+                  if (isPressingRef.current) {
+                    isPressingRef.current = false;
+                    stopRecording();
+                  }
+                }}
+                onTouchCancel={() => {
+                  if (isPressingRef.current) {
+                    isPressingRef.current = false;
+                    stopRecording();
+                  }
+                }}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  isPressingRef.current = true;
+                  startRecording();
+                }}
+                onMouseUp={(e) => {
+                  e.preventDefault();
+                  if (isPressingRef.current) {
+                    isPressingRef.current = false;
+                    stopRecording();
+                  }
+                }}
+                onMouseLeave={() => {
+                  if (isPressingRef.current) {
+                    isPressingRef.current = false;
+                    stopRecording();
+                  }
+                }}
+                style={{
+                  flex: 1,
+                  padding: 14,
+                  background: isRecording ? 'var(--accent)' : 'var(--bg-tertiary)',
+                  border: isRecording ? 'none' : '1px solid var(--border)',
+                  borderRadius: 12,
+                  color: isRecording ? 'white' : 'var(--text-primary)',
+                  fontSize: 15,
+                  fontWeight: 500,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                  userSelect: 'none',
+                  WebkitUserSelect: 'none',
+                  touchAction: 'manipulation',
+                }}
+              >
+                <Mic size={20} />
+                {isRecording ? (language === 'zh' ? '松开结束' : 'Release to stop') : (language === 'zh' ? '按住说话' : 'Hold to speak')}
+              </button>
+
+              <button
+                onClick={confirmVoiceText}
+                disabled={!voiceText.trim()}
+                style={{
+                  padding: '12px 24px',
+                  background: voiceText.trim() ? 'var(--accent)' : 'var(--bg-tertiary)',
+                  border: 'none',
+                  borderRadius: 12,
+                  color: voiceText.trim() ? 'white' : 'var(--text-muted)',
+                  fontSize: 14,
+                }}
+              >
+                {language === 'zh' ? '确认' : 'Confirm'}
+              </button>
+            </div>
+          </div>
+        ) : (
+          /* 普通输入模式 */
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input ref={fileInputRef} type="file" accept="image/*" onChange={handleFileSelect} style={{ display: 'none' }} />
+            <button onClick={() => fileInputRef.current?.click()} className="btn-secondary" style={{ padding: 12 }} title={T('uploadReference')}><Upload size={20} /></button>
+            <button onClick={enterVoiceMode} className="btn-secondary" style={{ padding: 12 }} title={language === 'zh' ? '语音输入' : 'Voice input'}><Mic size={20} /></button>
+            <input value={prompt} onChange={(e) => setPrompt(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleGenerate()} placeholder={T('describeImage')} style={{ flex: 1 }} />
+            {isImageLoading ? (
+              <button
+                onClick={cancelImageRequest}
+                style={{
+                  padding: 12,
+                  background: 'var(--danger)',
+                  border: 'none',
+                  borderRadius: 12,
+                  color: 'white',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <StopCircle size={20} />
+              </button>
+            ) : (
+              <button onClick={handleGenerate} disabled={!prompt.trim()} className="btn-primary" style={{ padding: 12 }}>
+                <Sparkles size={20} />
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Image Preview Modal */}
