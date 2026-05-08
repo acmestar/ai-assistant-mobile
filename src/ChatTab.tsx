@@ -88,11 +88,16 @@ export default function ChatTab() {
 
     recognition.onerror = (event: any) => {
       console.error('语音识别错误:', event.error);
+      isRecordingRef.current = false;
       setIsRecording(false);
     };
 
     recognition.onend = () => {
-      setIsRecording(false);
+      // 只有在用户没有主动停止时才更新状态
+      if (isRecordingRef.current) {
+        isRecordingRef.current = false;
+        setIsRecording(false);
+      }
     };
 
     recognitionRef.current = recognition;
@@ -106,55 +111,73 @@ export default function ChatTab() {
   const enterVoiceMode = () => {
     setIsVoiceMode(true);
     setVoiceText('');
+    isRecordingRef.current = false;
   };
 
   // 退出语音模式
   const exitVoiceMode = () => {
     setIsVoiceMode(false);
     setVoiceText('');
-    if (isRecording && recognitionRef.current) {
-      recognitionRef.current.stop();
-      setIsRecording(false);
+    if (isRecordingRef.current && recognitionRef.current) {
+      isRecordingRef.current = false;
+      try {
+        recognitionRef.current.stop();
+      } catch {}
     }
+    setIsRecording(false);
   };
 
   // 开始录音（长按）
   const startRecording = () => {
-    if (isRecordingRef.current) return; // 防止重复调用
+    if (isRecordingRef.current) return;
     if (!recognitionRef.current) {
       alert(T('voiceNotSupported'));
       return;
     }
-    isRecordingRef.current = true;
+
     setVoiceText('');
+    isRecordingRef.current = true;
     setIsRecording(true);
+
     try {
       recognitionRef.current.start();
-    } catch (e) {
-      // 如果已经在运行，先停止再开始
-      try {
-        recognitionRef.current.stop();
-      } catch {}
-      setTimeout(() => {
+    } catch (e: any) {
+      // 如果已经在运行，需要先停止
+      if (e.name === 'InvalidStateError' || e.message?.includes('already started')) {
         try {
-          recognitionRef.current.start();
-        } catch (err) {
-          console.error('无法启动语音识别:', err);
-          setIsRecording(false);
-          isRecordingRef.current = false;
-        }
-      }, 100);
+          recognitionRef.current.stop();
+        } catch {}
+        // 等待停止后再启动
+        setTimeout(() => {
+          try {
+            if (isRecordingRef.current && recognitionRef.current) {
+              recognitionRef.current.start();
+            }
+          } catch (err) {
+            console.error('无法启动语音识别:', err);
+            isRecordingRef.current = false;
+            setIsRecording(false);
+          }
+        }, 150);
+      } else {
+        console.error('无法启动语音识别:', e);
+        isRecordingRef.current = false;
+        setIsRecording(false);
+      }
     }
   };
 
   // 停止录音（松开）
   const stopRecording = () => {
-    if (!isRecordingRef.current) return; // 防止重复调用
+    if (!isRecordingRef.current) return;
     isRecordingRef.current = false;
-    if (recognitionRef.current) {
-      recognitionRef.current.stop();
-    }
     setIsRecording(false);
+
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch {}
+    }
   };
 
   // 确认语音文字，填入输入框
