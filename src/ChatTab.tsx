@@ -153,9 +153,17 @@ export default function ChatTab() {
 
   // 创建新的 SpeechRecognition 实例
   const createRecognition = () => {
-    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) return null;
+    // 支持多种浏览器：Chrome/Safari 使用 webkitSpeechRecognition，Edge/Firefox 使用 SpeechRecognition
+    const SpeechRecognition = (window as any).SpeechRecognition
+      || (window as any).webkitSpeechRecognition
+      || (window as any).mozSpeechRecognition
+      || (window as any).msSpeechRecognition;
 
-    const SpeechRecognition = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
+    if (!SpeechRecognition) {
+      console.log('浏览器不支持语音识别');
+      return null;
+    }
+
     const recognition = new SpeechRecognition();
     recognition.continuous = true;
     recognition.interimResults = true;
@@ -213,7 +221,14 @@ export default function ChatTab() {
             : 'Cannot capture audio. Microphone may be occupied by another app.\n\nTry:\n1. Close other apps using microphone (e.g. WeChat voice)\n2. Wait a few seconds\n3. Or refresh the page');
         });
       } else if (event.error === 'network') {
-        alert(language === 'zh' ? '网络错误，请检查网络连接' : 'Network error, please check your connection');
+        const isEdge = /Edg/.test(navigator.userAgent);
+        if (isEdge) {
+          alert(language === 'zh'
+            ? '网络连接失败：Edge 浏览器的语音识别需要连接微软服务器。\n\n请尝试：\n1. 检查网络连接\n2. 关闭 VPN 或代理后重试\n3. 或使用 Chrome/Safari 浏览器'
+            : 'Network error: Edge voice recognition requires connection to Microsoft servers.\n\nTry:\n1. Check network connection\n2. Disable VPN or proxy\n3. Or use Chrome/Safari browser');
+        } else {
+          alert(language === 'zh' ? '网络错误，请检查网络连接' : 'Network error, please check your connection');
+        }
       } else if (event.error === 'aborted') {
         console.log('语音识别被中断');
       } else if (event.error === 'service-not-allowed') {
@@ -275,7 +290,14 @@ export default function ChatTab() {
   const startRecording = async () => {
     if (isRecordingRef.current) return;
     if (!recognitionRef.current) {
-      alert(T('voiceNotSupported'));
+      const isEdge = /Edg/.test(navigator.userAgent);
+      if (isEdge) {
+        alert(language === 'zh'
+          ? 'Edge 浏览器语音识别需要：\n1. 使用 HTTPS 连接\n2. 允许麦克风权限\n\n建议使用 Chrome 或 Safari 获得最佳体验'
+          : 'Edge voice recognition requires:\n1. HTTPS connection\n2. Microphone permission\n\nRecommend using Chrome or Safari for best experience');
+      } else {
+        alert(T('voiceNotSupported'));
+      }
       return;
     }
 
@@ -289,7 +311,9 @@ export default function ChatTab() {
 
     try {
       recognitionRef.current.start();
+      console.log('语音识别已启动');
     } catch (e: any) {
+      console.error('启动语音识别失败:', e.name, e.message);
       // 如果已经在运行，需要先停止
       if (e.name === 'InvalidStateError' || e.message?.includes('already started')) {
         try {
@@ -313,6 +337,13 @@ export default function ChatTab() {
         console.error('无法启动语音识别:', e);
         isRecordingRef.current = false;
         setIsRecording(false);
+        // 显示错误信息
+        const isEdge = /Edg/.test(navigator.userAgent);
+        if (isEdge && (e.name === 'NotAllowedError' || e.name === 'SecurityError')) {
+          alert(language === 'zh'
+            ? 'Edge 浏览器限制：请确保网站使用 HTTPS，并刷新页面后重试'
+            : 'Edge restriction: Please ensure HTTPS is used, refresh and try again');
+        }
       }
     }
   };
