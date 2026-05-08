@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { MessageSquare, Send, Trash2, Plus, ChevronLeft, Image as ImageIcon, X, Copy, Edit2, Check, Pencil, Search, StopCircle, Pin, PinOff, Download, Mic, MicOff } from 'lucide-react';
+import { MessageSquare, Send, Trash2, Plus, ChevronLeft, Image as ImageIcon, X, Copy, Edit2, Check, Pencil, Search, StopCircle, Pin, PinOff, Download, Mic } from 'lucide-react';
 import { useAppStore, CHAT_MODELS } from './store';
 import { sendChatMessageStream, cancelChatRequest } from './api';
 import { t, Language } from './i18n';
@@ -561,9 +561,20 @@ export default function ChatTab() {
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
+              minWidth: 44,
             }}
           >
-            {isRecording ? <MicOff size={20} /> : <Mic size={20} />}
+            {isRecording ? (
+              <div className="voice-wave-container">
+                <div className="voice-wave-bar" />
+                <div className="voice-wave-bar" />
+                <div className="voice-wave-bar" />
+                <div className="voice-wave-bar" />
+                <div className="voice-wave-bar" />
+              </div>
+            ) : (
+              <Mic size={20} />
+            )}
           </button>
 
           <input
