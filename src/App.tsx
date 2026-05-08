@@ -5,6 +5,7 @@ import { t, Language } from './i18n';
 import ChatTab from './ChatTab';
 import ImageTab from './ImageTab';
 import SettingsTab from './SettingsTab';
+import PWAInstallPrompt from './PWAInstallPrompt';
 
 export default function App() {
   const { activeTab, setActiveTab, apiKey, createConversation, currentConversationId, theme, language } = useAppStore();
@@ -52,6 +53,9 @@ export default function App() {
           <span>{T('settings')}</span>
         </button>
       </div>
+
+      {/* PWA Install Prompt */}
+      <PWAInstallPrompt />
     </div>
   );
 }

@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect } from 'react';
-import { Image as ImageIcon, Sparkles, Trash2, Download, Upload, X, Maximize2, Clock, Sliders, AlertCircle, ZoomIn, ZoomOut, RotateCw, StopCircle, Wand2, Mic } from 'lucide-react';
+import { Image as ImageIcon, Sparkles, Trash2, Download, Upload, X, Maximize2, Clock, Sliders, AlertCircle, ZoomIn, ZoomOut, RotateCw, StopCircle, Wand2, Mic, Share2 } from 'lucide-react';
 import { useAppStore, IMAGE_MODELS, GPT2_RATIO_LABELS, GPT2_QUALITY_LABELS, getImageModelDef, PROMPT_TEMPLATES } from './store';
 import { generateImage, cancelImageRequest } from './api';
 import { t, Language } from './i18n';
+import { hapticFeedback, shareImage } from './utils';
 
 export default function ImageTab() {
   const { imageModelId, setImageModelId, imageRatio, setImageRatio, imageQuality, setImageQuality, imageRecords, isImageLoading, deleteImageRecord, clearImageRecords, pendingImageRequest, setPendingImageRequest, language } = useAppStore();
@@ -424,7 +425,22 @@ export default function ImageTab() {
                     <Clock size={10} />{new Date(record.createdAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                   </div>
                 </div>
-                <button onClick={(e) => { e.stopPropagation(); deleteImageRecord(record.id); }} style={{ position: 'absolute', top: 4, right: 4, width: 24, height: 24, borderRadius: '50%', background: 'rgba(0,0,0,0.5)', border: 'none', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
+                {/* 分享按钮 */}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    hapticFeedback('light');
+                    shareImage(record.imageUrl, record.prompt);
+                  }}
+                  style={{ position: 'absolute', top: 4, left: 4, width: 24, height: 24, borderRadius: '50%', background: 'rgba(0,0,0,0.5)', border: 'none', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+                >
+                  <Share2 size={12} />
+                </button>
+                {/* 删除按钮 */}
+                <button
+                  onClick={(e) => { e.stopPropagation(); hapticFeedback('medium'); deleteImageRecord(record.id); }}
+                  style={{ position: 'absolute', top: 4, right: 4, width: 24, height: 24, borderRadius: '50%', background: 'rgba(0,0,0,0.5)', border: 'none', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+                >
                   <X size={12} />
                 </button>
               </div>

@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { MessageSquare, Send, Trash2, Plus, ChevronLeft, Image as ImageIcon, X, Copy, Edit2, Check, Pencil, Search, StopCircle, Pin, PinOff, Download, Mic } from 'lucide-react';
+import { MessageSquare, Send, Trash2, Plus, ChevronLeft, Image as ImageIcon, X, Copy, Edit2, Check, Pencil, Search, StopCircle, Pin, PinOff, Download, Mic, Share2 } from 'lucide-react';
 import { useAppStore, CHAT_MODELS } from './store';
 import { sendChatMessageStream, cancelChatRequest } from './api';
 import { t, Language } from './i18n';
+import { hapticFeedback, shareConversation } from './utils';
 import ReactMarkdown from 'react-markdown';
 
 const SCROLL_POSITION_KEY = 'chat-scroll-position';
@@ -185,6 +186,7 @@ export default function ChatTab() {
       return;
     }
 
+    hapticFeedback('medium'); // 开始录音震动反馈
     setVoiceText('');
     isRecordingRef.current = true;
     setIsRecording(true);
@@ -220,6 +222,7 @@ export default function ChatTab() {
   // 停止录音（松开）
   const stopRecording = () => {
     if (!isRecordingRef.current) return;
+    hapticFeedback('light'); // 停止录音震动反馈
     isRecordingRef.current = false;
     setIsRecording(false);
 
@@ -232,6 +235,7 @@ export default function ChatTab() {
 
   // 确认语音文字，填入输入框
   const confirmVoiceText = () => {
+    hapticFeedback('medium');
     if (voiceText.trim()) {
       setInput(prev => prev ? prev + ' ' + voiceText.trim() : voiceText.trim());
     }
@@ -970,19 +974,29 @@ export default function ChatTab() {
                 {renamingConversationId !== conv.id && (
                   <div style={{ display: 'flex', gap: 4 }}>
                     <button
-                      onClick={(e) => { e.stopPropagation(); pinConversation(conv.id, !conv.pinned); }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        hapticFeedback('light');
+                        shareConversation(conv.title, conv.messages);
+                      }}
+                      style={{ padding: 8, color: 'var(--text-muted)', background: 'transparent' }}
+                    >
+                      <Share2 size={14} />
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); hapticFeedback('light'); pinConversation(conv.id, !conv.pinned); }}
                       style={{ padding: 8, color: conv.pinned ? 'var(--accent)' : 'var(--text-muted)', background: 'transparent' }}
                     >
                       {conv.pinned ? <PinOff size={14} /> : <Pin size={14} />}
                     </button>
                     <button
-                      onClick={(e) => { e.stopPropagation(); handleStartRename(conv.id, conv.title); }}
+                      onClick={(e) => { e.stopPropagation(); hapticFeedback('light'); handleStartRename(conv.id, conv.title); }}
                       style={{ padding: 8, color: 'var(--text-muted)', background: 'transparent' }}
                     >
                       <Pencil size={14} />
                     </button>
                     <button
-                      onClick={(e) => { e.stopPropagation(); deleteConversation(conv.id); }}
+                      onClick={(e) => { e.stopPropagation(); hapticFeedback('medium'); deleteConversation(conv.id); }}
                       style={{ padding: 8, color: 'var(--text-muted)', background: 'transparent' }}
                     >
                       <Trash2 size={16} />
