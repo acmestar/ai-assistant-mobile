@@ -52,6 +52,7 @@ export default function ChatTab() {
   const shouldScrollToBottomRef = useRef(false);
   const recognitionRef = useRef<any>(null);
   const isRecordingRef = useRef(false); // 用于防止重复触发
+  const isPressingRef = useRef(false); // 追踪鼠标/触摸按压状态
 
   const conversation = getCurrentConversation();
   const currentModel = CHAT_MODELS.find((m) => m.id === chatModelId);
@@ -670,23 +671,42 @@ export default function ChatTab() {
 
               {/* 长按录音按钮 */}
               <button
-                onTouchStart={(e) => { e.preventDefault(); startRecording(); }}
-                onTouchEnd={(e) => { e.preventDefault(); stopRecording(); }}
-                onTouchCancel={stopRecording}
-                onMouseDown={(e) => {
-                  // 只在非触摸设备上响应鼠标事件
-                  if (!('ontouchstart' in window)) {
-                    e.preventDefault();
-                    startRecording();
-                  }
+                onTouchStart={(e) => {
+                  e.preventDefault();
+                  isPressingRef.current = true;
+                  startRecording();
                 }}
-                onMouseUp={(e) => {
-                  if (!('ontouchstart' in window)) {
-                    e.preventDefault();
+                onTouchEnd={(e) => {
+                  e.preventDefault();
+                  if (isPressingRef.current) {
+                    isPressingRef.current = false;
                     stopRecording();
                   }
                 }}
-                onMouseLeave={() => isRecordingRef.current && stopRecording()}
+                onTouchCancel={() => {
+                  if (isPressingRef.current) {
+                    isPressingRef.current = false;
+                    stopRecording();
+                  }
+                }}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  isPressingRef.current = true;
+                  startRecording();
+                }}
+                onMouseUp={(e) => {
+                  e.preventDefault();
+                  if (isPressingRef.current) {
+                    isPressingRef.current = false;
+                    stopRecording();
+                  }
+                }}
+                onMouseLeave={() => {
+                  if (isPressingRef.current) {
+                    isPressingRef.current = false;
+                    stopRecording();
+                  }
+                }}
                 style={{
                   flex: 1,
                   padding: 14,
