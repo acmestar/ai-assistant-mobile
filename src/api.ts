@@ -185,6 +185,8 @@ export async function sendChatMessageStream(
     if (outputTokens === 0) {
       outputTokens = Math.ceil(fullContent.length / 4);
     }
+
+    console.log('Token 统计:', { inputTokens, outputTokens, fullContentLength: fullContent.length });
     addTokenUsage(inputTokens, outputTokens);
 
     addMessage(fullContent, 'assistant');

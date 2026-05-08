@@ -306,10 +306,12 @@ export const useAppStore = create<AppState>()(
       // Token 统计
       tokenUsage: [],
       addTokenUsage: (inputTokens, outputTokens) => set((state) => {
+        console.log('addTokenUsage 被调用:', { inputTokens, outputTokens });
         const newUsage: TokenUsage = { inputTokens, outputTokens, timestamp: Date.now() };
         const usages = [newUsage, ...state.tokenUsage].slice(0, 100); // 保留最近100条
         const totalInput = usages.reduce((sum, u) => sum + u.inputTokens, 0);
         const totalOutput = usages.reduce((sum, u) => sum + u.outputTokens, 0);
+        console.log('Token 总计:', { totalInput, totalOutput, count: usages.length });
         return { tokenUsage: usages, totalInputTokens: totalInput, totalOutputTokens: totalOutput };
       }),
       totalInputTokens: 0,
