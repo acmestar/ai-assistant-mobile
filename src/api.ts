@@ -146,13 +146,18 @@ export async function sendChatMessageStream(
     let fullContent = '';
     let inputTokens = 0;
     let outputTokens = 0;
+    let buffer = ''; // 用于存储不完整的数据
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
 
-      const chunk = decoder.decode(value, { stream: true });
-      const lines = chunk.split('\n');
+      // 将新数据追加到缓冲区
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+
+      // 保留最后一个可能不完整的行
+      buffer = lines.pop() || '';
 
       for (const line of lines) {
         if (line.startsWith('data: ')) {
@@ -174,6 +179,23 @@ export async function sendChatMessageStream(
           } catch {
             // 忽略解析错误
           }
+        }
+      }
+    }
+
+    // 处理缓冲区中剩余的数据
+    if (buffer.startsWith('data: ')) {
+      const data = buffer.slice(6);
+      if (data !== '[DONE]') {
+        try {
+          const parsed = JSON.parse(data);
+          const content = parsed.choices?.[0]?.delta?.content || '';
+          if (content) {
+            fullContent += content;
+            onChunk?.(content);
+          }
+        } catch {
+          // 忽略解析错误
         }
       }
     }
