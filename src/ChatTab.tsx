@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { MessageSquare, Send, Trash2, Plus, ChevronLeft, Image as ImageIcon, X, Loader2 } from 'lucide-react';
+import { MessageSquare, Send, Trash2, Plus, ChevronLeft, Image as ImageIcon, X, Loader2, Copy, Edit2, Check, Pencil } from 'lucide-react';
 import { useAppStore, CHAT_MODELS } from './store';
-import { sendChatMessage } from './api';
+import { sendChatMessageStream } from './api';
 import ReactMarkdown from 'react-markdown';
 
 const SCROLL_POSITION_KEY = 'chat-scroll-position';
@@ -19,6 +19,9 @@ export default function ChatTab() {
     deleteConversation,
     pendingChatRequest,
     setPendingChatRequest,
+    editMessage,
+    deleteMessage,
+    renameConversation,
   } = useAppStore();
 
   const [input, setInput] = useState('');
@@ -26,6 +29,12 @@ export default function ChatTab() {
   const [showModelPicker, setShowModelPicker] = useState(false);
   const [attachedImage, setAttachedImage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [editingContent, setEditingContent] = useState('');
+  const [renamingConversationId, setRenamingConversationId] = useState<string | null>(null);
+  const [renamingTitle, setRenamingTitle] = useState('');
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
+  const [streamingContent, setStreamingContent] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -45,7 +54,7 @@ export default function ChatTab() {
           setError(null);
           shouldScrollToBottomRef.current = true;
           try {
-            await sendChatMessage(userMessage, imageBase64);
+            await sendChatMessageStream(userMessage, imageBase64);
           } catch (e) {
             setError(String(e));
           }
@@ -64,7 +73,7 @@ export default function ChatTab() {
       setError(null);
       shouldScrollToBottomRef.current = true;
       setPendingChatRequest(null);
-      sendChatMessage(userMessage, imageBase64).catch((e) => setError(String(e)));
+      sendChatMessageStream(userMessage, imageBase64).catch((e: Error) => setError(String(e)));
     }
   }, []);
 
@@ -142,8 +151,13 @@ export default function ChatTab() {
     shouldScrollToBottomRef.current = true;
 
     try {
-      await sendChatMessage(messageText || '请描述这张图片', imageToSend || undefined);
+      await sendChatMessageStream(messageText || '请描述这张图片', imageToSend || undefined, (chunk) => {
+        setStreamingContent(prev => prev + chunk);
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      });
+      setStreamingContent('');
     } catch (e) {
+      setStreamingContent('');
       setError(String(e));
     }
   };
@@ -162,6 +176,54 @@ export default function ChatTab() {
   const handleNewChat = () => {
     createConversation();
     setShowSidebar(false);
+  };
+
+  const handleCopyMessage = (messageId: string, content: string) => {
+    navigator.clipboard.writeText(content);
+    setCopiedMessageId(messageId);
+    setTimeout(() => setCopiedMessageId(null), 2000);
+  };
+
+  const handleStartEdit = (messageId: string, content: string) => {
+    setEditingMessageId(messageId);
+    setEditingContent(content);
+  };
+
+  const handleSaveEdit = () => {
+    if (editingMessageId && editingContent.trim()) {
+      editMessage(editingMessageId, editingContent.trim());
+      setEditingMessageId(null);
+      setEditingContent('');
+    }
+  };
+
+  const handleCancelEdit = () => {
+    setEditingMessageId(null);
+    setEditingContent('');
+  };
+
+  const handleDeleteMessage = (messageId: string) => {
+    if (confirm('确定删除这条消息？')) {
+      deleteMessage(messageId);
+    }
+  };
+
+  const handleStartRename = (conversationId: string, currentTitle: string) => {
+    setRenamingConversationId(conversationId);
+    setRenamingTitle(currentTitle);
+  };
+
+  const handleSaveRename = () => {
+    if (renamingConversationId && renamingTitle.trim()) {
+      renameConversation(renamingConversationId, renamingTitle.trim());
+      setRenamingConversationId(null);
+      setRenamingTitle('');
+    }
+  };
+
+  const handleCancelRename = () => {
+    setRenamingConversationId(null);
+    setRenamingTitle('');
   };
 
   if (!conversation) {
@@ -257,21 +319,69 @@ export default function ChatTab() {
         )}
 
         {conversation.messages.map((msg) => (
-          <div key={msg.id} style={{ display: 'flex', justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
+          <div key={msg.id} style={{ display: 'flex', flexDirection: 'column', alignItems: msg.role === 'user' ? 'flex-end' : 'flex-start', gap: 4 }}>
             <div className={`message ${msg.role}`}>
               {msg.imageUrl && (
                 <img src={msg.imageUrl} alt="" style={{ maxWidth: '100%', borderRadius: 8, marginBottom: 8 }} />
               )}
-              {msg.role === 'assistant' ? (
+              {editingMessageId === msg.id ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%' }}>
+                  <textarea
+                    value={editingContent}
+                    onChange={(e) => setEditingContent(e.target.value)}
+                    style={{ width: '100%', minHeight: 60, resize: 'vertical' }}
+                  />
+                  <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                    <button onClick={handleCancelEdit} className="btn-secondary" style={{ padding: '4px 12px', fontSize: 12 }}>取消</button>
+                    <button onClick={handleSaveEdit} className="btn-primary" style={{ padding: '4px 12px', fontSize: 12 }}>保存</button>
+                  </div>
+                </div>
+              ) : msg.role === 'assistant' ? (
                 <ReactMarkdown>{msg.content}</ReactMarkdown>
               ) : (
                 msg.content
               )}
             </div>
+            {/* 消息操作按钮 */}
+            {!editingMessageId && (
+              <div style={{ display: 'flex', gap: 4, opacity: 0.6 }}>
+                {msg.role === 'assistant' && (
+                  <button
+                    onClick={() => handleCopyMessage(msg.id, msg.content)}
+                    style={{ padding: 4, background: 'transparent', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4, fontSize: 11 }}
+                  >
+                    {copiedMessageId === msg.id ? <Check size={12} /> : <Copy size={12} />}
+                    {copiedMessageId === msg.id ? '已复制' : '复制'}
+                  </button>
+                )}
+                {msg.role === 'user' && (
+                  <button
+                    onClick={() => handleStartEdit(msg.id, msg.content)}
+                    style={{ padding: 4, background: 'transparent', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4, fontSize: 11 }}
+                  >
+                    <Edit2 size={12} /> 编辑
+                  </button>
+                )}
+                <button
+                  onClick={() => handleDeleteMessage(msg.id)}
+                  style={{ padding: 4, background: 'transparent', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4, fontSize: 11 }}
+                >
+                  <Trash2 size={12} /> 删除
+                </button>
+              </div>
+            )}
           </div>
         ))}
 
-        {isChatLoading && (
+        {isChatLoading && streamingContent && (
+          <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
+            <div className="message assistant">
+              <ReactMarkdown>{streamingContent}</ReactMarkdown>
+            </div>
+          </div>
+        )}
+
+        {isChatLoading && !streamingContent && (
           <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
             <div className="message assistant">
               <div className="loading-dots">
@@ -395,8 +505,10 @@ export default function ChatTab() {
               <div
                 key={conv.id}
                 onClick={() => {
-                  useAppStore.setState({ currentConversationId: conv.id });
-                  setShowSidebar(false);
+                  if (renamingConversationId !== conv.id) {
+                    useAppStore.setState({ currentConversationId: conv.id });
+                    setShowSidebar(false);
+                  }
                 }}
                 style={{
                   padding: '12px 16px',
@@ -409,18 +521,48 @@ export default function ChatTab() {
                   alignItems: 'center',
                 }}
               >
-                <div>
-                  <div style={{ fontSize: 15, marginBottom: 2 }}>{conv.title}</div>
-                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                    {conv.messages.length} 条消息
-                  </div>
+                <div style={{ flex: 1, marginRight: 8 }}>
+                  {renamingConversationId === conv.id ? (
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }} onClick={(e) => e.stopPropagation()}>
+                      <input
+                        value={renamingTitle}
+                        onChange={(e) => setRenamingTitle(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleSaveRename();
+                          if (e.key === 'Escape') handleCancelRename();
+                        }}
+                        style={{ flex: 1, padding: '8px 12px', fontSize: 14 }}
+                        autoFocus
+                      />
+                      <button onClick={handleSaveRename} className="btn-primary" style={{ padding: '4px 8px' }}>
+                        <Check size={14} />
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <div style={{ fontSize: 15, marginBottom: 2 }}>{conv.title}</div>
+                      <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                        {conv.messages.length} 条消息
+                      </div>
+                    </>
+                  )}
                 </div>
-                <button
-                  onClick={(e) => { e.stopPropagation(); deleteConversation(conv.id); }}
-                  style={{ padding: 8, color: 'var(--text-muted)', background: 'transparent' }}
-                >
-                  <Trash2 size={16} />
-                </button>
+                {renamingConversationId !== conv.id && (
+                  <div style={{ display: 'flex', gap: 4 }}>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleStartRename(conv.id, conv.title); }}
+                      style={{ padding: 8, color: 'var(--text-muted)', background: 'transparent' }}
+                    >
+                      <Pencil size={14} />
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); deleteConversation(conv.id); }}
+                      style={{ padding: 8, color: 'var(--text-muted)', background: 'transparent' }}
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                )}
               </div>
             ))}
 

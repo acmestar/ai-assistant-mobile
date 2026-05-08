@@ -235,6 +235,9 @@ interface AppState {
   createConversation: () => string;
   getCurrentConversation: () => Conversation | null;
   addMessage: (content: string, role: 'user' | 'assistant', imageUrl?: string) => void;
+  editMessage: (messageId: string, content: string) => void;
+  deleteMessage: (messageId: string) => void;
+  renameConversation: (id: string, title: string) => void;
   clearConversation: () => void;
   deleteConversation: (id: string) => void;
   addImageRecord: (record: Omit<ImageRecord, 'id' | 'createdAt'>) => void;
@@ -326,6 +329,46 @@ export const useAppStore = create<AppState>()(
               : c.title;
             return { ...c, messages: updatedMessages, title };
           }),
+        });
+      },
+
+      editMessage: (messageId, content) => {
+        const { currentConversationId, conversations } = get();
+        if (!currentConversationId) return;
+
+        set({
+          conversations: conversations.map((c) => {
+            if (c.id !== currentConversationId) return c;
+            return {
+              ...c,
+              messages: c.messages.map((m) =>
+                m.id === messageId ? { ...m, content } : m
+              ),
+            };
+          }),
+        });
+      },
+
+      deleteMessage: (messageId) => {
+        const { currentConversationId, conversations } = get();
+        if (!currentConversationId) return;
+
+        set({
+          conversations: conversations.map((c) => {
+            if (c.id !== currentConversationId) return c;
+            return {
+              ...c,
+              messages: c.messages.filter((m) => m.id !== messageId),
+            };
+          }),
+        });
+      },
+
+      renameConversation: (id, title) => {
+        set({
+          conversations: get().conversations.map((c) =>
+            c.id === id ? { ...c, title } : c
+          ),
         });
       },
 

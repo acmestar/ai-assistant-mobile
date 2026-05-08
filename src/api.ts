@@ -2,23 +2,48 @@ import { useAppStore, CHAT_MODELS, OPENAI_SIZE_MAP, GPT2_SIZE_MAP, OPENAI_QUALIT
 
 const API_BASE = 'https://ai.acmestar.top/api';
 
+// 重试机制
+async function fetchWithRetry(url: string, options: RequestInit, timeout: number = 120000, retries: number = 2): Promise<Response> {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const response = await fetchWithTimeout(url, options, timeout);
+      return response;
+    } catch (error) {
+      if (attempt === retries) throw error;
+      // 等待一段时间后重试
+      await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+      console.log(`请求失败，第 ${attempt + 1} 次重试...`);
+    }
+  }
+  throw new Error('请求失败');
+}
+
 function fetchWithTimeout(url: string, options: RequestInit, timeout: number = 120000): Promise<Response> {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('请求超时')), timeout);
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      controller.abort();
+      reject(new Error('请求超时，请检查网络连接'));
+    }, timeout);
 
     const fetchOptions: RequestInit = {
       ...options,
       mode: 'cors',
       cache: 'no-cache',
+      signal: controller.signal,
     };
 
     fetch(url, fetchOptions)
-      .then((response) => { clearTimeout(timer); resolve(response); })
+      .then((response) => {
+        clearTimeout(timer);
+        resolve(response);
+      })
       .catch((error) => {
         clearTimeout(timer);
-        // 提供更详细的错误信息
         const errorMsg = error.message || String(error);
-        if (errorMsg.includes('Failed to fetch') || errorMsg.includes('NetworkError') || errorMsg.includes('Network request failed')) {
+        if (error.name === 'AbortError') {
+          reject(new Error('请求超时，请检查网络连接'));
+        } else if (errorMsg.includes('Failed to fetch') || errorMsg.includes('NetworkError') || errorMsg.includes('Network request failed')) {
           reject(new Error('网络连接失败，请检查网络设置或尝试切换网络'));
         } else if (errorMsg.includes('CORS') || errorMsg.includes('cross-origin')) {
           reject(new Error('跨域请求被拦截，请尝试使用其他浏览器'));
@@ -27,6 +52,99 @@ function fetchWithTimeout(url: string, options: RequestInit, timeout: number = 1
         }
       });
   });
+}
+
+// 流式输出聊天消息
+export async function sendChatMessageStream(
+  userMessage: string,
+  imageBase64?: string,
+  onChunk?: (chunk: string) => void
+): Promise<string> {
+  const { apiKey, chatModelId, addMessage, setIsChatLoading, setPendingChatRequest, currentConversationId } = useAppStore.getState();
+  if (!apiKey) throw new Error('请先设置 API Key');
+
+  const model = CHAT_MODELS.find((m) => m.id === chatModelId) || CHAT_MODELS[0];
+  addMessage(userMessage, 'user', imageBase64);
+  setIsChatLoading(true);
+
+  if (currentConversationId) {
+    setPendingChatRequest({ conversationId: currentConversationId, userMessage, imageBase64 });
+  }
+
+  try {
+    const conversation = useAppStore.getState().getCurrentConversation();
+    if (!conversation) throw new Error('没有当前对话');
+
+    const messages: Array<{ role: string; content: string | Array<{ type: string; text?: string; image_url?: { url: string } }> }> = [];
+
+    for (const msg of conversation.messages) {
+      if (msg.role === 'user' && msg.imageUrl) {
+        messages.push({ role: 'user', content: [{ type: 'text', text: msg.content }, { type: 'image_url', image_url: { url: msg.imageUrl } }] });
+      } else {
+        messages.push({ role: msg.role, content: msg.content });
+      }
+    }
+
+    if (imageBase64) {
+      messages[messages.length - 1] = { role: 'user', content: [{ type: 'text', text: userMessage }, { type: 'image_url', image_url: { url: imageBase64 } }] };
+    }
+
+    const resp = await fetch(`${API_BASE}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({ model: model.id, messages, max_tokens: 8192, stream: true }),
+    });
+
+    if (!resp.ok) {
+      const err = await resp.text();
+      throw new Error(`API 错误: ${resp.status} ${err.slice(0, 200)}`);
+    }
+
+    const reader = resp.body?.getReader();
+    if (!reader) throw new Error('无法读取响应流');
+
+    const decoder = new TextDecoder();
+    let fullContent = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      const chunk = decoder.decode(value, { stream: true });
+      const lines = chunk.split('\n');
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const data = line.slice(6);
+          if (data === '[DONE]') continue;
+
+          try {
+            const parsed = JSON.parse(data);
+            const content = parsed.choices?.[0]?.delta?.content || '';
+            if (content) {
+              fullContent += content;
+              onChunk?.(content);
+            }
+          } catch {
+            // 忽略解析错误
+          }
+        }
+      }
+    }
+
+    addMessage(fullContent, 'assistant');
+    setPendingChatRequest(null);
+    return fullContent;
+  } catch (error) {
+    if (error instanceof Error && (error.name === 'AbortError' || error.message.includes('abort') || error.message.includes('network'))) {
+      console.log('请求被中断，等待页面恢复');
+      return '';
+    }
+    setPendingChatRequest(null);
+    throw error;
+  } finally {
+    setIsChatLoading(false);
+  }
 }
 
 export async function sendChatMessage(userMessage: string, imageBase64?: string): Promise<string> {
@@ -60,13 +178,11 @@ export async function sendChatMessage(userMessage: string, imageBase64?: string)
       messages[messages.length - 1] = { role: 'user', content: [{ type: 'text', text: userMessage }, { type: 'image_url', image_url: { url: imageBase64 } }] };
     }
 
-    const resp = await fetch(`${API_BASE}/chat/completions`, {
+    const resp = await fetchWithRetry(`${API_BASE}/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({ model: model.id, messages, max_tokens: 8192 }),
-      mode: 'cors',
-      cache: 'no-cache',
-    });
+    }, 60000, 2);
 
     if (!resp.ok) {
       const err = await resp.text();
