@@ -721,7 +721,7 @@ export default function ChatTab() {
                   fontSize: 14,
                 }}
               >
-                {T('send')}
+                {language === 'zh' ? '确认' : 'Confirm'}
               </button>
             </div>
           </div>
