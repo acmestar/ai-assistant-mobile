@@ -96,6 +96,7 @@ export default function ChatTab() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null); // 输入框引用
   const prevMessagesLengthRef = useRef(0);
   const shouldScrollToBottomRef = useRef(false);
   const recognitionRef = useRef<any>(null);
@@ -105,6 +106,21 @@ export default function ChatTab() {
 
   const conversation = getCurrentConversation();
   const currentModel = CHAT_MODELS.find((m) => m.id === chatModelId);
+
+  // 自适应输入框高度
+  const adjustTextareaHeight = () => {
+    const textarea = inputRef.current;
+    if (textarea) {
+      textarea.style.height = 'auto';
+      const newHeight = Math.min(textarea.scrollHeight, 120); // 最大高度120px
+      textarea.style.height = newHeight + 'px';
+    }
+  };
+
+  // 输入变化时调整高度
+  useEffect(() => {
+    adjustTextareaHeight();
+  }, [input]);
 
   // 释放音频设备
   const releaseAudioDevice = async () => {
@@ -1053,12 +1069,28 @@ export default function ChatTab() {
               <Zap size={20} />
             </button>
 
-            <input
+            <textarea
+              ref={inputRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSend()}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSend();
+                }
+              }}
               placeholder={T('inputMessage')}
-              style={{ flex: 1, borderRadius: 20 }}
+              rows={1}
+              style={{
+                flex: 1,
+                borderRadius: 20,
+                resize: 'none',
+                minHeight: 44,
+                maxHeight: 120,
+                padding: '12px 16px',
+                lineHeight: 1.4,
+                overflowY: 'auto',
+              }}
             />
 
             {isChatLoading ? (
@@ -1136,6 +1168,14 @@ export default function ChatTab() {
                   hapticFeedback('light');
                   setInput(phrase.text);
                   setShowQuickPhrases(false);
+                  // 聚焦输入框并将光标移到最后
+                  setTimeout(() => {
+                    const textarea = inputRef.current;
+                    if (textarea) {
+                      textarea.focus();
+                      textarea.setSelectionRange(phrase.text.length, phrase.text.length);
+                    }
+                  }, 0);
                 }}
                 style={{
                   padding: '10px 14px',
