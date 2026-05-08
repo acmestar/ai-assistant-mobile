@@ -420,13 +420,14 @@ async function generateGeminiImage(apiKey: string, modelId: string, prompt: stri
     messages.push({ role: 'user', content: prompt });
   }
 
-  const resp = await fetchWithTimeout(`${API_BASE}/chat/completions`, {
+  const resp = await fetch(`${API_BASE}/chat/completions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({ model: modelId, messages, max_tokens: 4096 }),
     mode: 'cors',
     cache: 'no-cache',
-  }, 180000, imageAbortController?.signal);
+    signal: imageAbortController?.signal,
+  });
 
   if (!resp.ok) {
     const err = await resp.text();
