@@ -266,10 +266,24 @@ export default function ImageTab() {
             <p>未找到匹配的图片</p>
           </div>
         ) : !isImageLoading && (
-          <div style={{ textAlign: 'center', color: 'var(--text-muted)', marginTop: 60, padding: 20 }}>
-            <ImageIcon size={48} strokeWidth={1.5} style={{ marginBottom: 16, opacity: 0.5 }} />
-            <p style={{ fontSize: 16 }}>输入描述生成图片</p>
-            <p style={{ fontSize: 13, marginTop: 8 }}>可上传参考图辅助生成</p>
+          <div style={{ textAlign: 'center', marginTop: 80, padding: 40 }}>
+            <div style={{
+              width: 80,
+              height: 80,
+              borderRadius: '50%',
+              background: 'var(--accent-dim)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              margin: '0 auto 24px',
+            }}>
+              <ImageIcon size={36} strokeWidth={1.5} style={{ color: 'var(--accent)' }} />
+            </div>
+            <p style={{ marginBottom: 12, fontSize: 18, fontWeight: 500, color: 'var(--text-primary)' }}>生成图片</p>
+            <p style={{ fontSize: 14, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+              输入描述让 AI 为你创作<br />
+              可上传参考图辅助生成
+            </p>
           </div>
         )}
 

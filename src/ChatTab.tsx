@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { MessageSquare, Send, Trash2, Plus, ChevronLeft, Image as ImageIcon, X, Loader2, Copy, Edit2, Check, Pencil } from 'lucide-react';
+import { MessageSquare, Send, Trash2, Plus, ChevronLeft, Image as ImageIcon, X, Loader2, Copy, Edit2, Check, Pencil, Search } from 'lucide-react';
 import { useAppStore, CHAT_MODELS } from './store';
 import { sendChatMessageStream } from './api';
 import ReactMarkdown from 'react-markdown';
@@ -19,7 +19,6 @@ export default function ChatTab() {
     deleteConversation,
     pendingChatRequest,
     setPendingChatRequest,
-    editMessage,
     deleteMessage,
     renameConversation,
   } = useAppStore();
@@ -35,6 +34,7 @@ export default function ChatTab() {
   const [renamingTitle, setRenamingTitle] = useState('');
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [streamingContent, setStreamingContent] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -189,11 +189,19 @@ export default function ChatTab() {
     setEditingContent(content);
   };
 
-  const handleSaveEdit = () => {
+  const handleSaveEdit = async () => {
     if (editingMessageId && editingContent.trim()) {
-      editMessage(editingMessageId, editingContent.trim());
+      // 删除原消息
+      deleteMessage(editingMessageId);
       setEditingMessageId(null);
       setEditingContent('');
+      // 重新发送
+      shouldScrollToBottomRef.current = true;
+      try {
+        await sendChatMessageStream(editingContent.trim());
+      } catch (e) {
+        setError(String(e));
+      }
     }
   };
 
@@ -311,10 +319,24 @@ export default function ChatTab() {
       {/* Messages */}
       <div ref={messagesContainerRef} style={{ flex: 1, overflow: 'auto', padding: 16, display: 'flex', flexDirection: 'column', gap: 12, background: 'var(--bg-primary)' }}>
         {conversation.messages.length === 0 && (
-          <div style={{ textAlign: 'center', color: 'var(--text-muted)', marginTop: 60, padding: 20 }}>
-            <MessageSquare size={48} strokeWidth={1.5} style={{ marginBottom: 16, opacity: 0.5 }} />
-            <p style={{ marginBottom: 8, fontSize: 16 }}>发送消息开始对话</p>
-            <p style={{ fontSize: 13 }}>支持超长上下文，可发送图片</p>
+          <div style={{ textAlign: 'center', marginTop: 80, padding: 40 }}>
+            <div style={{
+              width: 80,
+              height: 80,
+              borderRadius: '50%',
+              background: 'var(--accent-dim)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              margin: '0 auto 24px',
+            }}>
+              <MessageSquare size={36} strokeWidth={1.5} style={{ color: 'var(--accent)' }} />
+            </div>
+            <p style={{ marginBottom: 12, fontSize: 18, fontWeight: 500, color: 'var(--text-primary)' }}>开始新对话</p>
+            <p style={{ fontSize: 14, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+              输入消息开始与 AI 交流<br />
+              支持超长上下文，可发送图片
+            </p>
           </div>
         )}
 
@@ -332,8 +354,10 @@ export default function ChatTab() {
                     style={{ width: '100%', minHeight: 60, resize: 'vertical' }}
                   />
                   <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-                    <button onClick={handleCancelEdit} className="btn-secondary" style={{ padding: '4px 12px', fontSize: 12 }}>取消</button>
-                    <button onClick={handleSaveEdit} className="btn-primary" style={{ padding: '4px 12px', fontSize: 12 }}>保存</button>
+                    <button onClick={handleCancelEdit} className="btn-secondary" style={{ padding: '6px 16px', fontSize: 13 }}>取消</button>
+                    <button onClick={handleSaveEdit} className="btn-primary" style={{ padding: '6px 16px', fontSize: 13, display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <Send size={14} /> 发送
+                    </button>
                   </div>
                 </div>
               ) : msg.role === 'assistant' ? (
@@ -383,11 +407,11 @@ export default function ChatTab() {
 
         {isChatLoading && !streamingContent && (
           <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
-            <div className="message assistant">
-              <div className="loading-dots">
-                <span></span>
-                <span></span>
-                <span></span>
+            <div className="message assistant" style={{ padding: '16px 20px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 200 }}>
+                <div className="skeleton" style={{ height: 14, width: '100%', borderRadius: 4 }} />
+                <div className="skeleton" style={{ height: 14, width: '80%', borderRadius: 4 }} />
+                <div className="skeleton" style={{ height: 14, width: '60%', borderRadius: 4 }} />
               </div>
             </div>
           </div>
@@ -500,8 +524,23 @@ export default function ChatTab() {
             </button>
           </div>
 
+          {/* 搜索框 */}
+          <div style={{ padding: '8px 16px', borderBottom: '1px solid var(--border)' }}>
+            <div style={{ position: 'relative' }}>
+              <Search size={16} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+              <input
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="搜索对话..."
+                style={{ paddingLeft: 36, borderRadius: 10 }}
+              />
+            </div>
+          </div>
+
           <div style={{ flex: 1, overflow: 'auto', padding: 8 }}>
-            {conversations.map((conv) => (
+            {conversations
+              .filter((conv) => !searchQuery || conv.title.toLowerCase().includes(searchQuery.toLowerCase()) || conv.messages.some(m => m.content.toLowerCase().includes(searchQuery.toLowerCase())))
+              .map((conv) => (
               <div
                 key={conv.id}
                 onClick={() => {
