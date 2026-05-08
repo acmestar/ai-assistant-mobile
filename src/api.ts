@@ -365,6 +365,8 @@ async function generateOpenAIImage(apiKey: string, modelId: string, prompt: stri
     }
 
     const data = await resp.json();
+    console.log('OpenAI 图片响应:', data);
+
     const b64 = data?.data?.[0]?.b64_json;
     const url = data?.data?.[0]?.url;
 
@@ -408,6 +410,7 @@ async function generateGPT2Image(apiKey: string, prompt: string, ratio: string, 
     }
 
     const data = await resp.json();
+    console.log('GPT2 编辑响应:', data);
     const b64 = data?.data?.[0]?.b64_json;
     const url = data?.data?.[0]?.url;
     if (b64) return `data:image/png;base64,${b64}`;
@@ -431,6 +434,7 @@ async function generateGPT2Image(apiKey: string, prompt: string, ratio: string, 
   }
 
   const data = await resp.json();
+  console.log('GPT2 生成响应:', data);
   const b64 = data?.data?.[0]?.b64_json;
   const url = data?.data?.[0]?.url;
   if (b64) return `data:image/png;base64,${b64}`;
@@ -460,6 +464,7 @@ async function generateGeminiImage(apiKey: string, modelId: string, prompt: stri
     }
 
     const data = await resp.json();
+    console.log('Gemini 图片响应:', data);
     const content = data?.choices?.[0]?.message?.content;
 
     if (!content) throw new Error('未返回内容');
