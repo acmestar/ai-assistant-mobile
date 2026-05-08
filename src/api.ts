@@ -445,7 +445,6 @@ async function generateGeminiImage(apiKey: string, modelId: string, prompt: stri
   const messages: Array<{ role: string; content: any }> = [];
 
   if (referenceImage) {
-    // 确认参考图格式
     console.log('Gemini 图生图 - 参考图存在，长度:', referenceImage.length);
     console.log('Gemini 图生图 - 参考图前缀:', referenceImage.substring(0, 50));
     messages.push({ role: 'user', content: [{ type: 'text', text: prompt }, { type: 'image_url', image_url: { url: referenceImage } }] });
@@ -480,11 +479,12 @@ async function generateGeminiImage(apiKey: string, modelId: string, prompt: stri
       if (content.startsWith('data:image')) return content;
 
       // Markdown 格式: ![image](data:image/xxx;base64,...) 或 ![image](https://...)
-      const mdMatch = content.match(/!\[.*?\]\((data:image\/[^)]+)\)/);
+      // 使用 [\s\S] 匹配包括换行符在内的所有字符
+      const mdMatch = content.match(/!\[.*?\]\((data:image\/[^)]+)\)/s);
       if (mdMatch && mdMatch[1]) {
         return mdMatch[1];
       }
-      const mdUrlMatch = content.match(/!\[.*?\]\((https?:\/\/[^)]+)\)/);
+      const mdUrlMatch = content.match(/!\[.*?\]\((https?:\/\/[^)]+)\)/s);
       if (mdUrlMatch && mdUrlMatch[1]) {
         return mdUrlMatch[1];
       }
