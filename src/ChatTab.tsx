@@ -89,7 +89,10 @@ export default function ChatTab() {
       console.error('语音识别错误:', event.error);
       // not-allowed 错误表示权限被拒绝
       if (event.error === 'not-allowed') {
-        alert(language === 'zh' ? '请允许麦克风权限以使用语音功能' : 'Please allow microphone access to use voice input');
+        const msg = language === 'zh'
+          ? '请允许麦克风权限以使用语音功能。\n\n提示：将应用添加到主屏幕可持久化权限，避免每次重新授权。'
+          : 'Please allow microphone access to use voice input.\n\nTip: Add to home screen to persist permissions.';
+        alert(msg);
       }
       isRecordingRef.current = false;
       setIsRecording(false);
