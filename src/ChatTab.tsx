@@ -43,13 +43,14 @@ export default function ChatTab() {
   const [streamingContent, setStreamingContent] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [isRecording, setIsRecording] = useState(false);
+  const [isVoiceMode, setIsVoiceMode] = useState(false); // 语音输入模式
+  const [voiceText, setVoiceText] = useState(''); // 语音识别的文字
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const prevMessagesLengthRef = useRef(0);
   const shouldScrollToBottomRef = useRef(false);
   const recognitionRef = useRef<any>(null);
-  const recordingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const conversation = getCurrentConversation();
   const currentModel = CHAT_MODELS.find((m) => m.id === chatModelId);
@@ -60,67 +61,103 @@ export default function ChatTab() {
 
     const SpeechRecognition = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
     const recognition = new SpeechRecognition();
-    recognition.continuous = false;
+    recognition.continuous = true; // 持续识别
     recognition.interimResults = true;
     recognition.lang = 'zh-CN';
 
     recognition.onresult = (event: any) => {
-      const transcript = event.results[0][0].transcript;
-      setInput(transcript);
+      let finalTranscript = '';
+      let interimTranscript = '';
+
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const transcript = event.results[i][0].transcript;
+        if (event.results[i].isFinal) {
+          finalTranscript += transcript;
+        } else {
+          interimTranscript += transcript;
+        }
+      }
+
+      // 实时更新语音文字
+      setVoiceText(prev => {
+        const newText = finalTranscript || interimTranscript || prev;
+        return newText;
+      });
     };
 
     recognition.onerror = (event: any) => {
       console.error('语音识别错误:', event.error);
-      // 延迟关闭动画，让用户看到反馈
-      if (recordingTimeoutRef.current) clearTimeout(recordingTimeoutRef.current);
-      recordingTimeoutRef.current = setTimeout(() => {
-        setIsRecording(false);
-      }, 500);
+      setIsRecording(false);
     };
 
     recognition.onend = () => {
-      // 延迟关闭动画，让用户看到声纹效果至少持续1秒
-      if (recordingTimeoutRef.current) clearTimeout(recordingTimeoutRef.current);
-      recordingTimeoutRef.current = setTimeout(() => {
-        setIsRecording(false);
-      }, 800);
+      setIsRecording(false);
     };
 
     recognitionRef.current = recognition;
 
     return () => {
-      if (recordingTimeoutRef.current) clearTimeout(recordingTimeoutRef.current);
       recognition.abort();
     };
   }, []);
 
-  const toggleRecording = () => {
+  // 进入语音模式
+  const enterVoiceMode = () => {
+    setIsVoiceMode(true);
+    setVoiceText('');
+  };
+
+  // 退出语音模式
+  const exitVoiceMode = () => {
+    setIsVoiceMode(false);
+    setVoiceText('');
+    if (isRecording && recognitionRef.current) {
+      recognitionRef.current.stop();
+      setIsRecording(false);
+    }
+  };
+
+  // 开始录音（长按）
+  const startRecording = () => {
     if (!recognitionRef.current) {
       alert(T('voiceNotSupported'));
       return;
     }
-
-    if (isRecording) {
-      recognitionRef.current.stop();
-    } else {
-      // 清除之前的定时器
-      if (recordingTimeoutRef.current) clearTimeout(recordingTimeoutRef.current);
-      setIsRecording(true);
+    setVoiceText('');
+    setIsRecording(true);
+    try {
+      recognitionRef.current.start();
+    } catch (e) {
+      // 如果已经在运行，先停止再开始
       try {
-        recognitionRef.current.start();
-      } catch (e) {
-        // 如果已经在运行，先停止再开始
         recognitionRef.current.stop();
-        setTimeout(() => {
-          try {
-            recognitionRef.current.start();
-          } catch (err) {
-            console.error('无法启动语音识别:', err);
-            setIsRecording(false);
-          }
-        }, 100);
-      }
+      } catch {}
+      setTimeout(() => {
+        try {
+          recognitionRef.current.start();
+        } catch (err) {
+          console.error('无法启动语音识别:', err);
+          setIsRecording(false);
+        }
+      }, 100);
     }
+  };
+
+  // 停止录音（松开）
+  const stopRecording = () => {
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+    }
+    setIsRecording(false);
+  };
+
+  // 确认语音文字，填入输入框
+  const confirmVoiceText = () => {
+    if (voiceText.trim()) {
+      setInput(prev => prev ? prev + ' ' + voiceText.trim() : voiceText.trim());
+    }
+    setIsVoiceMode(false);
+    setVoiceText('');
   };
 
   // 草稿自动保存
@@ -525,7 +562,7 @@ export default function ChatTab() {
 
       {/* Input - 固定在底部 */}
       <div style={{ padding: 12, background: 'var(--bg-secondary)', borderTop: '1px solid var(--border)', flexShrink: 0 }}>
-        {attachedImage && (
+        {attachedImage && !isVoiceMode && (
           <div style={{ marginBottom: 8, position: 'relative', display: 'inline-block' }}>
             <img src={attachedImage} alt="" style={{ height: 60, borderRadius: 12 }} />
             <button
@@ -549,93 +586,180 @@ export default function ChatTab() {
           </div>
         )}
 
-        <div style={{ display: 'flex', gap: 8 }}>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            onChange={handleImagePick}
-            style={{ display: 'none' }}
-          />
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            style={{
-              padding: 12,
-              background: 'var(--bg-tertiary)',
-              border: '1px solid var(--border)',
-              borderRadius: 12,
-              color: 'var(--text-secondary)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <ImageIcon size={20} />
-          </button>
+        {isVoiceMode ? (
+          /* 语音输入模式 */
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {/* 语音识别结果显示区 */}
+            <div
+              style={{
+                minHeight: 80,
+                padding: 16,
+                background: 'var(--bg-tertiary)',
+                borderRadius: 16,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                textAlign: 'center',
+                fontSize: voiceText ? 16 : 14,
+                color: voiceText ? 'var(--text-primary)' : 'var(--text-muted)',
+              }}
+            >
+              {isRecording ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <div className="voice-wave-container">
+                    <div className="voice-wave-bar" />
+                    <div className="voice-wave-bar" />
+                    <div className="voice-wave-bar" />
+                    <div className="voice-wave-bar" />
+                    <div className="voice-wave-bar" />
+                  </div>
+                  <span>{voiceText || (language === 'zh' ? '正在聆听...' : 'Listening...')}</span>
+                </div>
+              ) : (
+                voiceText || (language === 'zh' ? '长按下方按钮开始录音' : 'Long press the button below to start recording')
+              )}
+            </div>
 
-          {/* 语音输入按钮 */}
-          <button
-            onClick={toggleRecording}
-            style={{
-              padding: 12,
-              background: isRecording ? 'var(--accent)' : 'var(--bg-tertiary)',
-              border: '1px solid var(--border)',
-              borderRadius: 12,
-              color: isRecording ? 'white' : 'var(--text-secondary)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              minWidth: 44,
-            }}
-          >
-            {isRecording ? (
-              <div className="voice-wave-container">
-                <div className="voice-wave-bar" />
-                <div className="voice-wave-bar" />
-                <div className="voice-wave-bar" />
-                <div className="voice-wave-bar" />
-                <div className="voice-wave-bar" />
-              </div>
-            ) : (
-              <Mic size={20} />
-            )}
-          </button>
+            {/* 操作按钮 */}
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
+              <button
+                onClick={exitVoiceMode}
+                style={{
+                  padding: '12px 24px',
+                  background: 'var(--bg-tertiary)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 12,
+                  color: 'var(--text-secondary)',
+                  fontSize: 14,
+                }}
+              >
+                {T('cancel')}
+              </button>
 
-          <input
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSend()}
-            placeholder={T('inputMessage')}
-            style={{ flex: 1, borderRadius: 20 }}
-          />
+              {/* 长按录音按钮 */}
+              <button
+                onTouchStart={(e) => { e.preventDefault(); startRecording(); }}
+                onTouchEnd={(e) => { e.preventDefault(); stopRecording(); }}
+                onTouchCancel={stopRecording}
+                onMouseDown={startRecording}
+                onMouseUp={stopRecording}
+                onMouseLeave={() => isRecording && stopRecording()}
+                style={{
+                  flex: 1,
+                  padding: 14,
+                  background: isRecording ? 'var(--accent)' : 'var(--bg-tertiary)',
+                  border: isRecording ? 'none' : '1px solid var(--border)',
+                  borderRadius: 12,
+                  color: isRecording ? 'white' : 'var(--text-primary)',
+                  fontSize: 15,
+                  fontWeight: 500,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                  userSelect: 'none',
+                  WebkitUserSelect: 'none',
+                }}
+              >
+                <Mic size={20} />
+                {isRecording ? (language === 'zh' ? '松开结束' : 'Release to stop') : (language === 'zh' ? '按住说话' : 'Hold to speak')}
+              </button>
 
-          {isChatLoading ? (
+              <button
+                onClick={confirmVoiceText}
+                disabled={!voiceText.trim()}
+                style={{
+                  padding: '12px 24px',
+                  background: voiceText.trim() ? 'var(--accent)' : 'var(--bg-tertiary)',
+                  border: 'none',
+                  borderRadius: 12,
+                  color: voiceText.trim() ? 'white' : 'var(--text-muted)',
+                  fontSize: 14,
+                }}
+              >
+                {T('send')}
+              </button>
+            </div>
+          </div>
+        ) : (
+          /* 普通输入模式 */
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              onChange={handleImagePick}
+              style={{ display: 'none' }}
+            />
             <button
-              onClick={cancelChatRequest}
+              onClick={() => fileInputRef.current?.click()}
               style={{
                 padding: 12,
-                background: 'var(--danger)',
-                border: 'none',
+                background: 'var(--bg-tertiary)',
+                border: '1px solid var(--border)',
                 borderRadius: 12,
-                color: 'white',
+                color: 'var(--text-secondary)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
               }}
             >
-              <StopCircle size={20} />
+              <ImageIcon size={20} />
             </button>
-          ) : (
+
+            {/* 语音输入按钮 - 点击进入语音模式 */}
             <button
-              onClick={handleSend}
-              disabled={!input.trim() && !attachedImage}
-              className="btn-primary"
-              style={{ padding: 12, borderRadius: 12 }}
+              onClick={enterVoiceMode}
+              style={{
+                padding: 12,
+                background: 'var(--bg-tertiary)',
+                border: '1px solid var(--border)',
+                borderRadius: 12,
+                color: 'var(--text-secondary)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
             >
-              <Send size={20} />
+              <Mic size={20} />
             </button>
-          )}
-        </div>
+
+            <input
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSend()}
+              placeholder={T('inputMessage')}
+              style={{ flex: 1, borderRadius: 20 }}
+            />
+
+            {isChatLoading ? (
+              <button
+                onClick={cancelChatRequest}
+                style={{
+                  padding: 12,
+                  background: 'var(--danger)',
+                  border: 'none',
+                  borderRadius: 12,
+                  color: 'white',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <StopCircle size={20} />
+              </button>
+            ) : (
+              <button
+                onClick={handleSend}
+                disabled={!input.trim() && !attachedImage}
+                className="btn-primary"
+                style={{ padding: 12, borderRadius: 12 }}
+              >
+                <Send size={20} />
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Sidebar */}
