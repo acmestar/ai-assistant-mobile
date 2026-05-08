@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Image as ImageIcon, Sparkles, Loader2, Trash2, Download, Upload, X, Maximize2, Clock, Sliders, AlertCircle } from 'lucide-react';
+import { Image as ImageIcon, Sparkles, Loader2, Trash2, Download, Upload, X, Maximize2, Clock, Sliders, AlertCircle, ZoomIn, ZoomOut, RotateCw } from 'lucide-react';
 import { useAppStore, IMAGE_MODELS, GPT2_RATIO_LABELS, GPT2_QUALITY_LABELS, getImageModelDef } from './store';
 import { generateImage } from './api';
 
@@ -12,6 +12,9 @@ export default function ImageTab() {
   const [showRatioPicker, setShowRatioPicker] = useState(false);
   const [showQualityPicker, setShowQualityPicker] = useState(false);
   const [referenceImage, setReferenceImage] = useState<string | null>(null);
+  const [imageScale, setImageScale] = useState(1);
+  const [imageRotation, setImageRotation] = useState(0);
+  const [searchQuery, setSearchQuery] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const currentModel = getImageModelDef(imageModelId);
@@ -100,6 +103,12 @@ export default function ImageTab() {
     e.target.value = '';
   };
 
+  const filteredRecords = searchQuery.trim()
+    ? imageRecords.filter(record =>
+        record.prompt.toLowerCase().includes(searchQuery.toLowerCase())
+      )
+    : imageRecords;
+
   const handleDownload = (url: string) => {
     const link = document.createElement('a');
     link.href = url;
@@ -107,6 +116,37 @@ export default function ImageTab() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+
+  const handleZoomIn = () => {
+    setImageScale(prev => Math.min(prev + 0.25, 3));
+  };
+
+  const handleZoomOut = () => {
+    setImageScale(prev => Math.max(prev - 0.25, 0.5));
+  };
+
+  const handleRotate = () => {
+    setImageRotation(prev => (prev + 90) % 360);
+  };
+
+  const handleResetView = () => {
+    setImageScale(1);
+    setImageRotation(0);
+  };
+
+  const handleClosePreview = () => {
+    setSelectedImage(null);
+    handleResetView();
+  };
+
+  const handleDownloadAll = () => {
+    if (imageRecords.length === 0) return;
+    imageRecords.forEach((record, index) => {
+      setTimeout(() => {
+        handleDownload(record.imageUrl);
+      }, index * 500);
+    });
   };
 
   return (
@@ -125,7 +165,7 @@ export default function ImageTab() {
             {currentModel.name}
           </button>
         </div>
-        <div style={{ width: 36 }} />
+        <button onClick={handleDownloadAll} className="btn-secondary" style={{ padding: 8 }} title="批量下载"><Download size={18} /></button>
       </div>
 
       {/* Quality Picker */}
@@ -172,6 +212,16 @@ export default function ImageTab() {
 
       {/* Images Grid */}
       <div style={{ flex: 1, overflow: 'auto', padding: 16, background: 'var(--bg-primary)' }}>
+        {/* 搜索框 */}
+        {imageRecords.length > 0 && (
+          <input
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="搜索图片描述..."
+            style={{ marginBottom: 12, borderRadius: 12 }}
+          />
+        )}
+
         {storageWarning && (
           <div style={{ padding: 12, background: 'rgba(245, 158, 11, 0.1)', borderRadius: 12, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8, color: 'var(--accent-orange)', fontSize: 13 }}>
             <AlertCircle size={16} /><span>存储空间即将满（{imageRecords.length}/20），请及时下载保存重要图片</span>
@@ -194,10 +244,10 @@ export default function ImageTab() {
           </div>
         )}
 
-        {imageRecords.length > 0 ? (
+        {filteredRecords.length > 0 ? (
           <div className="image-grid">
-            {imageRecords.map((record) => (
-              <div key={record.id} onClick={() => setSelectedImage(record.imageUrl)} style={{ position: 'relative', borderRadius: 12, overflow: 'hidden', cursor: 'pointer' }}>
+            {filteredRecords.map((record) => (
+              <div key={record.id} onClick={() => { setSelectedImage(record.imageUrl); handleResetView(); }} style={{ position: 'relative', borderRadius: 12, overflow: 'hidden', cursor: 'pointer' }}>
                 <img src={record.thumbnailUrl || record.imageUrl} alt={record.prompt} style={{ width: '100%', aspectRatio: 1, objectFit: 'cover' }} />
                 <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, padding: 8, background: 'linear-gradient(transparent, rgba(0,0,0,0.7))' }}>
                   <p style={{ fontSize: 11, color: 'white', marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{record.prompt}</p>
@@ -210,6 +260,10 @@ export default function ImageTab() {
                 </button>
               </div>
             ))}
+          </div>
+        ) : imageRecords.length > 0 && searchQuery ? (
+          <div style={{ textAlign: 'center', color: 'var(--text-muted)', marginTop: 40 }}>
+            <p>未找到匹配的图片</p>
           </div>
         ) : !isImageLoading && (
           <div style={{ textAlign: 'center', color: 'var(--text-muted)', marginTop: 60, padding: 20 }}>
@@ -251,13 +305,48 @@ export default function ImageTab() {
 
       {/* Image Preview Modal */}
       {selectedImage && (
-        <div onClick={() => setSelectedImage(null)} style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.9)', zIndex: 300, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', padding: 20 }}>
-          <img src={selectedImage} alt="" style={{ maxWidth: '100%', maxHeight: '70vh', borderRadius: 12 }} />
-          <div style={{ marginTop: 16, display: 'flex', gap: 12 }}>
-            <button onClick={() => handleDownload(selectedImage)} className="btn-secondary"><Download size={18} style={{ marginRight: 6 }} />保存图片</button>
-            <button onClick={() => setSelectedImage(null)} className="btn-secondary">关闭</button>
+        <div onClick={handleClosePreview} style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.95)', zIndex: 300, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', padding: 20 }}>
+          <div style={{ position: 'relative', overflow: 'hidden', maxWidth: '100%', maxHeight: '70vh' }}>
+            <img
+              src={selectedImage}
+              alt=""
+              style={{
+                maxWidth: '100%',
+                maxHeight: '70vh',
+                borderRadius: 12,
+                transform: `scale(${imageScale}) rotate(${imageRotation}deg)`,
+                transition: 'transform 0.2s ease',
+              }}
+              onClick={(e) => e.stopPropagation()}
+            />
           </div>
-          <p style={{ marginTop: 12, color: 'var(--text-muted)', fontSize: 12 }}>长按图片可直接保存到手机</p>
+
+          {/* 缩放控制 */}
+          <div onClick={(e) => e.stopPropagation()} style={{ marginTop: 16, display: 'flex', gap: 8, alignItems: 'center' }}>
+            <button onClick={handleZoomOut} className="btn-secondary" style={{ padding: 10 }}>
+              <ZoomOut size={18} />
+            </button>
+            <span style={{ color: 'var(--text-muted)', fontSize: 14, minWidth: 60, textAlign: 'center' }}>
+              {Math.round(imageScale * 100)}%
+            </span>
+            <button onClick={handleZoomIn} className="btn-secondary" style={{ padding: 10 }}>
+              <ZoomIn size={18} />
+            </button>
+            <button onClick={handleRotate} className="btn-secondary" style={{ padding: 10 }}>
+              <RotateCw size={18} />
+            </button>
+          </div>
+
+          {/* 操作按钮 */}
+          <div onClick={(e) => e.stopPropagation()} style={{ marginTop: 12, display: 'flex', gap: 12 }}>
+            <button onClick={() => handleDownload(selectedImage)} className="btn-secondary">
+              <Download size={18} style={{ marginRight: 6 }} />保存图片
+            </button>
+            <button onClick={handleResetView} className="btn-secondary">重置</button>
+            <button onClick={handleClosePreview} className="btn-secondary">关闭</button>
+          </div>
+
+          <p style={{ marginTop: 12, color: 'var(--text-muted)', fontSize: 12 }}>双指缩放 | 长按保存到手机</p>
         </div>
       )}
     </div>
