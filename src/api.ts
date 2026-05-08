@@ -381,6 +381,7 @@ async function generateGPT2Image(apiKey: string, prompt: string, ratio: string, 
   const size = GPT2_SIZE_MAP[ratio] || 'auto';
 
   if (referenceImage) {
+    console.log('GPT2 图生图 - 参考图存在，长度:', referenceImage.length);
     const formData = new FormData();
     const m = referenceImage.match(/^data:([^;]+);base64,(.+)$/);
     if (!m) throw new Error('无效的参考图格式');
@@ -390,6 +391,8 @@ async function generateGPT2Image(apiKey: string, prompt: string, ratio: string, 
     const ia = new Uint8Array(ab);
     for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i);
     const blob = new Blob([ab], { type: m[1] });
+
+    console.log('GPT2 图生图 - Blob大小:', blob.size, '类型:', blob.type);
 
     formData.append('image', blob, 'reference.png');
     formData.append('prompt', prompt);
@@ -442,10 +445,16 @@ async function generateGeminiImage(apiKey: string, modelId: string, prompt: stri
   const messages: Array<{ role: string; content: any }> = [];
 
   if (referenceImage) {
+    // 确认参考图格式
+    console.log('Gemini 图生图 - 参考图存在，长度:', referenceImage.length);
+    console.log('Gemini 图生图 - 参考图前缀:', referenceImage.substring(0, 50));
     messages.push({ role: 'user', content: [{ type: 'text', text: prompt }, { type: 'image_url', image_url: { url: referenceImage } }] });
   } else {
+    console.log('Gemini 文生图 - 无参考图');
     messages.push({ role: 'user', content: prompt });
   }
+
+  console.log('Gemini 请求 - model:', modelId, 'messages数量:', messages.length);
 
   try {
     const resp = await fetchWithTimeout(`${API_BASE}/chat/completions`, {
