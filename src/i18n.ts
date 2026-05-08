@@ -81,6 +81,8 @@ export const translations: Record<Language, Record<string, string>> = {
     voiceInput: '语音输入',
     voiceNotSupported: '您的浏览器不支持语音输入',
     exporting: '正在导出...',
+    elderMode: '长辈模式',
+    elderModeDesc: '开启后点击消息即可朗读',
   },
   en: {
     appName: 'AI Assistant',
@@ -162,6 +164,8 @@ export const translations: Record<Language, Record<string, string>> = {
     voiceInput: 'Voice Input',
     voiceNotSupported: 'Voice input not supported',
     exporting: 'Exporting...',
+    elderMode: 'Elder Mode',
+    elderModeDesc: 'Tap message to read aloud',
   },
 };
 

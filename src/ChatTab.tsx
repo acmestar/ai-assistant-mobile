@@ -7,6 +7,25 @@ import ReactMarkdown from 'react-markdown';
 
 const SCROLL_POSITION_KEY = 'chat-scroll-position';
 
+// 朗读功能
+let currentUtterance: SpeechSynthesisUtterance | null = null;
+
+function speakText(text: string, lang: string) {
+  // 停止当前朗读
+  if (currentUtterance) {
+    speechSynthesis.cancel();
+  }
+
+  currentUtterance = new SpeechSynthesisUtterance(text);
+  currentUtterance.lang = lang === 'zh' ? 'zh-CN' : 'en-US';
+  currentUtterance.rate = 0.9; // 稍慢一点，更清晰
+  currentUtterance.onend = () => {
+    currentUtterance = null;
+  };
+
+  speechSynthesis.speak(currentUtterance);
+}
+
 export default function ChatTab() {
   const {
     conversations,
@@ -26,6 +45,7 @@ export default function ChatTab() {
     saveDraft,
     exportData,
     language,
+    elderMode,
   } = useAppStore();
 
   const T = (key: string) => t(key, language as Language);
@@ -535,7 +555,11 @@ export default function ChatTab() {
 
         {conversation.messages.map((msg) => (
           <div key={msg.id} style={{ display: 'flex', flexDirection: 'column', alignItems: msg.role === 'user' ? 'flex-end' : 'flex-start', gap: 4 }}>
-            <div className={`message ${msg.role}`}>
+            <div
+              className={`message ${msg.role}`}
+              onClick={() => elderMode && speakText(msg.content, language)}
+              style={elderMode ? { cursor: 'pointer' } : {}}
+            >
               {msg.imageUrl && (
                 <img src={msg.imageUrl} alt="" style={{ maxWidth: '100%', borderRadius: 8, marginBottom: 8 }} />
               )}

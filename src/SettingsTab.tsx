@@ -1,10 +1,10 @@
 import { useState, useRef } from 'react';
-import { Key, Info, Check, Eye, EyeOff, Trash2, Wifi, AlertCircle, Sun, Moon, Download, Upload, BarChart2, Globe } from 'lucide-react';
+import { Key, Info, Check, Eye, EyeOff, Trash2, Wifi, AlertCircle, Sun, Moon, Download, Upload, BarChart2, Globe, Volume2 } from 'lucide-react';
 import { useAppStore, CHAT_MODELS, IMAGE_MODELS } from './store';
 import { t, Language } from './i18n';
 
 export default function SettingsTab() {
-  const { apiKey, setApiKey, chatModelId, imageModelId, conversations, imageRecords, theme, setTheme, totalInputTokens, totalOutputTokens, exportData, importData, language, setLanguage } = useAppStore();
+  const { apiKey, setApiKey, chatModelId, imageModelId, conversations, imageRecords, theme, setTheme, totalInputTokens, totalOutputTokens, exportData, importData, language, setLanguage, elderMode, setElderMode } = useAppStore();
   const [showKey, setShowKey] = useState(false);
   const [tempKey, setTempKey] = useState(apiKey);
   const [saved, setSaved] = useState(false);
@@ -138,6 +138,32 @@ export default function SettingsTab() {
             style={{ padding: '8px 16px', display: 'flex', alignItems: 'center', gap: 6 }}
           >
             {language === 'zh' ? 'English' : '中文'}
+          </button>
+        </div>
+      </div>
+
+      {/* Elder Mode Toggle */}
+      <div className="settings-section">
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Volume2 size={18} color="var(--accent)" />
+            <div>
+              <span style={{ fontWeight: 500 }}>{T('elderMode')}</span>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{T('elderModeDesc')}</div>
+            </div>
+          </div>
+          <button
+            onClick={() => setElderMode(!elderMode)}
+            style={{
+              padding: '8px 16px',
+              background: elderMode ? 'var(--accent)' : 'var(--bg-tertiary)',
+              border: elderMode ? 'none' : '1px solid var(--border)',
+              borderRadius: 12,
+              color: elderMode ? 'white' : 'var(--text-secondary)',
+              fontWeight: 500,
+            }}
+          >
+            {elderMode ? (language === 'zh' ? '已开启' : 'On') : (language === 'zh' ? '开启' : 'Off')}
           </button>
         </div>
       </div>

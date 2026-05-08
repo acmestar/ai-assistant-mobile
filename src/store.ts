@@ -269,6 +269,8 @@ interface AppState {
   setTheme: (theme: 'dark' | 'light') => void;
   language: Language;
   setLanguage: (lang: Language) => void;
+  elderMode: boolean; // 长辈模式
+  setElderMode: (enabled: boolean) => void;
 
   // Actions
   createConversation: () => string;
@@ -345,6 +347,8 @@ export const useAppStore = create<AppState>()(
       },
       language: 'zh',
       setLanguage: (language) => set({ language }),
+      elderMode: false,
+      setElderMode: (elderMode) => set({ elderMode }),
 
       // Actions
       createConversation: () => {
@@ -540,6 +544,7 @@ export const useAppStore = create<AppState>()(
         theme: state.theme,
         tokenUsage: state.tokenUsage.slice(0, 50), // 只保留最近50条
         language: state.language,
+        elderMode: state.elderMode,
       }),
     }
   )
