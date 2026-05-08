@@ -44,17 +44,18 @@ async function fetchWithRetry(url: string, options: RequestInit, timeout: number
 function fetchWithTimeout(url: string, options: RequestInit, timeout: number = 120000, signal?: AbortSignal): Promise<Response> {
   return new Promise((resolve, reject) => {
     const controller = new AbortController();
+
+    // 如果外部提供了 signal，监听它的 abort 事件
+    const abortHandler = () => {
+      controller.abort();
+      reject(new Error('请求已取消'));
+    };
+    signal?.addEventListener('abort', abortHandler);
+
     const timer = setTimeout(() => {
       controller.abort();
       reject(new Error('请求超时，请检查网络连接'));
     }, timeout);
-
-    // 合并外部 signal 和内部 controller
-    const abortHandler = () => {
-      clearTimeout(timer);
-      reject(new Error('请求已取消'));
-    };
-    signal?.addEventListener('abort', abortHandler);
 
     const fetchOptions: RequestInit = {
       ...options,
@@ -73,7 +74,7 @@ function fetchWithTimeout(url: string, options: RequestInit, timeout: number = 1
         clearTimeout(timer);
         signal?.removeEventListener('abort', abortHandler);
         const errorMsg = error.message || String(error);
-        if (error.name === 'AbortError') {
+        if (error.name === 'AbortError' || signal?.aborted) {
           reject(new Error('请求已取消'));
         } else if (errorMsg.includes('Failed to fetch') || errorMsg.includes('NetworkError') || errorMsg.includes('Network request failed')) {
           reject(new Error('网络连接失败，请检查网络设置或尝试切换网络'));
@@ -351,27 +352,29 @@ async function generateOpenAIImage(apiKey: string, modelId: string, prompt: stri
   const size = OPENAI_SIZE_MAP[ratio] || '1024x1024';
   const qualityLevel = OPENAI_QUALITY_MAP[quality] || 'medium';
 
-  const resp = await fetch(`${API_BASE}/images/generations`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({ model: modelId, prompt, n: 1, size, quality: qualityLevel }),
-    mode: 'cors',
-    cache: 'no-cache',
-    signal: imageAbortController?.signal,
-  });
+  try {
+    const resp = await fetchWithTimeout(`${API_BASE}/images/generations`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({ model: modelId, prompt, n: 1, size, quality: qualityLevel }),
+    }, 180000, imageAbortController?.signal);
 
-  if (!resp.ok) {
-    const err = await resp.text();
-    throw new Error(`生成失败: ${resp.status} ${err.slice(0, 200)}`);
+    if (!resp.ok) {
+      const err = await resp.text();
+      throw new Error(`生成失败: ${resp.status} ${err.slice(0, 200)}`);
+    }
+
+    const data = await resp.json();
+    const b64 = data?.data?.[0]?.b64_json;
+    const url = data?.data?.[0]?.url;
+
+    if (b64) return `data:image/png;base64,${b64}`;
+    if (url) return url;
+    throw new Error('未返回图片');
+  } catch (error) {
+    if (error instanceof Error) throw error;
+    throw new Error('网络请求失败');
   }
-
-  const data = await resp.json();
-  const b64 = data?.data?.[0]?.b64_json;
-  const url = data?.data?.[0]?.url;
-
-  if (b64) return `data:image/png;base64,${b64}`;
-  if (url) return url;
-  throw new Error('未返回图片');
 }
 
 async function generateGPT2Image(apiKey: string, prompt: string, ratio: string, quality: string, referenceImage?: string): Promise<string> {
@@ -444,36 +447,38 @@ async function generateGeminiImage(apiKey: string, modelId: string, prompt: stri
     messages.push({ role: 'user', content: prompt });
   }
 
-  const resp = await fetch(`${API_BASE}/chat/completions`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({ model: modelId, messages, max_tokens: 4096 }),
-    mode: 'cors',
-    cache: 'no-cache',
-    signal: imageAbortController?.signal,
-  });
+  try {
+    const resp = await fetchWithTimeout(`${API_BASE}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({ model: modelId, messages, max_tokens: 4096 }),
+    }, 180000, imageAbortController?.signal);
 
-  if (!resp.ok) {
-    const err = await resp.text();
-    throw new Error(`Gemini 生成失败: ${resp.status} ${err.slice(0, 200)}`);
+    if (!resp.ok) {
+      const err = await resp.text();
+      throw new Error(`Gemini 生成失败: ${resp.status} ${err.slice(0, 200)}`);
+    }
+
+    const data = await resp.json();
+    const content = data?.choices?.[0]?.message?.content;
+
+    if (!content) throw new Error('未返回内容');
+
+    if (typeof content === 'string' && (content.startsWith('http') || content.startsWith('data:image'))) {
+      return content;
+    }
+
+    if (typeof content === 'object' && content?.url) return content.url;
+    if (typeof content === 'object' && content?.b64_json) return `data:image/png;base64,${content.b64_json}`;
+
+    const b64 = data?.data?.[0]?.b64_json;
+    const url = data?.data?.[0]?.url;
+    if (b64) return `data:image/png;base64,${b64}`;
+    if (url) return url;
+
+    throw new Error('未返回图片');
+  } catch (error) {
+    if (error instanceof Error) throw error;
+    throw new Error('网络请求失败');
   }
-
-  const data = await resp.json();
-  const content = data?.choices?.[0]?.message?.content;
-
-  if (!content) throw new Error('未返回内容');
-
-  if (typeof content === 'string' && (content.startsWith('http') || content.startsWith('data:image'))) {
-    return content;
-  }
-
-  if (typeof content === 'object' && content?.url) return content.url;
-  if (typeof content === 'object' && content?.b64_json) return `data:image/png;base64,${content.b64_json}`;
-
-  const b64 = data?.data?.[0]?.b64_json;
-  const url = data?.data?.[0]?.url;
-  if (b64) return `data:image/png;base64,${b64}`;
-  if (url) return url;
-
-  throw new Error('未返回图片');
 }
