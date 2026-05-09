@@ -316,17 +316,34 @@ interface AppState {
   setElderMode: (enabled: boolean) => void;
 
   // 模型队列（支持重复模型、顺序执行）
-  modelQueue: Array<{ id: string; modelId: string; instruction: string; result?: string }>;
-  setModelQueue: (queue: Array<{ id: string; modelId: string; instruction: string; result?: string }>) => void;
-  addModelToQueue: (modelId: string) => void;
+  modelQueue: Array<{ id: string; modelId: string; instruction: string; result?: string; title?: string }>;
+  setModelQueue: (queue: Array<{ id: string; modelId: string; instruction: string; result?: string; title?: string }>) => void;
+  addModelToQueue: (modelId: string, instruction?: string, title?: string) => void;
   removeModelFromQueue: (id: string) => void;
   updateQueueInstruction: (id: string, instruction: string) => void;
   updateQueueResult: (id: string, result: string) => void;
+  updateQueueTitle: (id: string, title: string) => void;
   clearModelQueue: () => void;
   isQueueRunning: boolean;
   setIsQueueRunning: (running: boolean) => void;
   currentQueueIndex: number;
   setCurrentQueueIndex: (index: number) => void;
+  parallelMode: boolean;
+  setParallelMode: (mode: boolean) => void;
+
+  // 角色/设定记忆库
+  characterMemory: Array<{ id: string; name: string; description: string; createdAt: number }>;
+  addCharacter: (name: string, description: string) => void;
+  updateCharacter: (id: string, name: string, description: string) => void;
+  deleteCharacter: (id: string) => void;
+  worldSetting: string;
+  setWorldSetting: (setting: string) => void;
+
+  // 进度保存
+  savedTasks: Array<{ id: string; name: string; queue: Array<{ id: string; modelId: string; instruction: string; result?: string; title?: string }>; createdAt: number }>;
+  saveTask: (name: string) => void;
+  loadTask: (id: string) => void;
+  deleteTask: (id: string) => void;
 
   // Actions
   createConversation: () => string;
@@ -409,12 +426,13 @@ export const useAppStore = create<AppState>()(
       // 模型队列
       modelQueue: [],
       setModelQueue: (modelQueue) => set({ modelQueue }),
-      addModelToQueue: (modelId) => set((state) => ({
+      addModelToQueue: (modelId, instruction = '', title = '') => set((state) => ({
         modelQueue: [...state.modelQueue, {
           id: Date.now().toString() + Math.random().toString(36).slice(2, 7),
           modelId,
-          instruction: '',
+          instruction,
           result: undefined,
+          title,
         }],
       })),
       removeModelFromQueue: (id) => set((state) => ({
@@ -430,11 +448,60 @@ export const useAppStore = create<AppState>()(
           item.id === id ? { ...item, result } : item
         ),
       })),
+      updateQueueTitle: (id, title) => set((state) => ({
+        modelQueue: state.modelQueue.map((item) =>
+          item.id === id ? { ...item, title } : item
+        ),
+      })),
       clearModelQueue: () => set({ modelQueue: [], currentQueueIndex: 0 }),
       isQueueRunning: false,
       setIsQueueRunning: (isQueueRunning) => set({ isQueueRunning }),
       currentQueueIndex: 0,
       setCurrentQueueIndex: (currentQueueIndex) => set({ currentQueueIndex }),
+      parallelMode: false,
+      setParallelMode: (parallelMode) => set({ parallelMode }),
+
+      // 角色/设定记忆库
+      characterMemory: [],
+      addCharacter: (name, description) => set((state) => ({
+        characterMemory: [...state.characterMemory, {
+          id: Date.now().toString(),
+          name,
+          description,
+          createdAt: Date.now(),
+        }],
+      })),
+      updateCharacter: (id, name, description) => set((state) => ({
+        characterMemory: state.characterMemory.map((c) =>
+          c.id === id ? { ...c, name, description } : c
+        ),
+      })),
+      deleteCharacter: (id) => set((state) => ({
+        characterMemory: state.characterMemory.filter((c) => c.id !== id),
+      })),
+      worldSetting: '',
+      setWorldSetting: (worldSetting) => set({ worldSetting }),
+
+      // 进度保存
+      savedTasks: [],
+      saveTask: (name) => set((state) => ({
+        savedTasks: [...state.savedTasks, {
+          id: Date.now().toString(),
+          name,
+          queue: [...state.modelQueue],
+          createdAt: Date.now(),
+        }],
+      })),
+      loadTask: (id) => set((state) => {
+        const task = state.savedTasks.find((t) => t.id === id);
+        if (task) {
+          return { modelQueue: [...task.queue], currentQueueIndex: 0 };
+        }
+        return {};
+      }),
+      deleteTask: (id) => set((state) => ({
+        savedTasks: state.savedTasks.filter((t) => t.id !== id),
+      })),
 
       // Actions
       createConversation: () => {
@@ -639,6 +706,9 @@ export const useAppStore = create<AppState>()(
         tokenUsage: state.tokenUsage.slice(0, 50), // 只保留最近50条
         language: state.language,
         elderMode: state.elderMode,
+        characterMemory: state.characterMemory,
+        worldSetting: state.worldSetting,
+        savedTasks: state.savedTasks,
       }),
     }
   )

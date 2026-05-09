@@ -78,6 +78,21 @@ export default function ChatTab() {
     clearModelQueue,
     isQueueRunning,
     currentQueueIndex,
+    // 角色/设定记忆库
+    characterMemory,
+    addCharacter,
+    updateCharacter,
+    deleteCharacter,
+    worldSetting,
+    setWorldSetting,
+    // 进度保存
+    savedTasks,
+    saveTask,
+    loadTask,
+    deleteTask,
+    // 并行模式
+    parallelMode,
+    setParallelMode,
   } = useAppStore();
 
   const T = (key: string) => t(key, language as Language);
@@ -105,6 +120,18 @@ export default function ChatTab() {
   const [showQueuePanel, setShowQueuePanel] = useState(false); // 模型队列面板
   const [showModelSelector, setShowModelSelector] = useState(false); // 模型选择器
   const [expandedResults, setExpandedResults] = useState<Set<string>>(new Set()); // 展开的结果
+  const [showOutlineParser, setShowOutlineParser] = useState(false); // 大纲解析器
+  const [outlineText, setOutlineText] = useState(''); // 大纲文本
+  const [showCharacterPanel, setShowCharacterPanel] = useState(false); // 角色面板
+  const [showExportPanel, setShowExportPanel] = useState(false); // 导出面板
+  const [showTaskPanel, setShowTaskPanel] = useState(false); // 任务面板
+  const [styleCheckResult, setStyleCheckResult] = useState<string | null>(null); // 风格检查结果
+  const [continuationSuggestion, setContinuationSuggestion] = useState<string | null>(null); // 续写建议
+  const [isAnalyzing, setIsAnalyzing] = useState(false); // 分析中
+  const [compareItemId, setCompareItemId] = useState<string | null>(null); // 正在对比的项
+  const [compareResults, setCompareResults] = useState<Record<string, string>>({}); // 对比结果
+  const [showSharePanel, setShowSharePanel] = useState(false); // 分享面板
+  const [shareLink, setShareLink] = useState<string>(''); // 分享链接
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -394,9 +421,9 @@ export default function ChatTab() {
     }
   }, [input, attachedImage, currentConversationId, saveDraft]);
 
-  // 恢复草稿
+  // 恢复草稿 - 只在切换对话且输入为空时恢复
   useEffect(() => {
-    if (conversation?.draft) {
+    if (conversation?.draft && !input) {
       setInput(conversation.draft);
       setAttachedImage(conversation.draftImage || null);
     }
@@ -541,14 +568,126 @@ export default function ChatTab() {
     }
   };
 
+  // 智能大纲解析器
+  const parseOutline = (text: string) => {
+    const lines = text.split('\n').filter(line => line.trim());
+    const chapters: Array<{ title: string; instruction: string }> = [];
+
+    // 匹配章节模式：# 第一章、第一章、Chapter 1、1. 等
+    const chapterPatterns = [
+      /^#+\s*(第[一二三四五六七八九十百千万零\d]+[章节回集部篇])/,
+      /^#+\s*(Chapter|CHAPTER)\s*\d+/i,
+      /^#+\s*(\d+[\.\、]\s*.+)/,
+      /^(第[一二三四五六七八九十百千万零\d]+[章节回集部篇])/,
+      /^(\d+[\.\、]\s*.+)/,
+    ];
+
+    for (const line of lines) {
+      let matched = false;
+      for (const pattern of chapterPatterns) {
+        const match = line.match(pattern);
+        if (match) {
+          const title = match[1] || match[0];
+          chapters.push({
+            title: title.trim(),
+            instruction: language === 'zh' ? `请写${title.trim()}` : `Please write ${title.trim()}`,
+          });
+          matched = true;
+          break;
+        }
+      }
+      // 如果没有匹配到章节模式，但有内容，也作为一个条目
+      if (!matched && line.length > 2 && chapters.length < 50) {
+        chapters.push({
+          title: line.trim().slice(0, 30),
+          instruction: language === 'zh' ? `请写：${line.trim()}` : `Please write: ${line.trim()}`,
+        });
+      }
+    }
+
+    return chapters;
+  };
+
+  // 从大纲生成队列
+  const generateQueueFromOutline = () => {
+    const chapters = parseOutline(outlineText);
+    if (chapters.length === 0) {
+      setError(language === 'zh' ? '未识别到章节结构，请检查大纲格式' : 'No chapters detected, please check outline format');
+      return;
+    }
+
+    // 清空现有队列
+    clearModelQueue();
+
+    // 添加章节到队列
+    chapters.forEach((chapter) => {
+      addModelToQueue(chatModelId, chapter.instruction, chapter.title);
+    });
+
+    setOutlineText('');
+    setShowOutlineParser(false);
+    hapticFeedback('medium');
+  };
+
+  // 合并章节并导出
+  const exportNovel = (format: 'txt' | 'md' | 'html') => {
+    const completedChapters = modelQueue.filter(item => item.result);
+
+    if (completedChapters.length === 0) {
+      setError(language === 'zh' ? '没有已完成的章节可以导出' : 'No completed chapters to export');
+      return;
+    }
+
+    let content = '';
+    const title = conversation?.title || (language === 'zh' ? '未命名小说' : 'Untitled Novel');
+
+    if (format === 'md') {
+      content = `# ${title}\n\n`;
+      completedChapters.forEach((item, index) => {
+        content += `## ${item.title || (language === 'zh' ? `第${index + 1}章` : `Chapter ${index + 1}`)}\n\n`;
+        content += `${item.result}\n\n---\n\n`;
+      });
+    } else if (format === 'html') {
+      content = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${title}</title>`;
+      content += `<style>body{font-family:serif;max-width:800px;margin:0 auto;padding:20px;line-height:1.8;}`;
+      content += `h1{text-align:center;}h2{border-bottom:1px solid #ccc;padding-bottom:10px;}</style></head><body>`;
+      content += `<h1>${title}</h1>`;
+      completedChapters.forEach((item, index) => {
+        content += `<h2>${item.title || (language === 'zh' ? `第${index + 1}章` : `Chapter ${index + 1}`)}</h2>`;
+        content += `<div>${item.result?.replace(/\n/g, '<br/>')}</div>`;
+      });
+      content += `</body></html>`;
+    } else {
+      content = `${title}\n${'='.repeat(title.length)}\n\n`;
+      completedChapters.forEach((item, index) => {
+        content += `${item.title || (language === 'zh' ? `第${index + 1}章` : `Chapter ${index + 1}`)}\n`;
+        content += `${'-'.repeat(20)}\n\n`;
+        content += `${item.result}\n\n`;
+      });
+    }
+
+    // 下载文件
+    const blob = new Blob([content], { type: format === 'html' ? 'text/html' : 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${title}.${format}`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   // 执行模型队列
   const handleExecuteQueue = async () => {
     if (isQueueRunning || modelQueue.length === 0) return;
 
     try {
-      await executeModelQueue((queueId, content) => {
+      await executeModelQueue((queueId, content, isComplete) => {
         // 实时更新结果
         updateQueueResult(queueId, content);
+        // 完成时自动展开该项
+        if (isComplete) {
+          setExpandedResults(prev => new Set(prev).add(queueId));
+        }
       });
     } catch (e) {
       setError(String(e));
@@ -566,6 +705,264 @@ export default function ChatTab() {
       updateQueueResult(queueId, `错误: ${e instanceof Error ? e.message : '请求失败'}`);
     }
   };
+
+  // 风格一致性检查
+  const checkStyleConsistency = async () => {
+    const completedChapters = modelQueue.filter(item => item.result);
+    if (completedChapters.length < 2) {
+      setError(language === 'zh' ? '至少需要2个已完成的章节才能检查风格一致性' : 'Need at least 2 completed chapters to check style consistency');
+      return;
+    }
+
+    setIsAnalyzing(true);
+    setStyleCheckResult(null);
+
+    try {
+      const { apiKey } = useAppStore.getState();
+      if (!apiKey) throw new Error('请先设置 API Key');
+
+      const chaptersText = completedChapters.map((item, index) =>
+        `【${item.title || `第${index + 1}章`}】\n${item.result}`
+      ).join('\n\n---\n\n');
+
+      const prompt = language === 'zh'
+        ? `请分析以下章节的写作风格一致性，检查：
+1. 叙事风格是否统一（第一人称/第三人称等）
+2. 语言风格是否一致（正式/口语化等）
+3. 角色性格是否前后一致
+4. 用词习惯是否有明显变化
+5. 节奏把控是否协调
+
+请给出简洁的分析报告，指出问题和建议：
+
+${chaptersText}`
+        : `Please analyze the writing style consistency of the following chapters:
+1. Narrative style consistency (first-person/third-person, etc.)
+2. Language style consistency (formal/casual, etc.)
+3. Character personality consistency
+4. Vocabulary usage patterns
+5. Pacing coordination
+
+Please provide a concise analysis report with issues and suggestions:
+
+${chaptersText}`;
+
+      const resp = await fetch('https://ai.acmestar.top/api/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({
+          model: chatModelId,
+          messages: [{ role: 'user', content: prompt }],
+          max_tokens: 2000,
+        }),
+      });
+
+      if (!resp.ok) throw new Error(`API 错误: ${resp.status}`);
+      const data = await resp.json();
+      setStyleCheckResult(data.choices?.[0]?.message?.content || '分析失败');
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  // 智能续写建议
+  const getContinuationSuggestion = async () => {
+    const completedChapters = modelQueue.filter(item => item.result);
+    if (completedChapters.length === 0) {
+      setError(language === 'zh' ? '没有已完成的章节，无法生成续写建议' : 'No completed chapters to generate suggestions');
+      return;
+    }
+
+    setIsAnalyzing(true);
+    setContinuationSuggestion(null);
+
+    try {
+      const { apiKey } = useAppStore.getState();
+      if (!apiKey) throw new Error('请先设置 API Key');
+
+      const previousChapters = completedChapters.slice(-3); // 最近3章作为上下文
+
+      const contextText = previousChapters.map((item, index) =>
+        `【${item.title || `第${completedChapters.length - previousChapters.length + index + 1}章`}】\n${item.result?.slice(0, 1000)}...`
+      ).join('\n\n');
+
+      const prompt = language === 'zh'
+        ? `基于以下已完成的章节内容，请分析剧情走向并提供续写建议：
+
+${contextText}
+
+请提供：
+1. 当前剧情发展分析
+2. 可能的剧情走向（2-3个方向）
+3. 建议的下一章内容大纲
+4. 需要注意的伏笔或悬念
+
+请给出简洁有创意的建议：`
+        : `Based on the following completed chapters, please analyze the plot direction and provide continuation suggestions:
+
+${contextText}
+
+Please provide:
+1. Current plot development analysis
+2. Possible plot directions (2-3 options)
+3. Suggested outline for the next chapter
+4. Foreshadowing or suspense to note
+
+Please give concise and creative suggestions:`;
+
+      const resp = await fetch('https://ai.acmestar.top/api/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({
+          model: chatModelId,
+          messages: [{ role: 'user', content: prompt }],
+          max_tokens: 2000,
+        }),
+      });
+
+      if (!resp.ok) throw new Error(`API 错误: ${resp.status}`);
+      const data = await resp.json();
+      setContinuationSuggestion(data.choices?.[0]?.message?.content || '分析失败');
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  // 多版本对比 - 用不同模型生成同一章节的多个版本
+  const generateCompareVersions = async (itemId: string) => {
+    const item = modelQueue.find(q => q.id === itemId);
+    if (!item || !item.instruction.trim()) return;
+
+    setCompareItemId(itemId);
+    setCompareResults({});
+
+    try {
+      const { apiKey } = useAppStore.getState();
+      if (!apiKey) throw new Error('请先设置 API Key');
+
+      // 获取其他模型（排除当前模型）
+      const otherModels = CHAT_MODELS.filter(m => m.id !== item.modelId).slice(0, 2); // 取2个其他模型
+      if (otherModels.length === 0) {
+        setError(language === 'zh' ? '没有其他模型可用于对比' : 'No other models available for comparison');
+        setCompareItemId(null);
+        return;
+      }
+
+      const results: Record<string, string> = {};
+
+      // 并行生成其他模型版本
+      const promises = otherModels.map(async (model) => {
+        try {
+          const resp = await fetch('https://ai.acmestar.top/api/chat/completions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+            body: JSON.stringify({
+              model: model.id,
+              messages: [{ role: 'user', content: item.instruction }],
+              max_tokens: 4000,
+            }),
+          });
+
+          if (!resp.ok) throw new Error(`API 错误: ${resp.status}`);
+          const data = await resp.json();
+          results[model.id] = data.choices?.[0]?.message?.content || '生成失败';
+        } catch (e) {
+          results[model.id] = `错误: ${e instanceof Error ? e.message : '请求失败'}`;
+        }
+      });
+
+      await Promise.all(promises);
+      setCompareResults(results);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setCompareItemId(null);
+    }
+  };
+
+  // 生成分享链接
+  const generateShareLink = () => {
+    if (modelQueue.length === 0) return;
+
+    const shareData = {
+      title: conversation?.title || (language === 'zh' ? '未命名任务' : 'Untitled Task'),
+      queue: modelQueue.map(item => ({
+        modelId: item.modelId,
+        instruction: item.instruction,
+        title: item.title,
+        result: item.result,
+      })),
+      worldSetting,
+      characters: characterMemory,
+      createdAt: Date.now(),
+    };
+
+    // 压缩并编码数据
+    const encoded = btoa(encodeURIComponent(JSON.stringify(shareData)));
+    const link = `${window.location.origin}${window.location.pathname}?task=${encoded}`;
+
+    setShareLink(link);
+    setShowSharePanel(true);
+    hapticFeedback('light');
+  };
+
+  // 从URL导入任务
+  const importTaskFromUrl = useCallback(() => {
+    const params = new URLSearchParams(window.location.search);
+    const taskData = params.get('task');
+
+    if (taskData) {
+      try {
+        const decoded = JSON.parse(decodeURIComponent(atob(taskData)));
+        if (decoded.queue && Array.isArray(decoded.queue)) {
+          // 清空现有队列
+          clearModelQueue();
+
+          // 导入队列
+          decoded.queue.forEach((item: any) => {
+            addModelToQueue(item.modelId, item.instruction, item.title);
+            if (item.result) {
+              // 需要等待添加后才能更新结果
+              setTimeout(() => {
+                const queue = useAppStore.getState().modelQueue;
+                const lastItem = queue[queue.length - 1];
+                if (lastItem) {
+                  useAppStore.getState().updateQueueResult(lastItem.id, item.result);
+                }
+              }, 100);
+            }
+          });
+
+          // 导入世界观和角色
+          if (decoded.worldSetting) {
+            setWorldSetting(decoded.worldSetting);
+          }
+          if (decoded.characters && Array.isArray(decoded.characters)) {
+            decoded.characters.forEach((c: any) => {
+              addCharacter(c.name, c.description);
+            });
+          }
+
+          // 清除URL参数
+          window.history.replaceState({}, '', window.location.pathname);
+
+          setShowQueuePanel(true);
+          hapticFeedback('medium');
+        }
+      } catch (e) {
+        console.error('导入任务失败:', e);
+      }
+    }
+  }, [clearModelQueue, addModelToQueue, setWorldSetting, addCharacter, language]);
+
+  // 页面加载时检查URL
+  useEffect(() => {
+    importTaskFromUrl();
+  }, [importTaskFromUrl]);
 
   const handleImagePick = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -802,18 +1199,304 @@ export default function ChatTab() {
             <span style={{ fontWeight: 600, fontSize: 14, color: 'var(--text-primary)' }}>
               {language === 'zh' ? '批量创作队列' : 'Batch Creation Queue'}
             </span>
-            <div style={{ display: 'flex', gap: 4 }}>
+            <button onClick={() => setShowQueuePanel(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', padding: 4 }}>
+              <X size={16} />
+            </button>
+          </div>
+
+          {/* 功能按钮行 */}
+          <div style={{ display: 'flex', gap: 4, marginBottom: 8, flexWrap: 'wrap' }}>
+            <button
+              onClick={() => setShowModelSelector(!showModelSelector)}
+              style={{ padding: '4px 8px', background: 'var(--accent)', border: 'none', borderRadius: 6, color: 'white', fontSize: 11, display: 'flex', alignItems: 'center', gap: 4 }}
+            >
+              <Plus size={12} />
+              {language === 'zh' ? '添加模型' : 'Add Model'}
+            </button>
+            <button
+              onClick={() => setShowOutlineParser(!showOutlineParser)}
+              style={{ padding: '4px 8px', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-secondary)', fontSize: 11, display: 'flex', alignItems: 'center', gap: 4 }}
+            >
+              📋 {language === 'zh' ? '大纲解析' : 'Outline'}
+            </button>
+            <button
+              onClick={() => setShowCharacterPanel(!showCharacterPanel)}
+              style={{ padding: '4px 8px', background: characterMemory.length > 0 ? 'var(--accent-dim)' : 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 6, color: characterMemory.length > 0 ? 'var(--accent)' : 'var(--text-secondary)', fontSize: 11, display: 'flex', alignItems: 'center', gap: 4 }}
+            >
+              👤 {language === 'zh' ? '角色' : 'Characters'}
+            </button>
+            <button
+              onClick={() => setShowExportPanel(!showExportPanel)}
+              disabled={modelQueue.filter(i => i.result).length === 0}
+              style={{ padding: '4px 8px', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 6, color: modelQueue.filter(i => i.result).length > 0 ? 'var(--text-secondary)' : 'var(--text-muted)', fontSize: 11, display: 'flex', alignItems: 'center', gap: 4, opacity: modelQueue.filter(i => i.result).length > 0 ? 1 : 0.5 }}
+            >
+              📥 {language === 'zh' ? '导出' : 'Export'}
+            </button>
+            <button
+              onClick={() => setShowTaskPanel(!showTaskPanel)}
+              style={{ padding: '4px 8px', background: savedTasks.length > 0 ? 'var(--accent-dim)' : 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 6, color: savedTasks.length > 0 ? 'var(--accent)' : 'var(--text-secondary)', fontSize: 11, display: 'flex', alignItems: 'center', gap: 4 }}
+            >
+              💾 {language === 'zh' ? '任务' : 'Tasks'}
+            </button>
+            <button
+              onClick={() => setParallelMode(!parallelMode)}
+              style={{ padding: '4px 8px', background: parallelMode ? 'var(--accent)' : 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 6, color: parallelMode ? 'white' : 'var(--text-secondary)', fontSize: 11, display: 'flex', alignItems: 'center', gap: 4 }}
+              title={language === 'zh' ? '并行模式：所有任务同时执行（无上下文关联）' : 'Parallel mode: All tasks run simultaneously (no context sharing)'}
+            >
+              ⚡ {language === 'zh' ? '并行' : 'Parallel'}
+            </button>
+            <button
+              onClick={generateShareLink}
+              disabled={modelQueue.length === 0}
+              style={{ padding: '4px 8px', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 6, color: modelQueue.length > 0 ? 'var(--text-secondary)' : 'var(--text-muted)', fontSize: 11, display: 'flex', alignItems: 'center', gap: 4, opacity: modelQueue.length > 0 ? 1 : 0.5 }}
+            >
+              🔗 {language === 'zh' ? '分享' : 'Share'}
+            </button>
+          </div>
+
+          {/* 大纲解析器 */}
+          {showOutlineParser && (
+            <div style={{ marginBottom: 8, padding: 8, background: 'var(--bg-tertiary)', borderRadius: 8 }}>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>
+                {language === 'zh' ? '粘贴大纲，自动识别章节并生成队列' : 'Paste outline to auto-detect chapters'}
+              </div>
+              <textarea
+                value={outlineText}
+                onChange={(e) => setOutlineText(e.target.value)}
+                placeholder={language === 'zh' ? '示例：\n# 第一章：开端\n# 第二章：相遇\n# 第三章：冲突' : 'Example:\n# Chapter 1: Beginning\n# Chapter 2: Meeting\n# Chapter 3: Conflict'}
+                style={{
+                  width: '100%',
+                  minHeight: 80,
+                  maxHeight: 150,
+                  padding: 8,
+                  fontSize: 12,
+                  borderRadius: 6,
+                  border: '1px solid var(--border)',
+                  background: 'var(--bg-secondary)',
+                  color: 'var(--text-primary)',
+                  resize: 'vertical',
+                }}
+              />
+              <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                <button
+                  onClick={() => { setOutlineText(''); setShowOutlineParser(false); }}
+                  style={{ flex: 1, padding: 6, background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-secondary)', fontSize: 11 }}
+                >
+                  {language === 'zh' ? '取消' : 'Cancel'}
+                </button>
+                <button
+                  onClick={generateQueueFromOutline}
+                  disabled={!outlineText.trim()}
+                  className="btn-primary"
+                  style={{ flex: 1, padding: 6, fontSize: 11, opacity: outlineText.trim() ? 1 : 0.5 }}
+                >
+                  {language === 'zh' ? '生成队列' : 'Generate Queue'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* 角色设定面板 */}
+          {showCharacterPanel && (
+            <div style={{ marginBottom: 8, padding: 8, background: 'var(--bg-tertiary)', borderRadius: 8 }}>
+              <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 6 }}>
+                {language === 'zh' ? '角色/设定记忆库' : 'Character/Setting Memory'}
+              </div>
+              {/* 世界观设定 */}
+              <div style={{ marginBottom: 8 }}>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>
+                  {language === 'zh' ? '世界观设定' : 'World Setting'}
+                </div>
+                <textarea
+                  value={worldSetting}
+                  onChange={(e) => setWorldSetting(e.target.value)}
+                  placeholder={language === 'zh' ? '描述故事的世界观、时代背景等' : 'Describe the world, era, etc.'}
+                  style={{
+                    width: '100%',
+                    minHeight: 40,
+                    maxHeight: 80,
+                    padding: 6,
+                    fontSize: 11,
+                    borderRadius: 6,
+                    border: '1px solid var(--border)',
+                    background: 'var(--bg-secondary)',
+                    color: 'var(--text-primary)',
+                    resize: 'vertical',
+                  }}
+                />
+              </div>
+              {/* 角色列表 */}
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>
+                {language === 'zh' ? '角色设定' : 'Characters'}
+              </div>
+              {characterMemory.map((char) => (
+                <div key={char.id} style={{ display: 'flex', gap: 4, marginBottom: 4, alignItems: 'center' }}>
+                  <input
+                    value={char.name}
+                    onChange={(e) => updateCharacter(char.id, e.target.value, char.description)}
+                    placeholder={language === 'zh' ? '姓名' : 'Name'}
+                    style={{ flex: 1, padding: 4, fontSize: 11, borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg-secondary)', color: 'var(--text-primary)' }}
+                  />
+                  <input
+                    value={char.description}
+                    onChange={(e) => updateCharacter(char.id, char.name, e.target.value)}
+                    placeholder={language === 'zh' ? '描述' : 'Description'}
+                    style={{ flex: 2, padding: 4, fontSize: 11, borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg-secondary)', color: 'var(--text-primary)' }}
+                  />
+                  <button onClick={() => deleteCharacter(char.id)} style={{ padding: 4, background: 'transparent', border: 'none', color: 'var(--danger)' }}>
+                    <X size={12} />
+                  </button>
+                </div>
+              ))}
               <button
-                onClick={() => setShowModelSelector(!showModelSelector)}
-                style={{ padding: 6, background: 'var(--accent)', border: 'none', borderRadius: 6, color: 'white' }}
+                onClick={() => addCharacter('', '')}
+                style={{ width: '100%', padding: 6, background: 'var(--bg-secondary)', border: '1px dashed var(--border)', borderRadius: 6, color: 'var(--text-muted)', fontSize: 11 }}
               >
-                <Plus size={14} />
-              </button>
-              <button onClick={() => setShowQueuePanel(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', padding: 4 }}>
-                <X size={16} />
+                + {language === 'zh' ? '添加角色' : 'Add Character'}
               </button>
             </div>
-          </div>
+          )}
+
+          {/* 导出面板 */}
+          {showExportPanel && (
+            <div style={{ marginBottom: 8, padding: 8, background: 'var(--bg-tertiary)', borderRadius: 8 }}>
+              <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 6 }}>
+                {language === 'zh' ? '导出小说' : 'Export Novel'}
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={() => exportNovel('txt')} style={{ flex: 1, padding: 8, background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-secondary)', fontSize: 11 }}>
+                  📄 TXT
+                </button>
+                <button onClick={() => exportNovel('md')} style={{ flex: 1, padding: 8, background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-secondary)', fontSize: 11 }}>
+                  📝 Markdown
+                </button>
+                <button onClick={() => exportNovel('html')} style={{ flex: 1, padding: 8, background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-secondary)', fontSize: 11 }}>
+                  🌐 HTML
+                </button>
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6, textAlign: 'center' }}>
+                {language === 'zh' ? `已完成 ${modelQueue.filter(i => i.result).length}/${modelQueue.length} 章` : `${modelQueue.filter(i => i.result).length}/${modelQueue.length} chapters completed`}
+              </div>
+            </div>
+          )}
+
+          {/* 任务面板 */}
+          {showTaskPanel && (
+            <div style={{ marginBottom: 8, padding: 8, background: 'var(--bg-tertiary)', borderRadius: 8 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)' }}>
+                  {language === 'zh' ? '保存的任务' : 'Saved Tasks'}
+                </span>
+                <button
+                  onClick={() => { saveTask(conversation?.title || (language === 'zh' ? '未命名任务' : 'Untitled Task')); hapticFeedback('light'); }}
+                  disabled={modelQueue.length === 0}
+                  style={{ padding: '4px 8px', background: modelQueue.length > 0 ? 'var(--accent)' : 'var(--bg-secondary)', border: 'none', borderRadius: 4, color: modelQueue.length > 0 ? 'white' : 'var(--text-muted)', fontSize: 10 }}
+                >
+                  {language === 'zh' ? '保存当前' : 'Save Current'}
+                </button>
+              </div>
+              {savedTasks.length === 0 ? (
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center', padding: 10 }}>
+                  {language === 'zh' ? '暂无保存的任务' : 'No saved tasks'}
+                </div>
+              ) : (
+                savedTasks.map((task) => (
+                  <div key={task.id} style={{ display: 'flex', gap: 4, marginBottom: 4, alignItems: 'center', padding: 6, background: 'var(--bg-secondary)', borderRadius: 6 }}>
+                    <span style={{ flex: 1, fontSize: 11, color: 'var(--text-primary)' }}>{task.name} ({task.queue.length}项)</span>
+                    <button onClick={() => { loadTask(task.id); setShowTaskPanel(false); hapticFeedback('light'); }} style={{ padding: 4, background: 'var(--accent)', border: 'none', borderRadius: 4, color: 'white', fontSize: 10 }}>
+                      {language === 'zh' ? '加载' : 'Load'}
+                    </button>
+                    <button onClick={() => deleteTask(task.id)} style={{ padding: 4, background: 'transparent', border: 'none', color: 'var(--danger)' }}>
+                      <X size={12} />
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+
+          {/* 分享面板 */}
+          {showSharePanel && (
+            <div style={{ marginBottom: 8, padding: 8, background: 'var(--bg-tertiary)', borderRadius: 8 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)' }}>
+                  🔗 {language === 'zh' ? '分享任务' : 'Share Task'}
+                </span>
+                <button onClick={() => setShowSharePanel(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', padding: 2 }}>
+                  <X size={14} />
+                </button>
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6 }}>
+                {language === 'zh' ? '复制链接分享给他人，对方打开即可导入任务' : 'Copy the link to share. Others can import by opening the link.'}
+              </div>
+              <div style={{ display: 'flex', gap: 4 }}>
+                <input
+                  value={shareLink}
+                  readOnly
+                  style={{ flex: 1, padding: 6, fontSize: 10, borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg-secondary)', color: 'var(--text-primary)' }}
+                />
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(shareLink);
+                    hapticFeedback('light');
+                  }}
+                  style={{ padding: '6px 10px', background: 'var(--accent)', border: 'none', borderRadius: 4, color: 'white', fontSize: 10 }}
+                >
+                  {language === 'zh' ? '复制' : 'Copy'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* AI 分析工具 */}
+          {modelQueue.filter(i => i.result).length >= 1 && (
+            <div style={{ marginBottom: 8, padding: 8, background: 'var(--bg-tertiary)', borderRadius: 8 }}>
+              <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 6 }}>
+                🤖 {language === 'zh' ? 'AI 分析工具' : 'AI Analysis Tools'}
+              </div>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                <button
+                  onClick={checkStyleConsistency}
+                  disabled={isAnalyzing || modelQueue.filter(i => i.result).length < 2}
+                  style={{ padding: '6px 10px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-secondary)', fontSize: 11, opacity: modelQueue.filter(i => i.result).length >= 2 ? 1 : 0.5 }}
+                >
+                  📊 {language === 'zh' ? '风格检查' : 'Style Check'}
+                </button>
+                <button
+                  onClick={getContinuationSuggestion}
+                  disabled={isAnalyzing}
+                  style={{ padding: '6px 10px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-secondary)', fontSize: 11 }}
+                >
+                  💡 {language === 'zh' ? '续写建议' : 'Suggestion'}
+                </button>
+              </div>
+              {/* 分析结果 */}
+              {isAnalyzing && (
+                <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-muted)', fontSize: 12 }}>
+                  <div style={{ width: 14, height: 14, border: '2px solid var(--accent)', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+                  {language === 'zh' ? 'AI 分析中...' : 'AI analyzing...'}
+                </div>
+              )}
+              {styleCheckResult && (
+                <div style={{ marginTop: 8, padding: 8, background: 'var(--bg-secondary)', borderRadius: 6, maxHeight: 200, overflow: 'auto' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                    <span style={{ fontSize: 11, fontWeight: 500, color: 'var(--accent)' }}>📊 {language === 'zh' ? '风格一致性分析' : 'Style Consistency Analysis'}</span>
+                    <button onClick={() => setStyleCheckResult(null)} style={{ padding: 2, background: 'transparent', border: 'none', color: 'var(--text-muted)' }}><X size={12} /></button>
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-primary)', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{styleCheckResult}</div>
+                </div>
+              )}
+              {continuationSuggestion && (
+                <div style={{ marginTop: 8, padding: 8, background: 'var(--bg-secondary)', borderRadius: 6, maxHeight: 200, overflow: 'auto' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                    <span style={{ fontSize: 11, fontWeight: 500, color: 'var(--accent)' }}>💡 {language === 'zh' ? '续写建议' : 'Continuation Suggestion'}</span>
+                    <button onClick={() => setContinuationSuggestion(null)} style={{ padding: 2, background: 'transparent', border: 'none', color: 'var(--text-muted)' }}><X size={12} /></button>
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-primary)', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{continuationSuggestion}</div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* 模型选择器 */}
           {showModelSelector && (
@@ -891,6 +1574,11 @@ export default function ChatTab() {
                       </span>
                       <span style={{ flex: 1, fontSize: 12, fontWeight: 500, color: 'var(--text-primary)' }}>
                         {model?.name}
+                        {isCompleted && (
+                          <span style={{ marginLeft: 6, color: 'var(--accent)', fontSize: 10 }}>
+                            ✓ {language === 'zh' ? '已完成' : 'Done'}
+                          </span>
+                        )}
                       </span>
                       {isRunning && (
                         <div style={{ width: 14, height: 14, border: '2px solid var(--accent)', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
@@ -899,8 +1587,19 @@ export default function ChatTab() {
                         <button
                           onClick={() => handleRegenerateItem(item.id)}
                           style={{ padding: 4, background: 'transparent', border: 'none', color: 'var(--text-muted)' }}
+                          title={language === 'zh' ? '重新生成' : 'Regenerate'}
                         >
                           <RefreshCw size={12} />
+                        </button>
+                      )}
+                      {isCompleted && CHAT_MODELS.length > 1 && (
+                        <button
+                          onClick={() => generateCompareVersions(item.id)}
+                          disabled={compareItemId === item.id}
+                          style={{ padding: 4, background: 'transparent', border: 'none', color: compareItemId === item.id ? 'var(--accent)' : 'var(--text-muted)' }}
+                          title={language === 'zh' ? '多模型对比' : 'Compare with other models'}
+                        >
+                          <GitCompare size={12} />
                         </button>
                       )}
                       <button
@@ -959,6 +1658,42 @@ export default function ChatTab() {
                         ) : (
                           <div style={{ fontSize: 12, color: 'var(--text-muted)', textAlign: 'center', padding: 10 }}>
                             {language === 'zh' ? '等待执行...' : 'Waiting to execute...'}
+                          </div>
+                        )}
+                        {/* 多版本对比结果 */}
+                        {compareItemId === item.id && (
+                          <div style={{ marginTop: 8 }}>
+                            {Object.keys(compareResults).length === 0 ? (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-muted)', fontSize: 12 }}>
+                                <div style={{ width: 14, height: 14, border: '2px solid var(--accent)', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+                                {language === 'zh' ? '正在生成对比版本...' : 'Generating comparison versions...'}
+                              </div>
+                            ) : (
+                              <div>
+                                <div style={{ fontSize: 11, fontWeight: 500, color: 'var(--accent)', marginBottom: 6 }}>
+                                  🔄 {language === 'zh' ? '多模型对比结果' : 'Multi-model Comparison'}
+                                </div>
+                                {Object.entries(compareResults).map(([modelId, result]) => {
+                                  const model = CHAT_MODELS.find(m => m.id === modelId);
+                                  return (
+                                    <div key={modelId} style={{ marginBottom: 8, padding: 6, background: 'var(--bg-secondary)', borderRadius: 6 }}>
+                                      <div style={{ fontSize: 11, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 4 }}>
+                                        {model?.name || modelId}
+                                      </div>
+                                      <div style={{ fontSize: 11, color: 'var(--text-secondary)', maxHeight: 100, overflow: 'auto', lineHeight: 1.4 }}>
+                                        {result.slice(0, 500)}{result.length > 500 ? '...' : ''}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                                <button
+                                  onClick={() => { setCompareItemId(null); setCompareResults({}); }}
+                                  style={{ width: '100%', padding: 4, background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-muted)', fontSize: 10 }}
+                                >
+                                  {language === 'zh' ? '关闭对比' : 'Close Comparison'}
+                                </button>
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>

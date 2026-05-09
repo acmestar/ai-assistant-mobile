@@ -509,11 +509,11 @@ async function generateGeminiImage(apiKey: string, modelId: string, prompt: stri
   }
 }
 
-// 执行模型队列 - 顺序执行，每个模型可以有不同的指令
+// 执行模型队列 - 支持顺序和并行模式
 export async function executeModelQueue(
   onProgress?: (queueId: string, content: string, isComplete: boolean) => void
 ): Promise<void> {
-  const { apiKey, modelQueue, setIsQueueRunning, updateQueueResult, setCurrentQueueIndex, getCurrentConversation } = useAppStore.getState();
+  const { apiKey, modelQueue, setIsQueueRunning, updateQueueResult, setCurrentQueueIndex, getCurrentConversation, characterMemory, worldSetting, parallelMode } = useAppStore.getState();
   if (!apiKey) throw new Error('请先设置 API Key');
   if (modelQueue.length === 0) return;
 
@@ -528,76 +528,164 @@ export async function executeModelQueue(
     }
   }
 
+  // 添加角色/世界观设定作为系统上下文
+  if (characterMemory.length > 0 || worldSetting) {
+    let systemContext = '';
+    if (worldSetting) {
+      systemContext += `【世界观设定】\n${worldSetting}\n\n`;
+    }
+    if (characterMemory.length > 0) {
+      systemContext += '【角色设定】\n';
+      characterMemory.forEach(c => {
+        systemContext += `- ${c.name}：${c.description}\n`;
+      });
+    }
+    // 将系统上下文作为第一条用户消息插入
+    contextMessages.unshift({ role: 'user', content: systemContext });
+    contextMessages.unshift({ role: 'assistant', content: '好的，我已经了解了世界观和角色设定，会按照这些设定进行创作。' });
+  }
+
   try {
-    for (let i = 0; i < modelQueue.length; i++) {
-      const item = modelQueue[i];
-      if (!item.instruction.trim()) continue;
+    if (parallelMode) {
+      // 并行模式：所有项同时执行
+      const promises = modelQueue.map(async (item, index) => {
+        if (!item.instruction.trim()) return;
 
-      setCurrentQueueIndex(i);
+        setCurrentQueueIndex(index);
 
-      try {
-        // 构建消息：上下文 + 当前指令
-        const messages = [
-          ...contextMessages,
-          { role: 'user' as const, content: item.instruction },
-        ];
+        try {
+          const messages = [
+            ...contextMessages,
+            { role: 'user' as const, content: item.instruction },
+          ];
 
-        const resp = await fetch(`${API_BASE}/chat/completions`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-          body: JSON.stringify({
-            model: item.modelId,
-            messages,
-            max_tokens: 8192,
-            stream: true,
-          }),
-        });
+          const resp = await fetch(`${API_BASE}/chat/completions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+            body: JSON.stringify({
+              model: item.modelId,
+              messages,
+              max_tokens: 8192,
+              stream: true,
+            }),
+          });
 
-        if (!resp.ok) throw new Error(`API 错误: ${resp.status}`);
+          if (!resp.ok) throw new Error(`API 错误: ${resp.status}`);
 
-        const reader = resp.body?.getReader();
-        if (!reader) throw new Error('无法读取响应');
+          const reader = resp.body?.getReader();
+          if (!reader) throw new Error('无法读取响应');
 
-        const decoder = new TextDecoder();
-        let content = '';
-        let buffer = '';
+          const decoder = new TextDecoder();
+          let content = '';
+          let buffer = '';
 
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
 
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
 
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              const data = line.slice(6);
-              if (data === '[DONE]') continue;
-              try {
-                const parsed = JSON.parse(data);
-                const chunk = parsed.choices?.[0]?.delta?.content || '';
-                if (chunk) {
-                  content += chunk;
-                  onProgress?.(item.id, content, false);
-                }
-              } catch {}
+            for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                const data = line.slice(6);
+                if (data === '[DONE]') continue;
+                try {
+                  const parsed = JSON.parse(data);
+                  const chunk = parsed.choices?.[0]?.delta?.content || '';
+                  if (chunk) {
+                    content += chunk;
+                    onProgress?.(item.id, content, false);
+                  }
+                } catch {}
+              }
             }
           }
+
+          updateQueueResult(item.id, content);
+          onProgress?.(item.id, content, true);
+
+        } catch (e) {
+          const errorMsg = `错误: ${e instanceof Error ? e.message : '请求失败'}`;
+          updateQueueResult(item.id, errorMsg);
+          onProgress?.(item.id, errorMsg, true);
         }
+      });
 
-        // 完成后更新结果
-        updateQueueResult(item.id, content);
-        onProgress?.(item.id, content, true);
+      await Promise.all(promises);
+    } else {
+      // 顺序模式：逐个执行，后续可看到前面的结果
+      for (let i = 0; i < modelQueue.length; i++) {
+        const item = modelQueue[i];
+        if (!item.instruction.trim()) continue;
 
-        // 将结果添加到对话历史（作为上下文供后续模型使用）
-        contextMessages.push({ role: 'user', content: item.instruction });
-        contextMessages.push({ role: 'assistant', content });
+        setCurrentQueueIndex(i);
 
-      } catch (e) {
-        const errorMsg = `错误: ${e instanceof Error ? e.message : '请求失败'}`;
-        updateQueueResult(item.id, errorMsg);
-        onProgress?.(item.id, errorMsg, true);
+        try {
+          // 构建消息：上下文 + 当前指令
+          const messages = [
+            ...contextMessages,
+            { role: 'user' as const, content: item.instruction },
+          ];
+
+          const resp = await fetch(`${API_BASE}/chat/completions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+            body: JSON.stringify({
+              model: item.modelId,
+              messages,
+              max_tokens: 8192,
+              stream: true,
+            }),
+          });
+
+          if (!resp.ok) throw new Error(`API 错误: ${resp.status}`);
+
+          const reader = resp.body?.getReader();
+          if (!reader) throw new Error('无法读取响应');
+
+          const decoder = new TextDecoder();
+          let content = '';
+          let buffer = '';
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+
+            for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                const data = line.slice(6);
+                if (data === '[DONE]') continue;
+                try {
+                  const parsed = JSON.parse(data);
+                  const chunk = parsed.choices?.[0]?.delta?.content || '';
+                  if (chunk) {
+                    content += chunk;
+                    onProgress?.(item.id, content, false);
+                  }
+                } catch {}
+              }
+            }
+          }
+
+          // 完成后更新结果
+          updateQueueResult(item.id, content);
+          onProgress?.(item.id, content, true);
+
+          // 将结果添加到对话历史（作为上下文供后续模型使用）
+          contextMessages.push({ role: 'user', content: item.instruction });
+          contextMessages.push({ role: 'assistant', content });
+
+        } catch (e) {
+          const errorMsg = `错误: ${e instanceof Error ? e.message : '请求失败'}`;
+          updateQueueResult(item.id, errorMsg);
+          onProgress?.(item.id, errorMsg, true);
+        }
       }
     }
   } finally {
@@ -611,7 +699,7 @@ export async function regenerateQueueItem(
   queueId: string,
   onProgress?: (content: string) => void
 ): Promise<string> {
-  const { apiKey, modelQueue, getCurrentConversation } = useAppStore.getState();
+  const { apiKey, modelQueue, getCurrentConversation, characterMemory, worldSetting } = useAppStore.getState();
   if (!apiKey) throw new Error('请先设置 API Key');
 
   const item = modelQueue.find(q => q.id === queueId);
@@ -624,6 +712,22 @@ export async function regenerateQueueItem(
     for (const msg of conversation.messages) {
       contextMessages.push({ role: msg.role, content: msg.content });
     }
+  }
+
+  // 添加角色/世界观设定作为系统上下文
+  if (characterMemory.length > 0 || worldSetting) {
+    let systemContext = '';
+    if (worldSetting) {
+      systemContext += `【世界观设定】\n${worldSetting}\n\n`;
+    }
+    if (characterMemory.length > 0) {
+      systemContext += '【角色设定】\n';
+      characterMemory.forEach(c => {
+        systemContext += `- ${c.name}：${c.description}\n`;
+      });
+    }
+    contextMessages.unshift({ role: 'user', content: systemContext });
+    contextMessages.unshift({ role: 'assistant', content: '好的，我已经了解了世界观和角色设定，会按照这些设定进行创作。' });
   }
 
   // 找到当前项之前的所有队列结果作为上下文
