@@ -1257,6 +1257,23 @@ ${characterMemory.map(c => `- ${c.replaceWith || c.originalName}：${c.descripti
             </button>
           </div>
 
+          {/* 功能说明 */}
+          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 8, padding: 6, background: 'var(--bg-tertiary)', borderRadius: 6, lineHeight: 1.5 }}>
+            {language === 'zh' ? (
+              <>
+                <b>使用流程：</b>粘贴大纲 → AI解析 → 生成队列 → 执行创作<br/>
+                <b>执行模式：</b>顺序模式（前后关联）| 并行模式（独立生成）<br/>
+                <b>队列管理：</b>点击 ✓/○ 启用/禁用章节，禁用的章节不会生成
+              </>
+            ) : (
+              <>
+                <b>Workflow:</b> Paste outline → AI Parse → Generate Queue → Execute<br/>
+                <b>Modes:</b> Sequential (linked) | Parallel (independent)<br/>
+                <b>Queue:</b> Click ✓/○ to enable/disable chapters
+              </>
+            )}
+          </div>
+
           {/* 主操作按钮 */}
           <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
             <button
