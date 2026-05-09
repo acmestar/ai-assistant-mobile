@@ -526,8 +526,9 @@ export default function SuperWritingTab() {
       });
 
       console.log('[NovelGenerateStep]', {
-        step: 'regenerate-chapter',
+        step: 'regenerate-first-chapter',
         effectiveModelId,
+        selectedWritingModelId,
         promptLength: chapterPrompt.length,
       });
 
@@ -792,6 +793,8 @@ export default function SuperWritingTab() {
 
     // 使用工作副本避免 React state 闭包问题
     let workingChapters = [...novelChapters];
+    let hasFailed = false;
+    let generatedCount = 0;
 
     for (let i = 0; i < novelChapterQueue.length; i++) {
       const item = novelChapterQueue[i];
@@ -826,6 +829,7 @@ export default function SuperWritingTab() {
         if (parsed) {
           // 更新工作副本
           workingChapters = [...workingChapters, parsed];
+          generatedCount += 1;
 
           // 更新 React state
           setNovelChapters(workingChapters);
@@ -840,6 +844,7 @@ export default function SuperWritingTab() {
         }
       } catch (error: any) {
         console.error('[NovelQueueError]', error);
+        hasFailed = true;
         // 标记失败
         setNovelChapterQueue(prev => prev.map(q =>
           q.id === item.id ? { ...q, status: 'failed' as const, error: error.message } : q
@@ -852,8 +857,7 @@ export default function SuperWritingTab() {
     setIsNovelQueueRunning(false);
 
     // 批量生成完成后自动展开完整小说稿
-    const allDone = novelChapterQueue.every(q => q.status === 'done');
-    if (allDone && novelChapterQueue.length > 0) {
+    if (!hasFailed && generatedCount > 0) {
       setShowFullNovelReader(true);
     }
   };
@@ -1694,7 +1698,7 @@ export default function SuperWritingTab() {
         )}
 
         {/* 设定已生成但第一章未生成 */}
-        {creationMode === 'novel' && novelProject && !novelChapterResult && !fastLoading && novelGenerationStep !== 'error' && (
+        {creationMode === 'novel' && novelProject && !novelChapterResult && !fastLoading && (
           <div style={{
             padding: 16,
             background: 'var(--bg-secondary)',
@@ -2505,7 +2509,7 @@ export default function SuperWritingTab() {
         )}
 
         {/* 完整小说稿阅读区 */}
-        {creationMode === 'novel' && novelChapters.length > 1 && (
+        {creationMode === 'novel' && novelChapters.length > 0 && (
           <div style={{
             padding: 16,
             background: 'var(--bg-secondary)',

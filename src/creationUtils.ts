@@ -1211,31 +1211,62 @@ ${previousChapter.slice(-3000)} ${previousChapter.length > 3000 ? '...(前文已
  */
 export function buildNovelProjectPrompt(options: {
   requirement: string;
+  genre?: string;
+  style?: string;
+  chapterInfo?: string;
 }): string {
-  const { requirement } = options;
+  const { requirement, genre, style, chapterInfo } = options;
+
+  const genreHint = genre ? `\n用户指定题材：${genre}` : '';
+  const styleHint = style ? `\n用户指定风格：${style}` : '';
+  const lengthHint = chapterInfo ? `\n用户指定篇幅：${chapterInfo}` : '';
 
   return `你是一个专业的小说策划。请根据用户的一句话想法，自动生成完整的小说企划。
 
 用户想法：
-${requirement}
+${requirement}${genreHint}${styleHint}${lengthHint}
 
 请输出 JSON 格式（不要输出 Markdown，不要解释，只输出纯 JSON）：
 
 {
-  "title": "小说名（吸引人的标题）",
-  "genre": "题材类型（自动判断：都市/玄幻/悬疑/言情/科幻/历史等）",
-  "style": "风格关键词（自动判断：治愈/爽文/细腻/暗黑/幽默/热血等）",
-  "logline": "一句话简介（有吸引力，概括核心卖点）",
-  "sellingPoints": "核心卖点（2-3个）",
+  "title": "小说名",
+  "genre": "题材类型",
+  "style": "风格关键词",
+  "logline": "一句话简介",
+  "sellingPoints": "核心卖点",
   "targetReaders": "目标读者",
-  "lengthSuggestion": "篇幅建议（自动判断：短篇10万字以内/中篇10-30万字/长篇30万字以上）",
+  "lengthSuggestion": "篇幅建议",
 
   "characters": [
     {
       "id": "char_1",
-      "name": "角色名",
-      "role": "protagonist/supporting/antagonist",
-      "identity": "身份/职业",
+      "name": "主角名",
+      "role": "protagonist",
+      "identity": "身份职业",
+      "personality": "性格特点",
+      "desire": "核心欲望",
+      "weakness": "性格弱点",
+      "relationship": "与主角关系",
+      "arc": "人物成长弧光",
+      "locked": false
+    },
+    {
+      "id": "char_2",
+      "name": "重要配角名",
+      "role": "supporting",
+      "identity": "身份职业",
+      "personality": "性格特点",
+      "desire": "核心欲望",
+      "weakness": "性格弱点",
+      "relationship": "与主角关系",
+      "arc": "人物成长弧光",
+      "locked": false
+    },
+    {
+      "id": "char_3",
+      "name": "反派或阻力来源名",
+      "role": "antagonist",
+      "identity": "身份职业",
       "personality": "性格特点",
       "desire": "核心欲望",
       "weakness": "性格弱点",
@@ -1271,7 +1302,47 @@ ${requirement}
     {
       "id": "chap_1",
       "chapterNo": 1,
-      "title": "章节标题",
+      "title": "第一章标题",
+      "goal": "本章目标",
+      "mainEvent": "主要事件",
+      "conflict": "冲突点",
+      "hook": "结尾钩子",
+      "locked": false
+    },
+    {
+      "id": "chap_2",
+      "chapterNo": 2,
+      "title": "第二章标题",
+      "goal": "本章目标",
+      "mainEvent": "主要事件",
+      "conflict": "冲突点",
+      "hook": "结尾钩子",
+      "locked": false
+    },
+    {
+      "id": "chap_3",
+      "chapterNo": 3,
+      "title": "第三章标题",
+      "goal": "本章目标",
+      "mainEvent": "主要事件",
+      "conflict": "冲突点",
+      "hook": "结尾钩子",
+      "locked": false
+    },
+    {
+      "id": "chap_4",
+      "chapterNo": 4,
+      "title": "第四章标题",
+      "goal": "本章目标",
+      "mainEvent": "主要事件",
+      "conflict": "冲突点",
+      "hook": "结尾钩子",
+      "locked": false
+    },
+    {
+      "id": "chap_5",
+      "chapterNo": 5,
+      "title": "第五章标题",
       "goal": "本章目标",
       "mainEvent": "主要事件",
       "conflict": "冲突点",
@@ -1295,7 +1366,7 @@ ${requirement}
 1. 用户只给一句话时，必须自动补全所有空白，包括题材、风格、篇幅，不要反问
 2. 至少生成3个角色（主角、重要配角、反派或阻力来源）
 3. 章节规划5-12个
-4. 只输出 JSON，不要其他文字
+4. 只输出合法 JSON，不要 Markdown，不要解释
 5. 不要生成第一章正文
 6. 不要输出 firstChapter 字段
 7. 不要输出 content 正文字段`;
@@ -1310,13 +1381,16 @@ export function buildNovelFirstChapterPlainPrompt(options: {
   novelProject: NovelProject;
   chapterPlan?: NovelChapterPlan;
 }): string {
-  const { novelProject, chapterPlan } = options;
+  const { requirement, novelProject, chapterPlan } = options;
 
   const characterList = novelProject.characters
     .map(c => `- ${c.name}（${c.role === 'protagonist' ? '主角' : c.role === 'antagonist' ? '反派' : '配角'}，${c.identity}，${c.personality}）`)
     .join('\n');
 
   return `你是一个专业的小说作家。请根据以下小说设定，写出第一章正文。
+
+用户原始想法：
+${requirement}
 
 小说标题：《${novelProject.title}》
 题材：${novelProject.genre}
@@ -1331,29 +1405,31 @@ ${characterList}
 - 规则：${novelProject.world.rules}
 ${novelProject.world.forbiddenRules ? `- 不可违背：${novelProject.world.forbiddenRules}` : ''}
 
-${chapterPlan ? `第一章规划：
-- 标题：${chapterPlan.title}
-- 目标：${chapterPlan.goal}
-- 主要事件：${chapterPlan.mainEvent}
-- 冲突点：${chapterPlan.conflict}
-- 结尾钩子：${chapterPlan.hook}` : ''}
+第一章规划：
+- 标题：${chapterPlan?.title || novelProject.chapters?.[0]?.title || '第一章'}
+- 本章目标：${chapterPlan?.goal || novelProject.chapters?.[0]?.goal || '引入主角和核心冲突'}
+- 主要事件：${chapterPlan?.mainEvent || novelProject.chapters?.[0]?.mainEvent || '开场事件'}
+- 冲突点：${chapterPlan?.conflict || novelProject.chapters?.[0]?.conflict || '初始冲突'}
+- 结尾钩子：${chapterPlan?.hook || novelProject.chapters?.[0]?.hook || '悬念'}
 
-${novelProject.firstChapterAdvice ? `开篇建议：
-- 开场场景：${novelProject.firstChapterAdvice.openingScene}
-- 出场人物：${novelProject.firstChapterAdvice.characters}
-- 情绪基调：${novelProject.firstChapterAdvice.mood}
-- 冲突引入：${novelProject.firstChapterAdvice.conflictIntro}
-- 结尾钩子：${novelProject.firstChapterAdvice.endingHook}` : ''}
+第一章建议：
+- 开场场景：${novelProject.firstChapterAdvice?.openingScene || '引人入胜的开场'}
+- 出场人物：${novelProject.firstChapterAdvice?.characters || '主角登场'}
+- 情绪基调：${novelProject.firstChapterAdvice?.mood || '紧张/温馨'}
+- 冲突引入：${novelProject.firstChapterAdvice?.conflictIntro || '自然引入冲突'}
+- 结尾钩子：${novelProject.firstChapterAdvice?.endingHook || '留下悬念'}
 
 请直接写出第一章正文，要求：
-1. 不要输出 JSON，不要输出 Markdown，不要解释
-2. 只输出纯文本小说正文
-3. 使用上面列出的角色名，不要改名
-4. 遵守世界观规则，不要违背 forbiddenRules
-5. 有场景、动作、对白、心理、节奏和结尾钩子
-6. 不要写成大纲，要写真正的小说正文
-7. 不要突然完结，结尾要有钩子
-8. 字数控制在 1200-2000 字`;
+1. 必须承接用户原始想法，不要偏离
+2. 必须遵守第一章规划和第一章建议
+3. 不要输出 JSON，不要输出 Markdown，不要解释
+4. 只输出纯文本小说正文
+5. 使用上面列出的角色名，不要改名
+6. 遵守世界观规则，不要违背 forbiddenRules
+7. 有场景、动作、对白、心理、节奏和结尾钩子
+8. 不要写成大纲，要写真正的小说正文
+9. 不要突然完结，结尾要有钩子
+10. 字数控制在 1200-2000 字`;
 }
 
 /**
