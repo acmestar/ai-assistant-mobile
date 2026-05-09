@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { MessageSquare, Send, Trash2, Plus, ChevronLeft, Image as ImageIcon, X, Copy, Edit2, Check, Pencil, Search, StopCircle, Pin, PinOff, Download, Mic, Share2, Zap, CheckCircle, Circle, GitCompare, Play, RefreshCw, ChevronDown, ChevronUp } from 'lucide-react';
-import { useAppStore, CHAT_MODELS } from './store';
+import { MessageSquare, Send, Trash2, Plus, ChevronLeft, Image as ImageIcon, X, Copy, Edit2, Check, Pencil, Search, StopCircle, Pin, PinOff, Download, Mic, Share2, Zap, CheckCircle, Circle, GitCompare, Play, RefreshCw, ChevronDown, ChevronUp, Sparkles } from 'lucide-react';
+import { useAppStore, CHAT_MODELS, checkStorageSize } from './store';
 import { sendChatMessageStream, cancelChatRequest, executeModelQueue, regenerateQueueItem } from './api';
 import { t, Language } from './i18n';
 import { hapticFeedback, shareConversation } from './utils';
@@ -93,6 +93,9 @@ export default function ChatTab() {
     // 并行模式
     parallelMode,
     setParallelMode,
+    // 当前创作草稿
+    activeWritingDraft,
+    setActiveWritingDraft,
   } = useAppStore();
 
   const T = (key: string) => t(key, language as Language);
@@ -148,6 +151,60 @@ export default function ChatTab() {
   const conversation = getCurrentConversation();
   const currentModel = CHAT_MODELS.find((m) => m.id === chatModelId);
 
+  // 从 activeWritingDraft 恢复创作状态（页面刷新后）
+  useEffect(() => {
+    if (activeWritingDraft) {
+      // 恢复大纲文本
+      if (activeWritingDraft.outlineText) {
+        setOutlineText(activeWritingDraft.outlineText);
+      }
+      // 恢复解析结果
+      if (activeWritingDraft.parsedOutline) {
+        setParsedOutline(activeWritingDraft.parsedOutline);
+        // 只有当队列空时才自动打开预览
+        if (modelQueue.length === 0) {
+          setShowOutlinePreview(true);
+        }
+      }
+      console.log('已从草稿恢复创作状态');
+    }
+  }, []); // 只在组件挂载时执行一次
+
+  // 自动保存草稿 - 当创作内容变化时
+  useEffect(() => {
+    // 检查是否有有效内容
+    const hasValidContent =
+      outlineText.trim() ||
+      parsedOutline ||
+      modelQueue.some(item => item.instruction?.trim() || item.result?.trim()) ||
+      worldSetting.trim() ||
+      characterMemory.length > 0;
+
+    // 只有在有有效内容时才保存，避免空草稿覆盖
+    if (!hasValidContent) return;
+
+    const draft = {
+      id: activeWritingDraft?.id || Date.now().toString(),
+      title: conversation?.title || (language === 'zh' ? '未命名创作' : 'Untitled'),
+      outlineText,
+      creationMode: 'novel' as const, // ChatTab 默认为小说模式
+      parsedOutline,
+      parsedCreation: null, // ChatTab 不使用 parsedCreation
+      // modelQueue 不在这里保存，由顶层 modelQueue 单独持久化
+      modelQueue: [],
+      worldSetting,
+      characterMemory: characterMemory.map(c => ({
+        id: c.id,
+        originalName: c.originalName,
+        replaceWith: c.replaceWith,
+        description: c.description,
+      })),
+      source: 'chat' as const,
+      updatedAt: Date.now(),
+    };
+    setActiveWritingDraft(draft);
+  }, [modelQueue, parsedOutline, outlineText, worldSetting, characterMemory, conversation?.title, language]); // 依赖关键状态
+
   // 自适应输入框高度
   const adjustTextareaHeight = () => {
     const textarea = inputRef.current;
@@ -162,6 +219,15 @@ export default function ChatTab() {
   useEffect(() => {
     adjustTextareaHeight();
   }, [input]);
+
+  // 检查存储容量，超过 4MB 时提醒用户
+  useEffect(() => {
+    if (checkStorageSize()) {
+      setError(language === 'zh'
+        ? '⚠️ 存储空间接近上限（4MB），建议导出小说后清理旧任务'
+        : '⚠️ Storage near limit (4MB), please export and clean old tasks');
+    }
+  }, [modelQueue]); // 当队列变化时检查
 
   // 释放音频设备
   const releaseAudioDevice = async () => {
@@ -807,6 +873,18 @@ ${characterMemory.map(c => `- ${c.replaceWith || c.originalName}：${c.descripti
       return;
     }
 
+    // HTML escape 函数 - 防止 XSS
+    const escapeHtml = (text: string): string => {
+      const htmlEntities: Record<string, string> = {
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;',
+      };
+      return text.replace(/[&<>"']/g, (char) => htmlEntities[char] || char);
+    };
+
     let content = '';
     const title = conversation?.title || (language === 'zh' ? '未命名小说' : 'Untitled Novel');
 
@@ -817,13 +895,15 @@ ${characterMemory.map(c => `- ${c.replaceWith || c.originalName}：${c.descripti
         content += `${item.result}\n\n---\n\n`;
       });
     } else if (format === 'html') {
-      content = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${title}</title>`;
+      content = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${escapeHtml(title)}</title>`;
       content += `<style>body{font-family:serif;max-width:800px;margin:0 auto;padding:20px;line-height:1.8;}`;
       content += `h1{text-align:center;}h2{border-bottom:1px solid #ccc;padding-bottom:10px;}</style></head><body>`;
-      content += `<h1>${title}</h1>`;
+      content += `<h1>${escapeHtml(title)}</h1>`;
       completedChapters.forEach((item, index) => {
-        content += `<h2>${item.title || (language === 'zh' ? `第${index + 1}章` : `Chapter ${index + 1}`)}</h2>`;
-        content += `<div>${item.result?.replace(/\n/g, '<br/>')}</div>`;
+        const chapterTitle = item.title || (language === 'zh' ? `第${index + 1}章` : `Chapter ${index + 1}`);
+        content += `<h2>${escapeHtml(chapterTitle)}</h2>`;
+        // 先 escape HTML，再将换行转为 <br/>
+        content += `<div>${escapeHtml(item.result || '').replace(/\n/g, '<br/>')}</div>`;
       });
       content += `</body></html>`;
     } else {
@@ -1118,7 +1198,12 @@ ${characterMemory.map(c => `- ${c.replaceWith || c.originalName}：${c.descripti
           <MessageSquare size={20} />
         </button>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          {/* 多模态模型选择标签 */}
+          <span style={{ fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+            {language === 'zh' ? '多模态模型' : 'Multimodal'}
+          </span>
+
           <button
             onClick={() => setShowModelPicker(!showModelPicker)}
             className="model-chip"
@@ -1126,6 +1211,8 @@ ${characterMemory.map(c => `- ${c.replaceWith || c.originalName}：${c.descripti
           >
             {currentModel?.name || T('selectModel')}
           </button>
+
+          {/* 批量创作按钮 */}
           <button
             onClick={() => setShowQueuePanel(!showQueuePanel)}
             style={{
@@ -1249,8 +1336,12 @@ ${characterMemory.map(c => `- ${c.replaceWith || c.originalName}：${c.descripti
           flexDirection: 'column',
         }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-            <span style={{ fontWeight: 600, fontSize: 14, color: 'var(--text-primary)' }}>
-              📝 {language === 'zh' ? '批量创作' : 'Batch Creation'}
+            <span style={{ fontWeight: 600, fontSize: 14, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Sparkles size={16} style={{ color: 'var(--accent)' }} />
+              {language === 'zh' ? '超级写作' : 'Super Writing'}
+              <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 400 }}>
+                ({language === 'zh' ? '批量创作' : 'Batch Creation'})
+              </span>
             </span>
             <button onClick={() => setShowQueuePanel(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', padding: 4, fontSize: 12 }}>
               {language === 'zh' ? '收回 ↑' : 'Collapse ↑'}

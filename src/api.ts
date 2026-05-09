@@ -518,7 +518,7 @@ export async function executeModelQueue(
   onProgress?: (queueId: string, content: string, isComplete: boolean) => void,
   onChapterComplete?: (title: string, content: string) => void  // 新增：章节完成时写入对话
 ): Promise<void> {
-  const { apiKey, modelQueue, setIsQueueRunning, updateQueueResult, setCurrentQueueIndex, getCurrentConversation, characterMemory, worldSetting, parallelMode } = useAppStore.getState();
+  const { apiKey, modelQueue, setIsQueueRunning, updateQueueResult, setCurrentQueueIndex, getCurrentConversation, characterMemory, worldSetting, parallelMode, activeWritingDraft } = useAppStore.getState();
   if (!apiKey) throw new Error('请先设置 API Key');
   if (modelQueue.length === 0) return;
 
@@ -533,8 +533,12 @@ export async function executeModelQueue(
     }
   }
 
-  // 构建系统提示词
-  const systemPrompt = `你是一位专业的小说作家。请根据提供的章节大纲和要求进行创作。
+  // 根据创作类型选择系统提示词
+  const creationMode = activeWritingDraft?.creationMode || 'novel';
+  let systemPrompt = '';
+
+  if (creationMode === 'novel') {
+    systemPrompt = `你是一位专业的小说作家。请根据提供的章节大纲和要求进行创作。
 
 创作要求：
 1. 严格按照大纲的剧情走向写作，不要偏离主线
@@ -542,11 +546,19 @@ export async function executeModelQueue(
 3. 文笔流畅，场景描写生动，对话自然
 4. 注意伏笔和呼应，保持故事的连贯性
 5. 每章字数控制在2000-5000字`;
+  } else {
+    systemPrompt = `你是一位专业的内容创作者。请根据用户的要求进行创作。
+
+创作要求：
+1. 严格按照用户的要求进行创作
+2. 内容质量高，语言流畅自然
+3. 符合指定的风格和格式要求`;
+  }
 
   contextMessages.unshift({ role: 'system', content: systemPrompt });
 
-  // 添加角色/世界观设定
-  if (characterMemory.length > 0 || worldSetting) {
+  // 仅在小说模式下添加角色/世界观设定
+  if (creationMode === 'novel' && (characterMemory.length > 0 || worldSetting)) {
     let settingContext = '';
     if (worldSetting) {
       settingContext += `【世界观设定】\n${worldSetting}\n\n`;
@@ -605,8 +617,10 @@ export async function executeModelQueue(
         setCurrentQueueIndex(modelQueue.findIndex(q => q.id === item.id));
 
         try {
-          // 构建指令：明确告诉模型这是写章节
-          const instruction = `请根据以下大纲创作章节内容：
+          // 根据创作类型构建指令
+          let instruction = '';
+          if (creationMode === 'novel') {
+            instruction = `请根据以下大纲创作章节内容：
 
 ${item.instruction}
 
@@ -614,6 +628,15 @@ ${item.instruction}
 - 这是独立的章节创作，请完整写出本章内容
 - 严格遵循大纲中的剧情走向和细节要求
 - 如果大纲中有具体场景、对话要点，请落实到文字中`;
+          } else {
+            instruction = `请根据以下要求创作内容：
+
+${item.instruction}
+
+注意：
+- 这是独立的内容创作，请完整写出
+- 严格遵循要求中的细节和格式`;
+          }
 
           const messages = [
             ...contextMessages,
@@ -639,6 +662,8 @@ ${item.instruction}
           const decoder = new TextDecoder();
           let content = '';
           let buffer = '';
+          let lastSaveTime = Date.now();
+          const SAVE_INTERVAL = 1500; // 1.5秒节流保存
 
           while (true) {
             const { done, value } = await reader.read();
@@ -658,6 +683,11 @@ ${item.instruction}
                   if (chunk) {
                     content += chunk;
                     onProgress?.(item.id, content, false);
+                    // 节流保存：每 1.5 秒更新一次
+                    if (Date.now() - lastSaveTime > SAVE_INTERVAL) {
+                      updateQueueResult(item.id, content);
+                      lastSaveTime = Date.now();
+                    }
                   }
                 } catch {}
               }
@@ -667,7 +697,7 @@ ${item.instruction}
           updateQueueResult(item.id, content);
           onProgress?.(item.id, content, true);
           // 写入对话
-          onChapterComplete?.(item.title || `第${index + 1}章`, content);
+          onChapterComplete?.(item.title || `内容 ${index + 1}`, content);
 
         } catch (e) {
           const errorMsg = `错误: ${e instanceof Error ? e.message : '请求失败'}`;
@@ -678,7 +708,7 @@ ${item.instruction}
 
       await Promise.all(promises);
     } else {
-      // 顺序模式：逐个执行启用的项，后续章节可看到前面章节的摘要
+      // 顺序模式：逐个执行启用的项，后续内容可看到前面内容的摘要
       for (let i = 0; i < enabledQueue.length; i++) {
         const item = enabledQueue[i];
         if (!item.instruction.trim()) continue;
@@ -686,18 +716,20 @@ ${item.instruction}
         setCurrentQueueIndex(modelQueue.findIndex(q => q.id === item.id));
 
         try {
-          // 构建前面章节的摘要上下文（避免 token 爆炸）
+          // 构建前面内容的摘要上下文（避免 token 爆炸）
           let previousContext = '';
           if (chapterSummaries.length > 0) {
-            previousContext = '【前面章节摘要】\n';
+            previousContext = '【前面内容摘要】\n';
             chapterSummaries.forEach((s) => {
               previousContext += `${s.title}：${s.summary}\n`;
             });
-            previousContext += '\n请承接前面的剧情，保持连贯性。\n\n';
+            previousContext += '\n请承接前面的内容，保持连贯性。\n\n';
           }
 
-          // 构建指令
-          const instruction = previousContext + `请根据以下大纲创作章节内容：
+          // 根据创作类型构建指令
+          let instruction = '';
+          if (creationMode === 'novel') {
+            instruction = previousContext + `请根据以下大纲创作章节内容：
 
 ${item.instruction}
 
@@ -705,6 +737,15 @@ ${item.instruction}
 - 严格遵循大纲中的剧情走向和细节要求
 - 与前面章节保持连贯，人物性格一致
 - 如果大纲中有具体场景、对话要点，请落实到文字中`;
+          } else {
+            instruction = previousContext + `请根据以下要求创作内容：
+
+${item.instruction}
+
+注意：
+- 严格遵循要求中的细节和格式
+- 与前面内容保持连贯和一致`;
+          }
 
           const messages = [
             ...contextMessages,
@@ -730,6 +771,8 @@ ${item.instruction}
           const decoder = new TextDecoder();
           let content = '';
           let buffer = '';
+          let lastSaveTime = Date.now();
+          const SAVE_INTERVAL = 1500; // 1.5秒节流保存
 
           while (true) {
             const { done, value } = await reader.read();
@@ -749,6 +792,11 @@ ${item.instruction}
                   if (chunk) {
                     content += chunk;
                     onProgress?.(item.id, content, false);
+                    // 节流保存：每 1.5 秒更新一次
+                    if (Date.now() - lastSaveTime > SAVE_INTERVAL) {
+                      updateQueueResult(item.id, content);
+                      lastSaveTime = Date.now();
+                    }
                   }
                 } catch {}
               }
@@ -760,14 +808,14 @@ ${item.instruction}
           onProgress?.(item.id, content, true);
 
           // 写入对话
-          onChapterComplete?.(item.title || `第${i + 1}章`, content);
+          onChapterComplete?.(item.title || `内容 ${i + 1}`, content);
 
-          // 生成摘要（而非完整内容）供后续章节参考
+          // 生成摘要（而非完整内容）供后续内容参考
           const summary = content.length > 500
             ? content.slice(0, 200) + '...' + content.slice(-200)  // 取开头和结尾各200字作为摘要
             : content;
           chapterSummaries.push({
-            title: item.title || `第${i + 1}章`,
+            title: item.title || `内容 ${i + 1}`,
             summary: summary.slice(0, 500)  // 限制摘要长度
           });
 

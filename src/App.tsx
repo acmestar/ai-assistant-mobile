@@ -1,11 +1,13 @@
 import { useEffect } from 'react';
-import { MessageSquare, Image, Settings } from 'lucide-react';
+import { MessageSquare, Image, Settings, Building2, Pencil } from 'lucide-react';
 import { useAppStore } from './store';
 import { t, Language } from './i18n';
 import ChatTab from './ChatTab';
 import ImageTab from './ImageTab';
 import SettingsTab from './SettingsTab';
 import PWAInstallPrompt from './PWAInstallPrompt';
+import VirtualCompanyTab from './virtual-company/VirtualCompanyTab';
+import SuperWritingTab from './SuperWritingTab';
 
 export default function App() {
   const { activeTab, setActiveTab, apiKey, createConversation, currentConversationId, theme, language } = useAppStore();
@@ -35,6 +37,8 @@ export default function App() {
       <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
         {activeTab === 'chat' && <ChatTab />}
         {activeTab === 'image' && <ImageTab />}
+        {activeTab === 'super-writing' && <SuperWritingTab />}
+        {activeTab === 'virtual-company' && <VirtualCompanyTab />}
         {activeTab === 'settings' && <SettingsTab />}
       </div>
 
@@ -47,6 +51,14 @@ export default function App() {
         <button className={`tab-item ${activeTab === 'image' ? 'active' : ''}`} onClick={() => setActiveTab('image')}>
           <Image size={22} />
           <span>{T('image')}</span>
+        </button>
+        <button className={`tab-item ${activeTab === 'super-writing' ? 'active' : ''}`} onClick={() => setActiveTab('super-writing')}>
+          <Pencil size={22} />
+          <span>{language === 'zh' ? '写作' : 'Write'}</span>
+        </button>
+        <button className={`tab-item ${activeTab === 'virtual-company' ? 'active' : ''}`} onClick={() => setActiveTab('virtual-company')}>
+          <Building2 size={22} />
+          <span>{language === 'zh' ? '公司' : 'Company'}</span>
         </button>
         <button className={`tab-item ${activeTab === 'settings' ? 'active' : ''}`} onClick={() => setActiveTab('settings')}>
           <Settings size={22} />

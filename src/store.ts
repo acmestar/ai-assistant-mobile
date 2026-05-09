@@ -1,6 +1,45 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { Language } from './i18n';
+import { AICompany } from './virtual-company/types';
+
+// ============ 创作类型定义 ============
+export type CreationMode =
+  | 'novel'
+  | 'xiaohongshu'
+  | 'short_video'
+  | 'moments'
+  | 'product_copy'
+  | 'marketing_matrix'
+  | 'course_outline'
+  | 'short_drama'
+  | 'free';
+
+// 创作类型显示名称
+export const CREATION_MODE_NAMES: Record<CreationMode, { zh: string; en: string }> = {
+  novel: { zh: '小说', en: 'Novel' },
+  xiaohongshu: { zh: '小红书', en: 'Xiaohongshu' },
+  short_video: { zh: '短视频', en: 'Short Video' },
+  moments: { zh: '朋友圈', en: 'Moments' },
+  product_copy: { zh: '产品文案', en: 'Product Copy' },
+  marketing_matrix: { zh: '营销矩阵', en: 'Marketing Matrix' },
+  course_outline: { zh: '课程大纲', en: 'Course Outline' },
+  short_drama: { zh: '短剧', en: 'Short Drama' },
+  free: { zh: '自由创作', en: 'Free Creation' },
+};
+
+// 创作类型对应的内容项名称
+export const CREATION_ITEM_NAMES: Record<CreationMode, { zh: string; en: string }> = {
+  novel: { zh: '章节', en: 'Chapter' },
+  xiaohongshu: { zh: '文案', en: 'Post' },
+  short_video: { zh: '脚本', en: 'Script' },
+  moments: { zh: '朋友圈', en: 'Post' },
+  product_copy: { zh: '产品文案', en: 'Product Copy' },
+  marketing_matrix: { zh: '内容计划', en: 'Content Plan' },
+  course_outline: { zh: '课程模块', en: 'Module' },
+  short_drama: { zh: '剧集', en: 'Episode' },
+  free: { zh: '内容项', en: 'Item' },
+};
 
 // 检查存储大小并提醒用户（导出供其他模块使用）
 export function checkStorageSize(): boolean {
@@ -136,7 +175,10 @@ export interface ChatModel {
 export const CHAT_MODELS: ChatModel[] = [
   { id: 'kimi-k2.5', name: 'Kimi K2.5', provider: 'openai', maxTokens: 131072 },
   { id: 'grok-4.2', name: 'Grok 4.2', provider: 'openai', maxTokens: 131072 },
+  { id: 'grok-4.1', name: 'Grok 4.1', provider: 'openai', maxTokens: 131072 },
   { id: 'gpt-5.5', name: 'GPT-5.5', provider: 'openai', maxTokens: 131072 },
+  { id: 'gemini-3.1-flash-lite-preview', name: 'Gemini 3.1 Flash Lite', provider: 'openai', maxTokens: 131072 },
+  { id: 'doubao-seed-2-0-lite-260215', name: 'Doubao Seed 2.0 Lite', provider: 'openai', maxTokens: 131072 },
   { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', provider: 'openai', maxTokens: 131072 },
 ];
 
@@ -302,8 +344,8 @@ interface AppState {
   setPendingImageRequest: (req: { prompt: string; referenceImage?: string } | null) => void;  // 生图历史记录
 
   // UI
-  activeTab: 'chat' | 'image' | 'settings';
-  setActiveTab: (tab: 'chat' | 'image' | 'settings') => void;
+  activeTab: 'chat' | 'image' | 'settings' | 'virtual-company' | 'super-writing' | 'morning-meeting';
+  setActiveTab: (tab: 'chat' | 'image' | 'settings' | 'virtual-company' | 'super-writing' | 'morning-meeting') => void;
   isChatLoading: boolean;
   setIsChatLoading: (loading: boolean) => void;
   isImageLoading: boolean;
@@ -334,6 +376,57 @@ interface AppState {
   parallelMode: boolean;
   setParallelMode: (mode: boolean) => void;
 
+  // 超级功能（可扩展）
+  superFeature: 'writing' | 'meeting' | 'virtual_company' | 'none';
+  setSuperFeature: (feature: 'writing' | 'meeting' | 'virtual_company' | 'none') => void;
+
+  // 虚拟公司会话（临时问答）
+  virtualCompanySessions: Array<{
+    id: string;
+    title: string;
+    requirement: string;
+    status: 'pending' | 'running' | 'completed' | 'failed';
+    config: {
+      reviewDepth: 'quick' | 'standard' | 'deep';
+      roleCount: number;
+      modelProvider: string;
+      enableDebate: boolean;
+      enableMvpPlan: boolean;
+      outputLanguage: string;
+    };
+    projectAnalysis?: any;
+    company?: any;
+    organization?: any[];
+    agents?: any[];
+    workflow?: any[];
+    reviews?: any[];
+    debates?: any[];
+    finalReport?: any;
+    messages?: any[];
+    currentStep?: string;
+    progress?: number;
+    createdAt: number;
+    updatedAt: number;
+  }>;
+  currentVirtualCompanyId: string | null;
+  createVirtualCompanySession: (requirement: string, config: any) => string;
+  updateVirtualCompanySession: (id: string, updates: any) => void;
+  deleteVirtualCompanySession: (id: string) => void;
+  setCurrentVirtualCompanyId: (id: string | null) => void;
+
+  // AI 公司（长期档案）
+  aiCompanies: AICompany[];
+  currentCompanyId: string | null;
+  createAICompany: (companyData: Partial<AICompany> & { name: string; purpose: string }) => string;
+  updateAICompany: (id: string, updates: Partial<AICompany>) => void;
+  deleteAICompany: (id: string) => void;
+  setCurrentCompanyId: (id: string | null) => void;
+  addCompanyMemory: (companyId: string, memory: Omit<AICompany['memories'][0], 'id' | 'companyId' | 'createdAt'>) => void;
+  addCompanyTask: (companyId: string, task: Omit<AICompany['tasks'][0], 'id' | 'companyId' | 'createdAt' | 'status'>) => void;
+  addCompanyRisk: (companyId: string, risk: Omit<AICompany['risks'][0], 'id' | 'companyId' | 'createdAt' | 'status'>) => void;
+  addCompanyMeeting: (companyId: string, meeting: Omit<AICompany['meetings'][0], 'id' | 'companyId' | 'createdAt'>) => void;
+  updateCompanyTaskStatus: (companyId: string, taskId: string, status: AICompany['tasks'][0]['status']) => void;
+
   // 角色/设定记忆库（支持原人名→替换人名映射）
   characterMemory: Array<{ id: string; originalName: string; replaceWith: string; description: string; createdAt: number }>;
   addCharacter: (originalName: string, replaceWith: string, description: string) => void;
@@ -342,10 +435,69 @@ interface AppState {
   worldSetting: string;
   setWorldSetting: (setting: string) => void;
 
+  // 当前创作草稿（持久化，防止丢稿）
+  activeWritingDraft: {
+    id: string;
+    title: string;
+    outlineText: string;
+    creationMode: CreationMode;
+    parsedOutline: {
+      chapters: Array<{ title: string; content?: string; order: number }>;
+      characters: Array<{ name: string; description: string; replaceWith?: string }>;
+      worldSetting: string;
+    } | null;
+    parsedCreation: any; // 不同创作类型的解析结果
+    modelQueue: Array<{ id: string; modelId: string; instruction: string; result?: string; title?: string; enabled: boolean }>;
+    worldSetting: string;
+    characterMemory: Array<{ id: string; originalName: string; replaceWith: string; description: string }>;
+    source: 'chat' | 'superWriting';
+    updatedAt: number;
+  } | null;
+  setActiveWritingDraft: (draft: {
+    id: string;
+    title: string;
+    outlineText: string;
+    creationMode: CreationMode;
+    parsedOutline: {
+      chapters: Array<{ title: string; content?: string; order: number }>;
+      characters: Array<{ name: string; description: string; replaceWith?: string }>;
+      worldSetting: string;
+    } | null;
+    parsedCreation: any;
+    modelQueue: Array<{ id: string; modelId: string; instruction: string; result?: string; title?: string; enabled: boolean }>;
+    worldSetting: string;
+    characterMemory: Array<{ id: string; originalName: string; replaceWith: string; description: string }>;
+    source: 'chat' | 'superWriting';
+    updatedAt: number;
+  } | null) => void;
+  clearActiveWritingDraft: () => void;
+
   // 进度保存
-  savedTasks: Array<{ id: string; name: string; queue: Array<{ id: string; modelId: string; instruction: string; result?: string; title?: string; enabled?: boolean }>; createdAt: number }>;
-  saveTask: (name: string) => void;
-  loadTask: (id: string) => void;
+  savedTasks: Array<{
+    id: string;
+    name: string;
+    queue: Array<{ id: string; modelId: string; instruction: string; result?: string; title?: string; enabled?: boolean }>;
+    creationMode: CreationMode;
+    parsedCreation: any;
+    outlineText: string;
+    worldSetting: string;
+    characterMemory: Array<{ id: string; originalName: string; replaceWith: string; description: string }>;
+    createdAt: number;
+  }>;
+  saveTask: (name: string, taskData?: {
+    creationMode?: CreationMode;
+    parsedCreation?: any;
+    outlineText?: string;
+    worldSetting?: string;
+    characterMemory?: Array<{ id: string; originalName: string; replaceWith: string; description: string }>;
+  }) => void;
+  loadTask: (id: string) => {
+    creationMode?: CreationMode;
+    parsedCreation?: any;
+    outlineText?: string;
+    worldSetting?: string;
+    characterMemory?: Array<{ id: string; originalName: string; replaceWith: string; description: string }>;
+  };
   deleteTask: (id: string) => void;
 
   // Actions
@@ -488,6 +640,149 @@ export const useAppStore = create<AppState>()(
       parallelMode: false,
       setParallelMode: (parallelMode) => set({ parallelMode }),
 
+      // 超级功能
+      superFeature: 'none',
+      setSuperFeature: (superFeature) => set({ superFeature }),
+
+      // 虚拟公司会话
+      virtualCompanySessions: [],
+      currentVirtualCompanyId: null,
+      createVirtualCompanySession: (requirement, config) => {
+        const id = Date.now().toString() + Math.random().toString(36).slice(2, 7);
+        const session = {
+          id,
+          title: requirement.slice(0, 30) + (requirement.length > 30 ? '...' : ''),
+          requirement,
+          status: 'pending' as const,
+          config,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        };
+        set((state) => ({
+          virtualCompanySessions: [session, ...state.virtualCompanySessions],
+          currentVirtualCompanyId: id,
+        }));
+        return id;
+      },
+      updateVirtualCompanySession: (id, updates) => set((state) => ({
+        virtualCompanySessions: state.virtualCompanySessions.map((s) =>
+          s.id === id ? { ...s, ...updates, updatedAt: Date.now() } : s
+        ),
+      })),
+      deleteVirtualCompanySession: (id) => set((state) => ({
+        virtualCompanySessions: state.virtualCompanySessions.filter((s) => s.id !== id),
+        currentVirtualCompanyId: state.currentVirtualCompanyId === id ? null : state.currentVirtualCompanyId,
+      })),
+      setCurrentVirtualCompanyId: (id) => set({ currentVirtualCompanyId: id }),
+
+      // AI 公司（长期档案）
+      aiCompanies: [],
+      currentCompanyId: null,
+      createAICompany: (companyData) => {
+        const id = Date.now().toString() + Math.random().toString(36).slice(2, 7);
+        const now = new Date().toISOString();
+        const company = {
+          id,
+          name: companyData.name,
+          purpose: companyData.purpose,
+          industry: companyData.industry,
+          stage: companyData.stage,
+          targetUsers: companyData.targetUsers || [],
+          products: companyData.products || [],
+          businessModel: companyData.businessModel,
+          agents: companyData.agents || [],
+          memories: companyData.memories || [],
+          goals: companyData.goals || [],
+          tasks: companyData.tasks || [],
+          risks: companyData.risks || [],
+          meetings: companyData.meetings || [],
+          createdAt: now,
+          updatedAt: now,
+        };
+        set((state) => ({
+          aiCompanies: [company, ...state.aiCompanies],
+          currentCompanyId: id,
+        }));
+        return id;
+      },
+      updateAICompany: (id, updates) => set((state) => ({
+        aiCompanies: state.aiCompanies.map((c) =>
+          c.id === id ? { ...c, ...updates, updatedAt: new Date().toISOString() } : c
+        ),
+      })),
+      deleteAICompany: (id) => set((state) => ({
+        aiCompanies: state.aiCompanies.filter((c) => c.id !== id),
+        currentCompanyId: state.currentCompanyId === id ? null : state.currentCompanyId,
+      })),
+      setCurrentCompanyId: (id) => set({ currentCompanyId: id }),
+      addCompanyMemory: (companyId, memory) => set((state) => ({
+        aiCompanies: state.aiCompanies.map((c) =>
+          c.id === companyId ? {
+            ...c,
+            memories: [...c.memories, {
+              id: Date.now().toString(),
+              companyId,
+              ...memory,
+              createdAt: new Date().toISOString(),
+            }],
+            updatedAt: new Date().toISOString(),
+          } : c
+        ),
+      })),
+      addCompanyTask: (companyId, task) => set((state) => ({
+        aiCompanies: state.aiCompanies.map((c) =>
+          c.id === companyId ? {
+            ...c,
+            tasks: [...c.tasks, {
+              id: Date.now().toString(),
+              companyId,
+              ...task,
+              status: 'todo',
+              createdAt: new Date().toISOString(),
+            }],
+            updatedAt: new Date().toISOString(),
+          } : c
+        ),
+      })),
+      addCompanyRisk: (companyId, risk) => set((state) => ({
+        aiCompanies: state.aiCompanies.map((c) =>
+          c.id === companyId ? {
+            ...c,
+            risks: [...c.risks, {
+              id: Date.now().toString(),
+              companyId,
+              ...risk,
+              status: 'active',
+              createdAt: new Date().toISOString(),
+            }],
+            updatedAt: new Date().toISOString(),
+          } : c
+        ),
+      })),
+      addCompanyMeeting: (companyId, meeting) => set((state) => ({
+        aiCompanies: state.aiCompanies.map((c) =>
+          c.id === companyId ? {
+            ...c,
+            meetings: [...c.meetings, {
+              id: Date.now().toString(),
+              companyId,
+              ...meeting,
+              createdAt: new Date().toISOString(),
+            }],
+            updatedAt: new Date().toISOString(),
+          } : c
+        ),
+      })),
+      updateCompanyTaskStatus: (companyId, taskId, status) => set((state) => ({
+        aiCompanies: state.aiCompanies.map((c) =>
+          c.id === companyId ? {
+            ...c,
+            tasks: c.tasks.map((t) => t.id === taskId ? { ...t, status } : t),
+            updatedAt: new Date().toISOString(),
+          } : c
+        ),
+      })),
+
       // 角色/设定记忆库（支持原人名→替换人名映射）
       characterMemory: [],
       addCharacter: (originalName, replaceWith, description) => set((state) => ({
@@ -510,17 +805,33 @@ export const useAppStore = create<AppState>()(
       worldSetting: '',
       setWorldSetting: (worldSetting) => set({ worldSetting }),
 
+      // 当前创作草稿（持久化，防止丢稿）
+      activeWritingDraft: null,
+      setActiveWritingDraft: (draft) => set({ activeWritingDraft: draft }),
+      clearActiveWritingDraft: () => set({ activeWritingDraft: null }),
+
       // 进度保存
       savedTasks: [],
-      saveTask: (name) => set((state) => ({
+      saveTask: (name, taskData) => set((state) => ({
         savedTasks: [...state.savedTasks, {
           id: Date.now().toString(),
           name,
           queue: [...state.modelQueue],
+          creationMode: taskData?.creationMode || state.activeWritingDraft?.creationMode || 'novel',
+          parsedCreation: taskData?.parsedCreation || state.activeWritingDraft?.parsedCreation || null,
+          outlineText: taskData?.outlineText || state.activeWritingDraft?.outlineText || '',
+          worldSetting: taskData?.worldSetting || state.worldSetting || '',
+          characterMemory: taskData?.characterMemory || state.characterMemory.map(c => ({
+            id: c.id,
+            originalName: c.originalName,
+            replaceWith: c.replaceWith,
+            description: c.description,
+          })) || [],
           createdAt: Date.now(),
         }],
       })),
-      loadTask: (id) => set((state) => {
+      loadTask: (id) => {
+        const state = get();
         const task = state.savedTasks.find((t) => t.id === id);
         if (task) {
           // 确保加载的队列项有 enabled 字段
@@ -528,10 +839,41 @@ export const useAppStore = create<AppState>()(
             ...item,
             enabled: item.enabled !== false  // 默认启用
           }));
-          return { modelQueue: queue, currentQueueIndex: 0 };
+          // 恢复角色记忆时添加 createdAt
+          const restoredCharacterMemory = (task.characterMemory || []).map(c => ({
+            ...c,
+            createdAt: Date.now(),
+          }));
+          // 恢复所有状态
+          set({
+            modelQueue: queue,
+            currentQueueIndex: 0,
+            worldSetting: task.worldSetting || '',
+            characterMemory: restoredCharacterMemory,
+            activeWritingDraft: {
+              id: task.id,
+              title: task.name,
+              outlineText: task.outlineText || '',
+              creationMode: task.creationMode || 'novel',
+              parsedOutline: null,
+              parsedCreation: task.parsedCreation || null,
+              modelQueue: [],
+              worldSetting: task.worldSetting || '',
+              characterMemory: restoredCharacterMemory,
+              source: 'superWriting',
+              updatedAt: Date.now(),
+            },
+          });
+          return {
+            creationMode: task.creationMode,
+            parsedCreation: task.parsedCreation,
+            outlineText: task.outlineText,
+            worldSetting: task.worldSetting,
+            characterMemory: task.characterMemory,
+          };
         }
         return {};
-      }),
+      },
       deleteTask: (id) => set((state) => ({
         savedTasks: state.savedTasks.filter((t) => t.id !== id),
       })),
@@ -741,7 +1083,16 @@ export const useAppStore = create<AppState>()(
         elderMode: state.elderMode,
         characterMemory: state.characterMemory,
         worldSetting: state.worldSetting,
-        savedTasks: state.savedTasks,
+        savedTasks: state.savedTasks.slice(-5), // 最多保留最近5个任务
+        virtualCompanySessions: state.virtualCompanySessions?.slice(0, 10), // 只保留最近10个虚拟公司会话
+        aiCompanies: state.aiCompanies, // 保存所有 AI 公司
+        currentCompanyId: state.currentCompanyId,
+        // 创作中心持久化 - 防止丢稿
+        modelQueue: state.modelQueue,
+        // activeWritingDraft 去重：不保存 modelQueue，由顶层 modelQueue 单独持久化
+        activeWritingDraft: state.activeWritingDraft
+          ? { ...state.activeWritingDraft, modelQueue: [] }
+          : null,
       }),
     }
   )
