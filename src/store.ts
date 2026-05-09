@@ -777,7 +777,7 @@ export const useAppStore = create<AppState>()(
         aiCompanies: state.aiCompanies.map((c) =>
           c.id === companyId ? {
             ...c,
-            tasks: c.tasks.map((t) => t.id === taskId ? { ...t, status } : t),
+            tasks: c.tasks.map((t: AICompany['tasks'][0]) => t.id === taskId ? { ...t, status } : t),
             updatedAt: new Date().toISOString(),
           } : c
         ),
