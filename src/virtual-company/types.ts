@@ -6,8 +6,8 @@ export type Scenario = 'problem_solving' | 'morning_meeting' | 'project_review' 
 // 输入类型
 export type InputType = 'text' | 'image' | 'link' | 'file';
 
-// 会议类型
-export type MeetingType = 'morning' | 'strategy' | 'review' | 'risk' | 'retrospective';
+// 会议类型 - 扩展支持更多类型
+export type MeetingType = 'morning' | 'strategy' | 'project_review' | 'risk' | 'review' | 'brainstorm' | 'retrospective';
 
 // 评审深度
 export type ReviewDepth = 'quick' | 'standard' | 'deep';

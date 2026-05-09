@@ -125,9 +125,11 @@ export function getMeetingTypeLabel(meetingType: MeetingType, language: 'zh' | '
   const labels: Record<MeetingType, { zh: string; en: string }> = {
     morning: { zh: '晨会', en: 'Morning Meeting' },
     strategy: { zh: '战略会', en: 'Strategy Meeting' },
+    project_review: { zh: '项目评审', en: 'Project Review' },
     review: { zh: '评审会', en: 'Review Meeting' },
     risk: { zh: '风险会', en: 'Risk Meeting' },
     retrospective: { zh: '复盘会', en: 'Retrospective' },
+    brainstorm: { zh: '头脑风暴', en: 'Brainstorm' },
   };
   return labels[meetingType]?.[language] || meetingType;
 }

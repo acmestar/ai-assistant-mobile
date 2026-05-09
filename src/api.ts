@@ -29,19 +29,24 @@ export function cancelImageRequest(): void {
 // 不写聊天记录的 API 调用函数 - 用于创作中心等场景
 export async function callChatCompletionRaw(
   prompt: string,
-  imageBase64?: string,
-  onChunk?: (chunk: string) => void
+  options?: {
+    imageBase64?: string;
+    modelId?: string;
+    onChunk?: (chunk: string) => void;
+  }
 ): Promise<string> {
   const { apiKey, chatModelId } = useAppStore.getState();
   if (!apiKey) throw new Error('请先设置 API Key');
 
-  const model = CHAT_MODELS.find((m) => m.id === chatModelId) || CHAT_MODELS[0];
+  // 优先使用传入的 modelId，否则使用全局默认
+  const modelId = options?.modelId || chatModelId;
+  const model = CHAT_MODELS.find((m) => m.id === modelId) || CHAT_MODELS[0];
 
   const messages: Array<{ role: string; content: string | Array<{ type: string; text?: string; image_url?: { url: string } }> }> = [];
   messages.push({ role: 'user', content: prompt });
 
-  if (imageBase64) {
-    messages[0] = { role: 'user', content: [{ type: 'text', text: prompt }, { type: 'image_url', image_url: { url: imageBase64 } }] };
+  if (options?.imageBase64) {
+    messages[0] = { role: 'user', content: [{ type: 'text', text: prompt }, { type: 'image_url', image_url: { url: options.imageBase64 } }] };
   }
 
   const resp = await fetch(`${API_BASE}/chat/completions`, {
@@ -80,7 +85,7 @@ export async function callChatCompletionRaw(
           const content = parsed.choices?.[0]?.delta?.content || '';
           if (content) {
             fullContent += content;
-            onChunk?.(content);
+            options?.onChunk?.(content);
           }
         } catch {
           // 忽略解析错误
@@ -583,7 +588,7 @@ async function generateGeminiImage(apiKey: string, modelId: string, prompt: stri
 export async function executeModelQueue(
   onProgress?: (queueId: string, content: string, isComplete: boolean) => void,
   onChapterComplete?: (title: string, content: string) => void,  // 章节完成时写入对话
-  options?: { saveToConversation?: boolean }  // 是否保存到聊天记录，默认 true
+  options?: { saveToConversation?: boolean; modelId?: string }  // modelId: 默认模型，优先级低于队列项的 modelId
 ): Promise<void> {
   const { apiKey, modelQueue, setIsQueueRunning, updateQueueResult, setCurrentQueueIndex, getCurrentConversation, characterMemory, worldSetting, parallelMode, activeWritingDraft } = useAppStore.getState();
   if (!apiKey) throw new Error('请先设置 API Key');
@@ -712,11 +717,14 @@ ${item.instruction}
             { role: 'user' as const, content: instruction },
           ];
 
+          // 模型选择优先级：队列项的 modelId > options.modelId > 全局默认
+          const effectiveModelId = item.modelId || options?.modelId || useAppStore.getState().chatModelId;
+
           const resp = await fetch(`${API_BASE}/chat/completions`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
             body: JSON.stringify({
-              model: item.modelId,
+              model: effectiveModelId,
               messages,
               max_tokens: 8192,
               stream: true,
@@ -823,11 +831,14 @@ ${item.instruction}
             { role: 'user' as const, content: instruction },
           ];
 
+          // 模型选择优先级：队列项的 modelId > options.modelId > 全局默认
+          const effectiveModelId = item.modelId || options?.modelId || useAppStore.getState().chatModelId;
+
           const resp = await fetch(`${API_BASE}/chat/completions`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
             body: JSON.stringify({
-              model: item.modelId,
+              model: effectiveModelId,
               messages,
               max_tokens: 8192,
               stream: true,

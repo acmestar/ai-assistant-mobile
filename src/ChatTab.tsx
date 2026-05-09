@@ -5,6 +5,7 @@ import { sendChatMessageStream, cancelChatRequest } from './api';
 import { t, Language } from './i18n';
 import { hapticFeedback, shareConversation } from './utils';
 import ReactMarkdown from 'react-markdown';
+import AutoResizeTextarea from './components/AutoResizeTextarea';
 
 const SCROLL_POSITION_KEY = 'chat-scroll-position';
 
@@ -547,6 +548,8 @@ export default function ChatTab() {
       setAttachedImage(reader.result as string);
     };
     reader.readAsDataURL(file);
+    // 清空 input 以允许重复选择同一文件
+    e.target.value = '';
   };
 
   const handleNewChat = () => {
@@ -658,13 +661,14 @@ export default function ChatTab() {
             onClick={() => {
               // 只发送当前输入框内容，不发送整个聊天记录
               const contentToSend = input.trim();
-              if (contentToSend) {
-                useAppStore.getState().setPendingWritingRequirement(contentToSend);
-                useAppStore.getState().setActiveTab('super-writing');
-                hapticFeedback('medium');
-              } else {
+              if (!contentToSend) {
                 setError(language === 'zh' ? '请先输入创作需求' : 'Please enter your creation request');
+                return;
               }
+              useAppStore.getState().setPendingWritingRequirement(contentToSend);
+              useAppStore.getState().setActiveTab('super-writing');
+              setInput('');  // 清空输入框
+              hapticFeedback('medium');
             }}
             style={{
               padding: 6,
@@ -851,10 +855,12 @@ export default function ChatTab() {
               )}
               {editingMessageId === msg.id ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%' }}>
-                  <textarea
+                  <AutoResizeTextarea
                     value={editingContent}
                     onChange={(e) => setEditingContent(e.target.value)}
-                    style={{ width: '100%', minHeight: 60, resize: 'vertical' }}
+                    minHeight={60}
+                    maxHeight={200}
+                    style={{ width: '100%' }}
                   />
                   <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                     <button onClick={handleCancelEdit} className="btn-secondary" style={{ padding: '6px 16px', fontSize: 13 }}>取消</button>
@@ -1144,8 +1150,7 @@ export default function ChatTab() {
               <Zap size={20} />
             </button>
 
-            <textarea
-              ref={inputRef}
+            <AutoResizeTextarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
@@ -1155,16 +1160,13 @@ export default function ChatTab() {
                 }
               }}
               placeholder={T('inputMessage')}
-              rows={1}
+              minHeight={44}
+              maxHeight={120}
               style={{
                 flex: 1,
                 borderRadius: 20,
-                resize: 'none',
-                minHeight: 44,
-                maxHeight: 120,
                 padding: '12px 16px',
                 lineHeight: 1.4,
-                overflowY: 'auto',
               }}
             />
 

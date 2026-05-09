@@ -412,12 +412,12 @@ export default function CompanyWorkspace({ companyId, onBack, onStartMeeting }: 
                   }}
                   style={{ marginTop: 3 }}
                 />
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-primary)', textDecoration: task.status === 'done' ? 'line-through' : 'none' }}>
+                <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
+                  <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-primary)', textDecoration: task.status === 'done' ? 'line-through' : 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {task.title}
                   </div>
                   {task.description && (
-                    <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>{task.description}</p>
+                    <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{task.description}</p>
                   )}
                   <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
                     <span style={{

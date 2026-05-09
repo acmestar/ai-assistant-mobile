@@ -19,18 +19,18 @@ import {
   Target,
   Briefcase,
   AlertTriangle,
+  Lightbulb,
+  Sparkles,
 } from 'lucide-react';
 import { useAppStore } from '../store';
 import {
   AICompany,
-  CompanyAgent,
   AgentSpeech,
   CompanyMeeting,
   MorningMeetingMinutes,
   SuggestedTask,
   SuggestedMemory,
   CompanyContextSnapshot,
-  CompanyMemory,
 } from './types';
 import {
   callModel,
@@ -41,16 +41,37 @@ import {
   getTaskTypeForAgent,
 } from './modelRouter';
 import GenerationInfo from './GenerationInfo';
+import {
+  MeetingTypeId,
+  MeetingRecommendation,
+  MEETING_TYPES,
+  getMeetingTypeConfig,
+  getMeetingTypeName,
+} from './meetingTypes';
+import {
+  buildSpeechPrompt,
+  buildMinutesPrompt,
+  buildMeetingRecommendationPrompt,
+  parseRecommendationResult,
+} from './meetingPrompts';
 
 interface CompanyMeetingPageProps {
   companyId: string;
-  meetingType: 'morning' | 'strategy' | 'review' | 'risk' | 'retrospective';
+  meetingType?: MeetingTypeId;
   onBack: () => void;
 }
 
-export default function CompanyMeetingPage({ companyId, meetingType, onBack }: CompanyMeetingPageProps) {
+export default function CompanyMeetingPage({ companyId, meetingType: initialMeetingType, onBack }: CompanyMeetingPageProps) {
   const { language, apiKey, aiCompanies, addCompanyMeeting, addCompanyTask, addCompanyMemory } = useAppStore();
   const company = aiCompanies.find((c: AICompany) => c.id === companyId);
+
+  // 会议类型选择（支持从外部传入初始值）
+  const [selectedMeetingType, setSelectedMeetingType] = useState<MeetingTypeId>(initialMeetingType || 'morning');
+
+  // 推荐会议状态
+  const [recommendations, setRecommendations] = useState<MeetingRecommendation[]>([]);
+  const [isRecommending, setIsRecommending] = useState(false);
+  const [recommendationError, setRecommendationError] = useState<string | null>(null);
 
   const [inputType, setInputType] = useState<'text' | 'image' | 'link'>('text');
   const [textContent, setTextContent] = useState('');
@@ -73,7 +94,7 @@ export default function CompanyMeetingPage({ companyId, meetingType, onBack }: C
   const [pendingTasks, setPendingTasks] = useState<SuggestedTask[]>([]);
   const [pendingMemories, setPendingMemories] = useState<SuggestedMemory[]>([]);
 
-  // 已保存的会议ID（会议生成完成后立即保存，用户确认后更新）
+  // 已保存的会议ID
   const [savedMeetingId, setSavedMeetingId] = useState<string | null>(null);
 
   // 生成信息
@@ -90,14 +111,6 @@ export default function CompanyMeetingPage({ companyId, meetingType, onBack }: C
     );
   }
 
-  const meetingTypeLabels = {
-    morning: language === 'zh' ? '晨会' : 'Morning Meeting',
-    strategy: language === 'zh' ? '战略会' : 'Strategy Meeting',
-    review: language === 'zh' ? '项目评审' : 'Project Review',
-    risk: language === 'zh' ? '风险会' : 'Risk Meeting',
-    retrospective: language === 'zh' ? '复盘会' : 'Retrospective',
-  };
-
   // 处理图片上传
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -108,6 +121,83 @@ export default function CompanyMeetingPage({ companyId, meetingType, onBack }: C
       };
       reader.readAsDataURL(file);
     }
+    e.target.value = '';
+  };
+
+  // 推荐会议主题
+  const handleRecommendMeetings = async () => {
+    if (!apiKey) {
+      alert(language === 'zh' ? '请先设置 API Key' : 'Please set API Key first');
+      return;
+    }
+
+    setIsRecommending(true);
+    setRecommendationError(null);
+    setRecommendations([]);
+
+    try {
+      const contextSnapshot: CompanyContextSnapshot = {
+        companyName: company.name,
+        purpose: company.purpose,
+        industry: company.industry,
+        stage: company.stage,
+        targetUsers: company.targetUsers,
+        products: company.products,
+        businessModel: company.businessModel,
+        currentGoals: company.goals?.filter(g => g.status === 'active').map(g => g.title),
+        currentTasks: company.tasks?.filter(t => t.status !== 'done').map(t => t.title),
+        risks: company.risks?.filter(r => r.status === 'active').map(r => r.title),
+        agents: company.agents,
+      };
+
+      const recentMeetings = (company.meetings || []).slice(-5).map(m => ({
+        type: m.type,
+        createdAt: m.createdAt,
+      }));
+
+      const recentTasks = (company.tasks || []).map(t => ({
+        title: t.title,
+        status: t.status,
+      }));
+
+      const prompt = buildMeetingRecommendationPrompt(contextSnapshot, recentMeetings, recentTasks);
+
+      const result = await callModel<string>(
+        'meeting_recommendation',
+        { prompt },
+        { mode: 'standard', companyId, meetingId: `recommend-${Date.now()}` }
+      );
+
+      if (result.success && result.data) {
+        const parsed = parseRecommendationResult(result.data);
+        if (parsed.length > 0) {
+          setRecommendations(parsed);
+        } else {
+          // 如果解析失败，提供默认推荐
+          setRecommendations([
+            {
+              meetingType: 'morning',
+              title: language === 'zh' ? '今日工作安排' : 'Today\'s work planning',
+              reason: language === 'zh' ? '明确今日重点任务' : 'Clarify today\'s priorities',
+              expectedOutput: language === 'zh' ? '今日任务清单、阻碍、行动' : 'Tasks, blockers, actions',
+              priority: 'high',
+            },
+          ]);
+        }
+      }
+    } catch (error: any) {
+      console.error('推荐会议失败:', error);
+      setRecommendationError(error.message || (language === 'zh' ? '推荐失败' : 'Recommendation failed'));
+    } finally {
+      setIsRecommending(false);
+    }
+  };
+
+  // 点击推荐会议，开始此会议
+  const handleStartRecommendedMeeting = (rec: MeetingRecommendation) => {
+    setSelectedMeetingType(rec.meetingType);
+    setTextContent(rec.title);
+    setRecommendations([]);
   };
 
   // 开始会议
@@ -134,7 +224,6 @@ export default function CompanyMeetingPage({ companyId, meetingType, onBack }: C
     setCurrentStep(language === 'zh' ? '正在初始化...' : 'Initializing...');
     setError(null);
 
-    // 创建会话 ID
     const sessionId = `meeting-${Date.now()}`;
     sessionIdRef.current = sessionId;
     clearSessionModels(sessionId);
@@ -184,18 +273,16 @@ export default function CompanyMeetingPage({ companyId, meetingType, onBack }: C
 
       // Step 4: 内容摘要
       setProgress(25);
-      setCurrentStep(language === 'zh' ? '正在整理今日信息摘要...' : 'Summarizing...');
+      setCurrentStep(language === 'zh' ? '正在整理信息摘要...' : 'Summarizing...');
       await callModel<string>(
         'content_summary',
         {
-          prompt: `请总结以下内容的核心要点（100字以内）：
-
-${extractedContent}`,
+          prompt: `请总结以下内容的核心要点（100字以内）：\n\n${extractedContent}`,
         },
         { mode: userMode, companyId, meetingId: sessionId }
       );
 
-      // Step 5-10: 各角色发言（使用 getTaskTypeForAgent 动态分配）
+      // Step 5-10: 各角色发言
       const agents = company.agents || [];
       const currentSpeeches: AgentSpeech[] = [];
 
@@ -206,16 +293,17 @@ ${extractedContent}`,
         setProgress(progressPercent);
         setCurrentStep(`${agent.name}（${agent.role}）正在发言...`);
 
-        // 使用 getTaskTypeForAgent 动态获取 TaskType
-        const taskType = getTaskTypeForAgent(agent, meetingType);
+        const taskType = getTaskTypeForAgent(agent, selectedMeetingType);
 
+        // 使用新的 buildSpeechPrompt 函数
         const speechPrompt = buildSpeechPrompt(
           extractedContent,
           contextSnapshot,
           relatedMemories,
-          agent,
-          currentSpeeches,
-          meetingType
+          selectedMeetingType,
+          agent.name,
+          agent.role,
+          currentSpeeches
         );
 
         const speechResult = await callModel<Omit<AgentSpeech, 'agentId' | 'agentName' | 'role' | 'createdAt'>>(
@@ -254,31 +342,23 @@ ${extractedContent}`,
 
       // Step 11: 生成会议纪要
       setProgress(85);
-      setCurrentStep(language === 'zh' ? '正在整合最终晨会纪要...' : 'Synthesizing final minutes...');
+      const meetingName = getMeetingTypeName(selectedMeetingType, language as 'zh' | 'en');
+      setCurrentStep(language === 'zh' ? `正在生成${meetingName}纪要...` : `Generating ${meetingName} minutes...`);
+
+      // 使用新的 buildMinutesPrompt 函数
       const minutesPrompt = buildMinutesPrompt(
         extractedContent,
         contextSnapshot,
         relatedMemories,
         currentSpeeches,
-        meetingType
+        selectedMeetingType
       );
 
       const minutesResult = await callModel<MorningMeetingMinutes>(
         'final_report_synthesis',
         {
           prompt: minutesPrompt,
-          systemPrompt: `你是会议主持人，请根据讨论结果生成会议纪要。
-输出 JSON 格式，包含：
-- meetingType: "morning"
-- informationSummary: 信息摘要（100字以内）
-- relevanceLevel: "high" | "medium" | "low"
-- relevanceReason: 关联度判断理由
-- goalImpact: [{ goal: "目标名称", impact: "影响描述", direction: "positive" | "negative" | "neutral" | "uncertain" }]
-- businessImpact: { product?: "产品影响", user?: "用户影响", market?: "市场影响", competition?: "竞争影响", businessModel?: "商业模式影响", technical?: "技术影响", execution?: "执行影响", cost?: "成本影响", resource?: "资源影响", risk?: "风险影响" }
-- opportunities: ["机会1", "机会2"]
-- risks: ["风险1", "风险2"]
-- actions: ["行动1", "行动2"]
-- todayFocus: ["今日重点1", "今日重点2"]`,
+          systemPrompt: `你是会议主持人，请根据讨论结果生成会议纪要。严格按照指定的 JSON 格式输出。`,
         },
         { mode: userMode, companyId, meetingId: sessionId, requireJson: true }
       );
@@ -286,23 +366,11 @@ ${extractedContent}`,
       if (minutesResult.success && minutesResult.data) {
         setMinutes(minutesResult.data);
 
-        // 从会议纪要中提取建议任务和记忆
-        // 注意：这里使用单独的 AI 调用来提取任务和记忆
+        // 提取任务和记忆
         const taskExtractionResult = await callModel<{ tasks: SuggestedTask[] }>(
           'task_extraction',
           {
-            prompt: `根据以下会议讨论内容，提取建议的任务：
-
-${JSON.stringify(minutesResult.data)}
-
-${currentSpeeches.map(s => `【${s.agentName}】${s.content}`).join('\n')}
-
-输出 JSON 格式：
-{
-  "tasks": [
-    { "id": "task-1", "title": "任务标题", "description": "任务描述", "priority": "high" | "medium" | "low" }
-  ]
-}`,
+            prompt: `根据以下会议讨论内容，提取建议的任务：\n\n${JSON.stringify(minutesResult.data)}\n\n${currentSpeeches.map(s => `【${s.agentName}】${s.content}`).join('\n')}\n\n输出 JSON 格式：\n{\n  "tasks": [\n    { "id": "task-1", "title": "任务标题", "description": "任务描述", "priority": "high" | "medium" | "low" }\n  ]\n}`,
           },
           { mode: userMode, companyId, meetingId: sessionId, requireJson: true }
         );
@@ -310,21 +378,11 @@ ${currentSpeeches.map(s => `【${s.agentName}】${s.content}`).join('\n')}
         const memoryExtractionResult = await callModel<{ memories: SuggestedMemory[] }>(
           'memory_extraction',
           {
-            prompt: `根据以下会议讨论内容，提取应该写入公司长期记忆的内容：
-
-${JSON.stringify(minutesResult.data)}
-
-输出 JSON 格式：
-{
-  "memories": [
-    { "id": "memory-1", "type": "strategy" | "market" | "product" | "risk" | "user" | "decision" | "meeting_summary", "content": "记忆内容", "importance": "high" | "medium" | "low" }
-  ]
-}`,
+            prompt: `根据以下会议讨论内容，提取应该写入公司长期记忆的内容：\n\n${JSON.stringify(minutesResult.data)}\n\n输出 JSON 格式：\n{\n  "memories": [\n    { "id": "memory-1", "type": "strategy" | "market" | "product" | "risk" | "user" | "decision" | "meeting_summary", "content": "记忆内容", "importance": "high" | "medium" | "low" }\n  ]\n}`,
           },
           { mode: userMode, companyId, meetingId: sessionId, requireJson: true }
         );
 
-        // 提取任务和记忆
         const extractedTasks = taskExtractionResult.success && taskExtractionResult.data?.tasks
           ? taskExtractionResult.data.tasks : [];
         const extractedMemories = memoryExtractionResult.success && memoryExtractionResult.data?.memories
@@ -333,11 +391,9 @@ ${JSON.stringify(minutesResult.data)}
         setPendingTasks(extractedTasks);
         setPendingMemories(extractedMemories);
 
-        // 生成来源摘要
         const summary2 = generateSourceSummary(sessionId, userMode, 'gpt-5.5');
         setSourceSummary(summary2);
 
-        // 会议生成完成后立即保存（此时 confirmedTaskIds 和 confirmedMemoryIds 为空）
         const lightAgents = company.agents?.map(a => ({
           id: a.id,
           name: a.name,
@@ -350,7 +406,7 @@ ${JSON.stringify(minutesResult.data)}
         const meeting: CompanyMeeting = {
           id: meetingId,
           companyId,
-          type: meetingType,
+          type: selectedMeetingType,
           inputType,
           rawInput: inputType === 'text' ? textContent : inputType === 'image' ? imageUrl || '' : linkUrl,
           extractedContent: textContent,
@@ -395,11 +451,9 @@ ${JSON.stringify(minutesResult.data)}
   const handleConfirmTasksAndMemories = () => {
     if (!savedMeetingId) return;
 
-    // 更新会议的 confirmedTaskIds 和 confirmedMemoryIds
     const meeting = company.meetings?.find(m => m.id === savedMeetingId);
     if (!meeting) return;
 
-    // 更新会议的确认字段
     const updatedMeeting: CompanyMeeting = {
       ...meeting,
       suggestedTasks: pendingTasks,
@@ -409,10 +463,8 @@ ${JSON.stringify(minutesResult.data)}
       updatedAt: new Date().toISOString(),
     };
 
-    // 更新会议记录
     addCompanyMeeting(companyId, updatedMeeting);
 
-    // 如果有确认的任务和记忆，转换成正式的 CompanyTask 和 CompanyMemory 并保存
     if (showTaskConfirm && pendingTasks.length > 0) {
       pendingTasks.forEach(task => {
         const companyTask = {
@@ -444,8 +496,10 @@ ${JSON.stringify(minutesResult.data)}
   const handleExport = () => {
     if (!minutes) return;
 
+    const meetingName = getMeetingTypeName(selectedMeetingType, language as 'zh' | 'en');
+
     const exportContent = `
-# ${company.name} - ${meetingTypeLabels[meetingType]}
+# ${company.name} - ${meetingName}
 
 ## 公司背景
 - 使命：${company.purpose}
@@ -454,12 +508,6 @@ ${JSON.stringify(minutesResult.data)}
 
 ## 信息摘要
 ${minutes.informationSummary}
-
-## 与公司的关联度
-${minutes.relevanceLevel} - ${minutes.relevanceReason}
-
-## 对公司目标的影响
-${minutes.goalImpact?.map(g => `- ${g.goal}：${g.impact}（${g.direction}）`).join('\n') || '无'}
 
 ## 机会
 ${minutes.opportunities?.map((o, i) => `${i + 1}. ${o}`).join('\n') || '无'}
@@ -478,28 +526,255 @@ ${minutes.todayActions?.map((a, i) => `${i + 1}. ${a}`).join('\n') || '无'}
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${company.name}_${meetingTypeLabels[meetingType]}_${new Date().toLocaleDateString()}.md`;
+    a.download = `${company.name}_${meetingName}_${new Date().toLocaleDateString()}.md`;
     a.click();
     URL.revokeObjectURL(url);
   };
 
+  // 渲染会议类型选择
+  const renderMeetingTypeSelector = () => (
+    <div style={{
+      background: 'var(--bg-secondary)',
+      borderRadius: 12,
+      padding: 12,
+      border: '1px solid var(--border)',
+    }}>
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: 12,
+      }}>
+        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+          {language === 'zh' ? '会议类型' : 'Meeting Type'}
+        </span>
+        <button
+          onClick={handleRecommendMeetings}
+          disabled={isRecommending}
+          style={{
+            padding: '4px 10px',
+            background: 'var(--accent-dim)',
+            border: '1px solid var(--accent)',
+            borderRadius: 6,
+            color: 'var(--accent)',
+            fontSize: 11,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 4,
+            cursor: isRecommending ? 'wait' : 'pointer',
+            opacity: isRecommending ? 0.7 : 1,
+          }}
+        >
+          {isRecommending ? (
+            <RefreshCw size={12} className="spin" />
+          ) : (
+            <Lightbulb size={12} />
+          )}
+          {language === 'zh' ? '推荐会议' : 'Recommend'}
+        </button>
+      </div>
+
+      {/* 会议类型卡片 */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(3, 1fr)',
+        gap: 8,
+      }}>
+        {MEETING_TYPES.map((mt) => (
+          <button
+            key={mt.id}
+            onClick={() => setSelectedMeetingType(mt.id)}
+            style={{
+              padding: 10,
+              background: selectedMeetingType === mt.id ? 'var(--accent-dim)' : 'var(--bg-tertiary)',
+              border: selectedMeetingType === mt.id ? '1px solid var(--accent)' : '1px solid var(--border)',
+              borderRadius: 8,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: 4,
+              cursor: 'pointer',
+              minWidth: 0,
+            }}
+          >
+            <span style={{ fontSize: 18 }}>{mt.icon}</span>
+            <span style={{
+              fontSize: 11,
+              fontWeight: 500,
+              color: selectedMeetingType === mt.id ? 'var(--accent)' : 'var(--text-primary)',
+              textAlign: 'center',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              maxWidth: '100%',
+            }}>
+              {language === 'zh' ? mt.nameZh : mt.nameEn}
+            </span>
+          </button>
+        ))}
+      </div>
+
+      {/* 当前选中会议类型说明 */}
+      {(() => {
+        const config = getMeetingTypeConfig(selectedMeetingType);
+        if (!config) return null;
+        return (
+          <div style={{
+            marginTop: 10,
+            padding: 10,
+            background: 'var(--bg-tertiary)',
+            borderRadius: 8,
+          }}>
+            <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>
+              {language === 'zh' ? config.descriptionZh : config.descriptionEn}
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+              📋 {language === 'zh' ? '产出：' : 'Output: '}{language === 'zh' ? config.outputZh : config.outputEn}
+            </div>
+          </div>
+        );
+      })()}
+    </div>
+  );
+
+  // 渲染推荐会议结果
+  const renderRecommendations = () => {
+    if (recommendations.length === 0 && !recommendationError) return null;
+
+    return (
+      <div style={{
+        background: 'var(--bg-secondary)',
+        borderRadius: 12,
+        padding: 12,
+        border: '1px solid var(--accent)',
+      }}>
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          marginBottom: 12,
+        }}>
+          <Sparkles size={16} style={{ color: 'var(--accent)' }} />
+          <span style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: 13 }}>
+            {language === 'zh' ? '推荐会议主题' : 'Recommended Meetings'}
+          </span>
+          <button
+            onClick={() => setRecommendations([])}
+            style={{
+              marginLeft: 'auto',
+              padding: 2,
+              background: 'transparent',
+              border: 'none',
+              color: 'var(--text-muted)',
+              cursor: 'pointer',
+            }}
+          >
+            ✕
+          </button>
+        </div>
+
+        {recommendationError && (
+          <div style={{ color: 'var(--danger)', fontSize: 12, marginBottom: 8 }}>
+            {recommendationError}
+          </div>
+        )}
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {recommendations.map((rec, index) => {
+            const config = getMeetingTypeConfig(rec.meetingType);
+            return (
+              <div
+                key={index}
+                style={{
+                  padding: 12,
+                  background: 'var(--bg-tertiary)',
+                  borderRadius: 8,
+                  border: '1px solid var(--border)',
+                }}
+              >
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  marginBottom: 6,
+                }}>
+                  <span style={{ fontSize: 16 }}>{config?.icon || '📅'}</span>
+                  <span style={{
+                    fontWeight: 500,
+                    color: 'var(--text-primary)',
+                    fontSize: 13,
+                    flex: 1,
+                    minWidth: 0,
+                    overflowWrap: 'anywhere',
+                    wordBreak: 'break-word',
+                  }}>
+                    {rec.title}
+                  </span>
+                  {rec.priority && (
+                    <span style={{
+                      padding: '2px 6px',
+                      background: rec.priority === 'high' ? 'rgba(239, 68, 68, 0.1)' : 'var(--bg-secondary)',
+                      borderRadius: 4,
+                      fontSize: 10,
+                      color: rec.priority === 'high' ? 'var(--danger)' : 'var(--text-muted)',
+                    }}>
+                      {rec.priority}
+                    </span>
+                  )}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>
+                  {rec.reason}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 8 }}>
+                  📋 {rec.expectedOutput}
+                </div>
+                <button
+                  onClick={() => handleStartRecommendedMeeting(rec)}
+                  style={{
+                    width: '100%',
+                    padding: 8,
+                    background: 'var(--accent)',
+                    border: 'none',
+                    borderRadius: 6,
+                    color: 'white',
+                    fontSize: 12,
+                    fontWeight: 500,
+                    cursor: 'pointer',
+                  }}
+                >
+                  {language === 'zh' ? '开始此会议' : 'Start This Meeting'}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
   // 渲染输入页面
   const renderInputPage = () => (
-    <div style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: 16, display: 'flex', flexDirection: 'column', gap: 16 }}>
+    <div style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
       {/* 公司信息 */}
       <div style={{
-        padding: 16,
+        padding: 12,
         background: 'var(--bg-secondary)',
         borderRadius: 12,
         border: '1px solid var(--border)',
       }}>
-        <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8 }}>
+        <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>
           {company.name}
         </div>
         <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5 }}>
           {company.purpose}
         </div>
       </div>
+
+      {/* 会议类型选择 */}
+      {renderMeetingTypeSelector()}
+
+      {/* 推荐会议结果 */}
+      {renderRecommendations()}
 
       {/* 生成模式选择 */}
       <div style={{
@@ -603,15 +878,15 @@ ${minutes.todayActions?.map((a, i) => `${i + 1}. ${a}`).join('\n') || '无'}
       </div>
 
       {/* 输入区域 */}
-      <div style={{ background: 'var(--bg-secondary)', borderRadius: 12, padding: 16 }}>
+      <div style={{ background: 'var(--bg-secondary)', borderRadius: 12, padding: 12 }}>
         {inputType === 'text' && (
           <textarea
             value={textContent}
             onChange={(e) => setTextContent(e.target.value)}
-            placeholder={language === 'zh' ? '粘贴新闻、资讯、政策原文...' : 'Paste news, information, policy text...'}
+            placeholder={language === 'zh' ? '输入会议议题、问题或讨论内容...' : 'Enter meeting topic, question or content...'}
             style={{
               width: '100%',
-              minHeight: 120,
+              minHeight: 100,
               padding: 12,
               borderRadius: 8,
               border: '1px solid var(--border)',
@@ -683,7 +958,7 @@ ${minutes.todayActions?.map((a, i) => `${i + 1}. ${a}`).join('\n') || '无'}
             type="url"
             value={linkUrl}
             onChange={(e) => setLinkUrl(e.target.value)}
-            placeholder={language === 'zh' ? '粘贴新闻链接...' : 'Paste news link...'}
+            placeholder={language === 'zh' ? '粘贴链接...' : 'Paste link...'}
             style={{
               width: '100%',
               padding: 12,
@@ -794,7 +1069,7 @@ ${minutes.todayActions?.map((a, i) => `${i + 1}. ${a}`).join('\n') || '无'}
           </div>
 
           <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 8, color: 'var(--text-primary)' }}>
-            {language === 'zh' ? 'AI 晨会进行中' : 'AI Morning Meeting'}
+            {getMeetingTypeName(selectedMeetingType, language as 'zh' | 'en')} {language === 'zh' ? '进行中' : 'in Progress'}
           </h3>
 
           <p style={{ fontSize: 14, color: 'var(--text-muted)', marginBottom: 24, textAlign: 'center' }}>
@@ -856,28 +1131,11 @@ ${minutes.todayActions?.map((a, i) => `${i + 1}. ${a}`).join('\n') || '无'}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
             <Sunrise size={16} style={{ color: 'var(--accent)' }} />
             <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
-              {language === 'zh' ? '今日信息摘要' : 'Today\'s Summary'}
+              {language === 'zh' ? '会议摘要' : 'Meeting Summary'}
             </span>
           </div>
           <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
             {minutes.informationSummary}
-          </p>
-          <div style={{ marginTop: 12 }}>
-            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-              {language === 'zh' ? '与公司关联度：' : 'Relevance: '}
-            </span>
-            <span style={{
-              padding: '2px 8px',
-              background: minutes.relevanceLevel === 'high' ? 'var(--accent-dim)' : 'var(--bg-tertiary)',
-              borderRadius: 6,
-              fontSize: 11,
-              color: minutes.relevanceLevel === 'high' ? 'var(--accent)' : 'var(--text-muted)',
-            }}>
-              {minutes.relevanceLevel}
-            </span>
-          </div>
-          <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
-            {minutes.relevanceReason}
           </p>
         </div>
       )}
@@ -957,7 +1215,7 @@ ${minutes.todayActions?.map((a, i) => `${i + 1}. ${a}`).join('\n') || '无'}
       {minutes && minutes.todayActions?.length > 0 && (
         <div style={{ padding: 16, background: 'var(--accent-dim)', borderRadius: 12, border: '1px solid var(--accent)' }}>
           <div style={{ fontWeight: 600, color: 'var(--accent)', marginBottom: 12 }}>
-            📋 {language === 'zh' ? '今日行动' : 'Today\'s Actions'}
+            📋 {language === 'zh' ? '行动项' : 'Action Items'}
           </div>
           <ol style={{ margin: 0, paddingLeft: 20, fontSize: 13, color: 'var(--text-secondary)' }}>
             {minutes.todayActions.map((action, i) => (
@@ -1049,6 +1307,8 @@ ${minutes.todayActions?.map((a, i) => `${i + 1}. ${a}`).join('\n') || '无'}
     </div>
   );
 
+  const meetingName = getMeetingTypeName(selectedMeetingType, language as 'zh' | 'en');
+
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       {/* Header */}
@@ -1075,7 +1335,7 @@ ${minutes.todayActions?.map((a, i) => `${i + 1}. ${a}`).join('\n') || '无'}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <Sunrise size={20} style={{ color: 'var(--accent)' }} />
           <span style={{ fontWeight: 600, fontSize: 14 }}>
-            {meetingTypeLabels[meetingType]}
+            {meetingName}
           </span>
         </div>
       </div>
@@ -1095,66 +1355,4 @@ ${minutes.todayActions?.map((a, i) => `${i + 1}. ${a}`).join('\n') || '无'}
       `}</style>
     </div>
   );
-}
-
-// Prompt 构建函数
-function buildSpeechPrompt(
-  content: string,
-  contextSnapshot: CompanyContextSnapshot,
-  relatedMemories: CompanyMemory[],
-  _agent: CompanyAgent,
-  previousSpeeches: AgentSpeech[],
-  _meetingType: string
-): string {
-  return `你是公司晨会专家团队成员，正在参加晨会。
-
-公司背景：
-${JSON.stringify(contextSnapshot, null, 2)}
-
-相关记忆：
-${relatedMemories.map(m => `- [${m.type}] ${m.content}`).join('\n') || '无'}
-
-原始信息：
-${content}
-
-前面专家的观点：
-${previousSpeeches.map(s => `【${s.agentName}】${s.content}`).join('\n') || '无'}
-
-请从你的专业角度发表观点。要求：
-1. 站在你的角色立场，结合公司背景分析这条信息对公司的意义
-2. 判断信息与公司的关联度（high/medium/low）
-3. 分析对公司目标、业务、产品、用户的影响
-4. 给出具体建议和风险提示
-5. 如果有不同意见，明确指出
-
-输出 JSON 格式：
-{
-  "content": "核心观点（150字以内）",
-  "suggestions": ["建议1", "建议2"],
-  "risks": ["风险1", "风险2"]
-}`;
-}
-
-function buildMinutesPrompt(
-  content: string,
-  contextSnapshot: CompanyContextSnapshot,
-  relatedMemories: CompanyMemory[],
-  speeches: AgentSpeech[],
-  _meetingType: string
-): string {
-  return `你是会议主持人，请根据讨论结果生成会议纪要。
-
-公司背景：
-${JSON.stringify(contextSnapshot, null, 2)}
-
-相关记忆：
-${relatedMemories.map(m => `- [${m.type}] ${m.content}`).join('\n') || '无'}
-
-原始信息：
-${content}
-
-专家发言：
-${speeches.map(s => `【${s.agentName}（${s.role}）】\n${s.content}\n建议：${s.suggestions.join('、')}\n风险：${s.risks.join('、')}`).join('\n\n')}
-
-请生成完整的会议纪要。`;
 }

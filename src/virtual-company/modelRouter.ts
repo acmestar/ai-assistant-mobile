@@ -19,6 +19,8 @@ export type TaskType =
   | 'project_review_analysis'
   | 'risk_meeting_analysis'
   | 'retrospective_meeting_analysis'
+  | 'brainstorm_meeting_analysis'
+  | 'meeting_recommendation'
   | 'meeting_summary_draft'
   | 'final_report_synthesis'
 
@@ -280,6 +282,8 @@ const STANDARD_MODEL_ROUTER: Record<TaskType, ModelId> = {
   project_review_analysis: 'gpt-5.5',
   risk_meeting_analysis: 'gpt-5.5',
   retrospective_meeting_analysis: 'gpt-5.5',
+  brainstorm_meeting_analysis: 'gpt-5.5',
+  meeting_recommendation: 'gpt-5.5',
   final_report_synthesis: 'gpt-5.5',
 
   // 资料整理
@@ -443,7 +447,7 @@ export function getModelForTask(taskType: TaskType, mode: UserMode = 'standard')
  */
 export function getTaskTypeForAgent(
   agent: { role: string; department: string; name: string; responsibilities: string[] },
-  meetingType: 'morning' | 'strategy' | 'review' | 'risk' | 'retrospective'
+  meetingType: string
 ): TaskType {
   const text = `${agent.role} ${agent.department} ${agent.name} ${agent.responsibilities.join(' ')}`;
 

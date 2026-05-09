@@ -5,6 +5,14 @@ import { generateImage, cancelImageRequest } from './api';
 import { t, Language } from './i18n';
 import { hapticFeedback, shareImage } from './utils';
 
+// 多图上传类型
+type UploadedImage = {
+  id: string;
+  url: string;
+  name?: string;
+  size?: number;
+};
+
 export default function ImageTab() {
   const { imageModelId, setImageModelId, imageRatio, setImageRatio, imageQuality, setImageQuality, imageRecords, isImageLoading, deleteImageRecord, clearImageRecords, pendingImageRequest, setPendingImageRequest, language } = useAppStore();
 
@@ -16,7 +24,8 @@ export default function ImageTab() {
   const [showRatioPicker, setShowRatioPicker] = useState(false);
   const [showQualityPicker, setShowQualityPicker] = useState(false);
   const [showTemplatePicker, setShowTemplatePicker] = useState(false);
-  const [referenceImage, setReferenceImage] = useState<string | null>(null);
+  // 改为数组支持多图
+  const [referenceImages, setReferenceImages] = useState<UploadedImage[]>([]);
   const [imageScale, setImageScale] = useState(1);
   const [imageRotation, setImageRotation] = useState(0);
   const [searchQuery, setSearchQuery] = useState('');
@@ -25,6 +34,11 @@ export default function ImageTab() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const touchStartXRef = useRef(0); // 触摸起始位置
   const touchCurrentIdRef = useRef<string | null>(null); // 当前触摸的图片ID
+
+  // 最多上传图片数量
+  const MAX_IMAGES = 6;
+  // 单张图片最大 10MB
+  const MAX_IMAGE_SIZE = 10 * 1024 * 1024;
 
   // 语音输入状态
   const [isRecording, setIsRecording] = useState(false);
@@ -236,7 +250,7 @@ export default function ImageTab() {
     return quality;
   };
 
-  const availableRatios = imageModelId === 'gpt-image-2' && referenceImage
+  const availableRatios = imageModelId === 'gpt-image-2' && referenceImages.length > 0
     ? currentModel.ratios.filter(r => ['1:1', '3:2', '2:3'].includes(r))
     : currentModel.ratios;
 
@@ -247,35 +261,90 @@ export default function ImageTab() {
     setPrompt('');
 
     try {
-      await generateImage(promptText, referenceImage || undefined);
-      setReferenceImage(null);
+      // 当前 API 只支持单张参考图，取第一张
+      // TODO: 未来如果 API 支持多图，可以传入所有图片
+      const firstReferenceImage = referenceImages.length > 0 ? referenceImages[0].url : undefined;
+      await generateImage(promptText, firstReferenceImage);
+      setReferenceImages([]);
     } catch (e) {
       setError(String(e));
     }
   };
 
+  // 处理多图上传
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (!file.type.startsWith('image/')) {
-      setError(language === 'zh' ? '请选择图片文件' : 'Please select an image file');
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    // 检查数量限制
+    const remainingSlots = MAX_IMAGES - referenceImages.length;
+    if (remainingSlots <= 0) {
+      setError(language === 'zh' ? `最多上传 ${MAX_IMAGES} 张图片` : `Maximum ${MAX_IMAGES} images allowed`);
+      e.target.value = '';
       return;
     }
-    if (file.size > 10 * 1024 * 1024) {
-      setError(language === 'zh' ? '图片大小不能超过 10MB' : 'Image size cannot exceed 10MB');
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const result = event.target?.result as string;
-      setReferenceImage(result);
-      setError(null);
-      if (imageModelId === 'gpt-image-2' && !['1:1', '3:2', '2:3'].includes(imageRatio)) {
-        setImageRatio('1:1');
+
+    const filesToProcess = Array.from(files).slice(0, remainingSlots);
+    const newImages: UploadedImage[] = [];
+
+    let processedCount = 0;
+    let hasError = false;
+
+    filesToProcess.forEach((file, index) => {
+      if (!file.type.startsWith('image/')) {
+        if (!hasError) {
+          setError(language === 'zh' ? '请选择图片文件' : 'Please select image files only');
+          hasError = true;
+        }
+        processedCount++;
+        return;
       }
-    };
-    reader.readAsDataURL(file);
+
+      if (file.size > MAX_IMAGE_SIZE) {
+        if (!hasError) {
+          setError(language === 'zh' ? '图片大小不能超过 10MB' : 'Image size cannot exceed 10MB');
+          hasError = true;
+        }
+        processedCount++;
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const result = event.target?.result as string;
+        newImages.push({
+          id: `${Date.now()}-${index}-${Math.random().toString(36).slice(2, 9)}`,
+          url: result,
+          name: file.name,
+          size: file.size,
+        });
+
+        processedCount++;
+        // 所有文件处理完成后更新状态
+        if (processedCount === filesToProcess.length && newImages.length > 0) {
+          setReferenceImages(prev => [...prev, ...newImages]);
+          setError(null);
+          // GPT-2 图生图模式限制比例
+          if (imageModelId === 'gpt-image-2' && !['1:1', '3:2', '2:3'].includes(imageRatio)) {
+            setImageRatio('1:1');
+          }
+        }
+      };
+      reader.readAsDataURL(file);
+    });
+
+    // 清空 input 以允许重复选择同一文件
     e.target.value = '';
+  };
+
+  // 删除单张图片
+  const removeReferenceImage = (id: string) => {
+    setReferenceImages(prev => prev.filter(img => img.id !== id));
+  };
+
+  // 清空所有参考图
+  const clearReferenceImages = () => {
+    setReferenceImages([]);
   };
 
   const filteredRecords = searchQuery.trim()
@@ -360,7 +429,7 @@ export default function ImageTab() {
       {/* Ratio Picker */}
       {showRatioPicker && (
         <div style={{ position: 'absolute', top: 60, left: 16, right: 16, background: 'var(--bg-tertiary)', borderRadius: 16, padding: 12, zIndex: 100, border: '1px solid var(--border)', maxHeight: 300, overflow: 'auto' }}>
-          <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 8 }}>{T('ratio')}{imageModelId === 'gpt-image-2' && referenceImage && <span style={{ color: 'var(--accent)', marginLeft: 8 }}>（{T('referenceMode')}）</span>}</div>
+          <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 8 }}>{T('ratio')}{imageModelId === 'gpt-image-2' && referenceImages.length > 0 && <span style={{ color: 'var(--accent)', marginLeft: 8 }}>（{T('referenceMode')}）</span>}</div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {availableRatios.map((r) => (
               <button key={r} onClick={() => { setImageRatio(r); setShowRatioPicker(false); }} style={{ padding: '10px 16px', background: imageRatio === r ? 'var(--accent-dim)' : 'var(--bg-secondary)', border: '1px solid ' + (imageRatio === r ? 'var(--accent)' : 'var(--border)'), borderRadius: 10, color: imageRatio === r ? 'var(--accent)' : 'var(--text-secondary)' }}>
@@ -542,16 +611,108 @@ export default function ImageTab() {
         )}
       </div>
 
-      {/* Reference Image Preview */}
-      {referenceImage && (
-        <div style={{ padding: '8px 16px', background: 'var(--bg-tertiary)', borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div style={{ position: 'relative', width: 60, height: 60, borderRadius: 8, overflow: 'hidden' }}>
-            <img src={referenceImage} alt={T('referenceImage')} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-            <button onClick={() => setReferenceImage(null)} style={{ position: 'absolute', top: 2, right: 2, width: 20, height: 20, borderRadius: '50%', background: 'rgba(0,0,0,0.6)', border: 'none', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
-              <X size={12} />
-            </button>
+      {/* Reference Images Preview - 多图横向滚动 */}
+      {referenceImages.length > 0 && (
+        <div style={{
+          padding: '8px 16px',
+          background: 'var(--bg-tertiary)',
+          borderTop: '1px solid var(--border)',
+        }}>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            marginBottom: referenceImages.length > 0 ? 8 : 0,
+          }}>
+            <span style={{ color: 'var(--text-muted)', fontSize: 12, flex: 1 }}>
+              {language === 'zh' ? `参考图 (${referenceImages.length}/${MAX_IMAGES})` : `Reference (${referenceImages.length}/${MAX_IMAGES})`}
+            </span>
+            {referenceImages.length > 1 && (
+              <button
+                onClick={clearReferenceImages}
+                style={{
+                  padding: '2px 8px',
+                  background: 'transparent',
+                  border: '1px solid var(--border)',
+                  borderRadius: 6,
+                  color: 'var(--text-muted)',
+                  fontSize: 11,
+                  cursor: 'pointer',
+                }}
+              >
+                {language === 'zh' ? '清空' : 'Clear'}
+              </button>
+            )}
           </div>
-          <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>{T('referenceImage')}</span>
+          <div style={{
+            display: 'flex',
+            gap: 8,
+            overflowX: 'auto',
+            paddingBottom: 4,
+            // 隐藏滚动条但保持滚动功能
+            scrollbarWidth: 'none',
+            msOverflowStyle: 'none',
+          }}>
+            {referenceImages.map((img) => (
+              <div
+                key={img.id}
+                style={{
+                  position: 'relative',
+                  width: 64,
+                  height: 64,
+                  borderRadius: 8,
+                  overflow: 'hidden',
+                  flexShrink: 0,
+                }}
+              >
+                <img
+                  src={img.url}
+                  alt={img.name || 'reference'}
+                  style={{
+                    width: '100%',
+                    height: '100%',
+                    objectFit: 'cover',
+                  }}
+                />
+                <button
+                  onClick={() => removeReferenceImage(img.id)}
+                  style={{
+                    position: 'absolute',
+                    top: 2,
+                    right: 2,
+                    width: 18,
+                    height: 18,
+                    borderRadius: '50%',
+                    background: 'rgba(0,0,0,0.6)',
+                    border: 'none',
+                    color: 'white',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: 'pointer',
+                    padding: 0,
+                  }}
+                >
+                  <X size={10} />
+                </button>
+              </div>
+            ))}
+          </div>
+          {/* 提示：当前 API 只使用第一张参考图 */}
+          {referenceImages.length > 1 && (
+            <div style={{
+              marginTop: 6,
+              padding: '4px 8px',
+              background: 'rgba(245, 158, 11, 0.1)',
+              borderRadius: 6,
+              fontSize: 11,
+              color: 'var(--accent-orange)',
+            }}>
+              {language === 'zh'
+                ? '⚠️ 当前模型仅使用第一张参考图'
+                : '⚠️ Current model only uses the first reference image'}
+            </div>
+          )}
         </div>
       )}
 
@@ -717,7 +878,7 @@ export default function ImageTab() {
         ) : (
           /* 普通输入模式 */
           <div style={{ display: 'flex', gap: 8 }}>
-            <input ref={fileInputRef} type="file" accept="image/*" onChange={handleFileSelect} style={{ display: 'none' }} />
+            <input ref={fileInputRef} type="file" accept="image/*" multiple onChange={handleFileSelect} style={{ display: 'none' }} />
             <button onClick={() => fileInputRef.current?.click()} className="btn-secondary" style={{ padding: 12 }} title={T('uploadReference')}><Upload size={20} /></button>
             <button onClick={enterVoiceMode} className="btn-secondary" style={{ padding: 12 }} title={language === 'zh' ? '语音输入' : 'Voice input'}><Mic size={20} /></button>
             <input value={prompt} onChange={(e) => setPrompt(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleGenerate()} placeholder={T('describeImage')} style={{ flex: 1 }} />

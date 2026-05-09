@@ -24,6 +24,7 @@ import {
 } from './creationUtils';
 import type { CreationMode } from './store';
 import ReactMarkdown from 'react-markdown';
+import AutoResizeTextarea from './components/AutoResizeTextarea';
 
 // 示例创作目标 - 涵盖小目标和大目标
 const EXAMPLE_TARGETS: Array<{ category: string; text: string; icon: string; mode: CreationMode }> = [
@@ -105,7 +106,7 @@ export default function SuperWritingTab() {
   useEffect(() => {
     if (pendingWritingRequirement.trim()) {
       setOutlineText(pendingWritingRequirement);
-      setShowOutlineParser(true);
+      // 不再自动打开大纲解析面板，让用户自己决定如何处理
       clearPendingWritingRequirement();
     }
   }, [pendingWritingRequirement]);
@@ -186,7 +187,9 @@ export default function SuperWritingTab() {
       const prompt = buildCreationPrompt(creationMode, outlineText);
 
       // 使用不写聊天记录的 API
-      const result = await callChatCompletionRaw(prompt, undefined, () => {});
+      const result = await callChatCompletionRaw(prompt, {
+        modelId: effectiveModelId,
+      });
 
       // 解析 JSON
       const jsonMatch = result.match(/\{[\s\S]*\}/);
@@ -259,6 +262,7 @@ export default function SuperWritingTab() {
     const { updateQueueResult } = useAppStore.getState();
 
     // 创作中心不保存到聊天记录，但需要传入 onProgress 回调更新 UI
+    // 传入创作台默认模型
     await executeModelQueue(
       (queueId, content, isComplete) => {
         // 实时更新结果
@@ -269,7 +273,7 @@ export default function SuperWritingTab() {
         }
       },
       undefined, // onChapterComplete 不需要，因为不写聊天记录
-      { saveToConversation: false }
+      { saveToConversation: false, modelId: effectiveModelId }
     );
   };
 
@@ -285,9 +289,12 @@ export default function SuperWritingTab() {
       // 根据创作类型构建 prompt
       const prompt = buildCreationPrompt(creationMode, outlineText);
 
-      // 使用流式输出
-      const result = await callChatCompletionRaw(prompt, undefined, (chunk) => {
-        setFastResult(prev => prev + chunk);
+      // 使用流式输出，传入创作台默认模型
+      const result = await callChatCompletionRaw(prompt, {
+        modelId: effectiveModelId,
+        onChunk: (chunk) => {
+          setFastResult(prev => prev + chunk);
+        },
       });
 
       setFastResult(result);
@@ -316,12 +323,15 @@ export default function SuperWritingTab() {
         const item = modelQueue.find(q => q.id === queueId);
         if (!item || !item.instruction.trim()) return;
 
-        const result = await callChatCompletionRaw(item.instruction, undefined, (chunk) => {
-          // 实时更新进度
-          const currentItem = useAppStore.getState().modelQueue.find(q => q.id === queueId);
-          if (currentItem) {
-            updateQueueResult(queueId, (currentItem.result || '') + chunk);
-          }
+        const result = await callChatCompletionRaw(item.instruction, {
+          modelId: effectiveModelId,
+          onChunk: (chunk) => {
+            // 实时更新进度
+            const currentItem = useAppStore.getState().modelQueue.find(q => q.id === queueId);
+            if (currentItem) {
+              updateQueueResult(queueId, (currentItem.result || '') + chunk);
+            }
+          },
         });
         updateQueueResult(queueId, result);
       }
@@ -740,23 +750,23 @@ export default function SuperWritingTab() {
             <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 8, color: 'var(--text-primary)' }}>
               {language === 'zh' ? '描述你的创作目标' : 'Describe your creation goal'}
             </div>
-            <textarea
+            <AutoResizeTextarea
               value={outlineText}
               onChange={(e) => setOutlineText(e.target.value)}
               placeholder={language === 'zh'
                 ? '例如：\n• 帮我写10条小红书护肤文案\n• 我想写一本都市言情小说\n• 帮我规划一套Python课程大纲\n• 写20个职场短视频脚本'
                 : 'e.g.,\n• Write 10 skincare posts for Xiaohongshu\n• I want to write a romance novel\n• Design a Python course outline'
               }
+              minHeight={150}
+              maxHeight={400}
               style={{
                 width: '100%',
-                minHeight: 150,
                 padding: 12,
                 borderRadius: 8,
                 border: '1px solid var(--border)',
                 background: 'var(--bg-tertiary)',
                 color: 'var(--text-primary)',
                 fontSize: 13,
-                resize: 'vertical',
               }}
             />
             <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
@@ -1014,20 +1024,20 @@ export default function SuperWritingTab() {
                   )}
                 </div>
 
-                <textarea
+                <AutoResizeTextarea
                   value={item.instruction}
                   onChange={(e) => updateQueueInstruction(item.id, e.target.value)}
                   placeholder={language === 'zh' ? '输入创作指令...' : 'Enter instruction...'}
+                  minHeight={60}
+                  maxHeight={200}
                   style={{
                     width: '100%',
-                    minHeight: 60,
                     padding: 8,
                     borderRadius: 6,
                     border: '1px solid var(--border)',
                     background: 'var(--bg-primary)',
                     color: 'var(--text-primary)',
                     fontSize: 12,
-                    resize: 'vertical',
                   }}
                 />
 

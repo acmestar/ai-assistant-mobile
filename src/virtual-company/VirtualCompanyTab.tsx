@@ -8,6 +8,7 @@ import CreateCompanyPage from './CreateCompanyPage';
 import CompanyMeetingPage from './CompanyMeetingPage';
 import CompanyRequirementPage from './CompanyRequirementPage';
 import { RequirementAnalysis, AICompany, CompanyAgent } from './types';
+import { MeetingTypeId } from './meetingTypes';
 
 type ViewMode = 'list' | 'workspace' | 'create' | 'meeting' | 'requirement';
 
@@ -29,7 +30,7 @@ export default function VirtualCompanyTab() {
 
   const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [selectedCompanyId, setSelectedCompanyId] = useState<string | null>(currentCompanyId);
-  const [meetingType, setMeetingType] = useState<'morning' | 'strategy' | 'review' | 'risk' | 'retrospective'>('morning');
+  const [meetingType, setMeetingType] = useState<MeetingTypeId>('morning');
 
   // 选择公司
   const handleSelectCompany = (companyId: string) => {
@@ -59,7 +60,7 @@ export default function VirtualCompanyTab() {
 
   // 开始会议
   const handleStartMeeting = (type: string) => {
-    setMeetingType(type as typeof meetingType);
+    setMeetingType(type as MeetingTypeId);
     setViewMode('meeting');
   };
 
@@ -157,7 +158,7 @@ export default function VirtualCompanyTab() {
     useAppStore.getState().addAICompany(tempCompany);
     setSelectedCompanyId(companyId);
     setCurrentCompanyId(companyId);
-    setMeetingType(analysis.suggestedMeetingType);
+    setMeetingType((analysis.suggestedMeetingType || 'morning') as MeetingTypeId);
     setViewMode('meeting');
   };
 

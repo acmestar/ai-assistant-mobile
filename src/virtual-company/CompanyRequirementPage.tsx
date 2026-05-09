@@ -17,6 +17,7 @@ import {
   EXAMPLE_REQUIREMENTS,
 } from './requirementAnalyzer';
 import type { RequirementAnalysis } from './types';
+import AutoResizeTextarea from '../components/AutoResizeTextarea';
 
 interface CompanyRequirementPageProps {
   onBack: () => void;
@@ -215,7 +216,7 @@ export default function CompanyRequirementPage({
           <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>
             {language === 'zh' ? '你的需求' : 'Your Requirement'}
           </div>
-          <textarea
+          <AutoResizeTextarea
             value={requirement}
             onChange={(e) => setRequirement(e.target.value)}
             placeholder={
@@ -223,16 +224,16 @@ export default function CompanyRequirementPage({
                 ? '例如：我想开一家宠物洗护店，预算20万，在杭州，想知道怎么定位、选址和获客...'
                 : 'e.g., I want to open a pet grooming shop with 200k budget in Hangzhou...'
             }
+            minHeight={120}
+            maxHeight={300}
             style={{
               width: '100%',
-              minHeight: 120,
               padding: 12,
               borderRadius: 8,
               border: '1px solid var(--border)',
               background: 'var(--bg-tertiary)',
               color: 'var(--text-primary)',
               fontSize: 13,
-              resize: 'vertical',
             }}
           />
 
@@ -378,9 +379,11 @@ export default function CompanyRequirementPage({
                 <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>
                   {language === 'zh' ? '使命/目的' : 'Purpose'}
                 </label>
-                <textarea
+                <AutoResizeTextarea
                   value={editedProfile.purpose}
                   onChange={(e) => updateEditedField('purpose', e.target.value)}
+                  minHeight={60}
+                  maxHeight={200}
                   style={{
                     width: '100%',
                     padding: 10,
@@ -389,8 +392,6 @@ export default function CompanyRequirementPage({
                     background: 'var(--bg-tertiary)',
                     color: 'var(--text-primary)',
                     fontSize: 13,
-                    minHeight: 60,
-                    resize: 'vertical',
                   }}
                 />
               </div>
