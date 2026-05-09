@@ -535,9 +535,29 @@ export async function executeModelQueue(
       systemContext += `【世界观设定】\n${worldSetting}\n\n`;
     }
     if (characterMemory.length > 0) {
+      // 生成角色替换规则
+      const replacements = characterMemory
+        .filter(c => c.replaceWith.trim())
+        .map(c => `- 文中的"${c.originalName}"请替换为"${c.replaceWith}"`)
+        .join('\n');
+
+      const keepOriginal = characterMemory
+        .filter(c => !c.replaceWith.trim())
+        .map(c => `"${c.originalName}"`)
+        .join('、');
+
+      if (replacements || keepOriginal) {
+        systemContext += '【角色替换规则】\n';
+        if (replacements) systemContext += replacements + '\n';
+        if (keepOriginal) systemContext += `- ${keepOriginal}保持不变\n`;
+        systemContext += '\n';
+      }
+
+      // 角色描述
       systemContext += '【角色设定】\n';
       characterMemory.forEach(c => {
-        systemContext += `- ${c.name}：${c.description}\n`;
+        const displayName = c.replaceWith.trim() || c.originalName;
+        systemContext += `- ${displayName}：${c.description}\n`;
       });
     }
     // 将系统上下文作为第一条用户消息插入
@@ -721,9 +741,29 @@ export async function regenerateQueueItem(
       systemContext += `【世界观设定】\n${worldSetting}\n\n`;
     }
     if (characterMemory.length > 0) {
+      // 生成角色替换规则
+      const replacements = characterMemory
+        .filter(c => c.replaceWith.trim())
+        .map(c => `- 文中的"${c.originalName}"请替换为"${c.replaceWith}"`)
+        .join('\n');
+
+      const keepOriginal = characterMemory
+        .filter(c => !c.replaceWith.trim())
+        .map(c => `"${c.originalName}"`)
+        .join('、');
+
+      if (replacements || keepOriginal) {
+        systemContext += '【角色替换规则】\n';
+        if (replacements) systemContext += replacements + '\n';
+        if (keepOriginal) systemContext += `- ${keepOriginal}保持不变\n`;
+        systemContext += '\n';
+      }
+
+      // 角色描述
       systemContext += '【角色设定】\n';
       characterMemory.forEach(c => {
-        systemContext += `- ${c.name}：${c.description}\n`;
+        const displayName = c.replaceWith.trim() || c.originalName;
+        systemContext += `- ${displayName}：${c.description}\n`;
       });
     }
     contextMessages.unshift({ role: 'user', content: systemContext });

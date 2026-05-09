@@ -122,6 +122,13 @@ export default function ChatTab() {
   const [expandedResults, setExpandedResults] = useState<Set<string>>(new Set()); // 展开的结果
   const [showOutlineParser, setShowOutlineParser] = useState(false); // 大纲解析器
   const [outlineText, setOutlineText] = useState(''); // 大纲文本
+  const [showOutlinePreview, setShowOutlinePreview] = useState(false); // 大纲预览
+  const [parsedOutline, setParsedOutline] = useState<{
+    chapters: Array<{ title: string; order: number }>;
+    characters: Array<{ name: string; description: string; replaceWith?: string }>;
+    worldSetting: string;
+  } | null>(null); // 解析结果
+  const [selectedChapters, setSelectedChapters] = useState<Set<number>>(new Set()); // 选中的章节
   const [showCharacterPanel, setShowCharacterPanel] = useState(false); // 角色面板
   const [showExportPanel, setShowExportPanel] = useState(false); // 导出面板
   const [showTaskPanel, setShowTaskPanel] = useState(false); // 任务面板
@@ -569,64 +576,111 @@ export default function ChatTab() {
     }
   };
 
-  // 智能大纲解析器
-  const parseOutline = (text: string) => {
-    const lines = text.split('\n').filter(line => line.trim());
-    const chapters: Array<{ title: string; instruction: string }> = [];
+  // AI 智能大纲解析（使用 Grok）
+  const parseOutlineByAI = async () => {
+    if (!outlineText.trim()) return;
 
-    // 匹配章节模式：# 第一章、第一章、Chapter 1、1. 等
-    const chapterPatterns = [
-      /^#+\s*(第[一二三四五六七八九十百千万零\d]+[章节回集部篇])/,
-      /^#+\s*(Chapter|CHAPTER)\s*\d+/i,
-      /^#+\s*(\d+[\.\、]\s*.+)/,
-      /^(第[一二三四五六七八九十百千万零\d]+[章节回集部篇])/,
-      /^(\d+[\.\、]\s*.+)/,
-    ];
+    setIsAnalyzing(true);
+    setError(null);
 
-    for (const line of lines) {
-      let matched = false;
-      for (const pattern of chapterPatterns) {
-        const match = line.match(pattern);
-        if (match) {
-          const title = match[1] || match[0];
-          chapters.push({
-            title: title.trim(),
-            instruction: language === 'zh' ? `请写${title.trim()}` : `Please write ${title.trim()}`,
-          });
-          matched = true;
-          break;
-        }
+    try {
+      const { apiKey } = useAppStore.getState();
+      if (!apiKey) throw new Error('请先设置 API Key');
+
+      const prompt = `请分析以下小说大纲，提取章节列表、角色信息和世界观设定。
+
+要求：
+1. 只返回JSON格式，不要其他内容
+2. 格式如下：
+{
+  "chapters": [
+    {"title": "第一章：少年觉醒", "order": 1},
+    {"title": "第二章：拜师学艺", "order": 2}
+  ],
+  "characters": [
+    {"name": "李明", "description": "少年主角，性格勇敢"},
+    {"name": "王老", "description": "隐世高人，李明的师父"}
+  ],
+  "worldSetting": "修仙世界，剑道为尊..."
+}
+3. 只提取明确的章节标题，不要提取正文内容
+4. 角色只提取有名字的主要角色
+5. 世界观提取核心设定即可
+
+大纲内容：
+${outlineText}`;
+
+      const resp = await fetch('https://ai.acmestar.top/api/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({
+          model: 'grok-4.2', // 使用 Grok 解析
+          messages: [{ role: 'user', content: prompt }],
+          max_tokens: 2000,
+        }),
+      });
+
+      if (!resp.ok) throw new Error(`API 错误: ${resp.status}`);
+      const data = await resp.json();
+      const content = data.choices?.[0]?.message?.content || '';
+
+      // 提取 JSON
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) throw new Error('AI 返回格式错误');
+
+      const result = JSON.parse(jsonMatch[0]);
+
+      // 限制章节数量
+      const MAX_CHAPTERS = 30;
+      if (result.chapters && result.chapters.length > MAX_CHAPTERS) {
+        result.chapters = result.chapters.slice(0, MAX_CHAPTERS);
+        setError(language === 'zh' ? `章节过多，已截取前${MAX_CHAPTERS}章` : `Too many chapters, limited to ${MAX_CHAPTERS}`);
       }
-      // 如果没有匹配到章节模式，但有内容，也作为一个条目
-      if (!matched && line.length > 2 && chapters.length < 50) {
-        chapters.push({
-          title: line.trim().slice(0, 30),
-          instruction: language === 'zh' ? `请写：${line.trim()}` : `Please write: ${line.trim()}`,
-        });
-      }
+
+      // 保存解析结果到状态
+      setParsedOutline(result);
+      setShowOutlineParser(false);
+      setShowOutlinePreview(true);
+      hapticFeedback('medium');
+
+    } catch (e) {
+      setError(language === 'zh' ? `解析失败: ${e instanceof Error ? e.message : '未知错误'}` : `Parse failed: ${e instanceof Error ? e.message : 'Unknown error'}`);
+    } finally {
+      setIsAnalyzing(false);
     }
-
-    return chapters;
   };
 
-  // 从大纲生成队列
-  const generateQueueFromOutline = () => {
-    const chapters = parseOutline(outlineText);
-    if (chapters.length === 0) {
-      setError(language === 'zh' ? '未识别到章节结构，请检查大纲格式' : 'No chapters detected, please check outline format');
-      return;
-    }
+  // 从解析结果生成队列
+  const generateQueueFromParsedOutline = () => {
+    if (!parsedOutline || !parsedOutline.chapters?.length) return;
 
-    // 清空现有队列
+    // 清空现有队列和角色
     clearModelQueue();
+    useAppStore.setState({ characterMemory: [] });
 
     // 添加章节到队列
-    chapters.forEach((chapter) => {
-      addModelToQueue(chatModelId, chapter.instruction, chapter.title);
+    parsedOutline.chapters.forEach((chapter: { title: string; order: number }) => {
+      const instruction = language === 'zh'
+        ? `请写${chapter.title}`
+        : `Please write ${chapter.title}`;
+      addModelToQueue(chatModelId, instruction, chapter.title);
     });
 
+    // 添加角色到记忆库
+    if (parsedOutline.characters) {
+      parsedOutline.characters.forEach((char: { name: string; description: string }) => {
+        addCharacter(char.name, '', char.description);
+      });
+    }
+
+    // 设置世界观
+    if (parsedOutline.worldSetting) {
+      setWorldSetting(parsedOutline.worldSetting);
+    }
+
+    setShowOutlinePreview(false);
+    setParsedOutline(null);
     setOutlineText('');
-    setShowOutlineParser(false);
     hapticFeedback('medium');
   };
 
@@ -944,7 +998,7 @@ Please give concise and creative suggestions:`;
           }
           if (decoded.characters && Array.isArray(decoded.characters)) {
             decoded.characters.forEach((c: any) => {
-              addCharacter(c.name, c.description);
+              addCharacter(c.name || c.originalName || '', c.replaceWith || '', c.description || '');
             });
           }
 
@@ -1287,16 +1341,16 @@ Please give concise and creative suggestions:`;
           {showOutlineParser && (
             <div style={{ marginBottom: 8, padding: 8, background: 'var(--bg-tertiary)', borderRadius: 8 }}>
               <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>
-                {language === 'zh' ? '粘贴大纲，自动识别章节并生成队列' : 'Paste outline to auto-detect chapters'}
+                {language === 'zh' ? '粘贴大纲，AI将智能解析章节、角色和世界观' : 'Paste outline, AI will parse chapters, characters and world setting'}
               </div>
               <textarea
                 value={outlineText}
                 onChange={(e) => setOutlineText(e.target.value)}
-                placeholder={language === 'zh' ? '示例：\n# 第一章：开端\n# 第二章：相遇\n# 第三章：冲突' : 'Example:\n# Chapter 1: Beginning\n# Chapter 2: Meeting\n# Chapter 3: Conflict'}
+                placeholder={language === 'zh' ? '粘贴小说大纲内容...\n\nAI会自动识别：\n- 章节结构\n- 角色信息\n- 世界观设定' : 'Paste novel outline...\n\nAI will detect:\n- Chapter structure\n- Characters\n- World setting'}
                 style={{
                   width: '100%',
-                  minHeight: 80,
-                  maxHeight: 150,
+                  minHeight: 100,
+                  maxHeight: 200,
                   padding: 8,
                   fontSize: 12,
                   borderRadius: 6,
@@ -1314,12 +1368,121 @@ Please give concise and creative suggestions:`;
                   {language === 'zh' ? '取消' : 'Cancel'}
                 </button>
                 <button
-                  onClick={generateQueueFromOutline}
-                  disabled={!outlineText.trim()}
+                  onClick={parseOutlineByAI}
+                  disabled={!outlineText.trim() || isAnalyzing}
                   className="btn-primary"
-                  style={{ flex: 1, padding: 6, fontSize: 11, opacity: outlineText.trim() ? 1 : 0.5 }}
+                  style={{ flex: 1, padding: 6, fontSize: 11, opacity: outlineText.trim() && !isAnalyzing ? 1 : 0.5 }}
                 >
-                  {language === 'zh' ? '生成队列' : 'Generate Queue'}
+                  {isAnalyzing ? (language === 'zh' ? '解析中...' : 'Parsing...') : (language === 'zh' ? 'AI解析' : 'AI Parse')}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* 大纲预览 */}
+          {showOutlinePreview && parsedOutline && (
+            <div style={{ marginBottom: 8, padding: 8, background: 'var(--bg-tertiary)', borderRadius: 8 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)' }}>
+                  📋 {language === 'zh' ? '解析结果' : 'Parse Result'}
+                </span>
+                <button onClick={() => { setShowOutlinePreview(false); setParsedOutline(null); }} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', padding: 2 }}>
+                  <X size={14} />
+                </button>
+              </div>
+
+              {/* 章节列表 */}
+              {parsedOutline.chapters && parsedOutline.chapters.length > 0 && (
+                <div style={{ marginBottom: 8 }}>
+                  <div style={{ fontSize: 11, color: 'var(--accent)', marginBottom: 4 }}>
+                    📖 {language === 'zh' ? `检测到 ${parsedOutline.chapters.length} 个章节` : `Detected ${parsedOutline.chapters.length} chapters`}
+                  </div>
+                  <div style={{ maxHeight: 100, overflow: 'auto', background: 'var(--bg-secondary)', borderRadius: 4, padding: 4 }}>
+                    {parsedOutline.chapters.map((chapter, index) => (
+                      <div key={index} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '2px 0' }}>
+                        <input
+                          type="checkbox"
+                          checked={selectedChapters.has(index)}
+                          onChange={() => {
+                            const newSet = new Set(selectedChapters);
+                            if (newSet.has(index)) newSet.delete(index);
+                            else newSet.add(index);
+                            setSelectedChapters(newSet);
+                          }}
+                          style={{ width: 12, height: 12 }}
+                        />
+                        <span style={{ fontSize: 11, color: 'var(--text-primary)' }}>{chapter.title}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* 角色列表 */}
+              {parsedOutline.characters && parsedOutline.characters.length > 0 && (
+                <div style={{ marginBottom: 8 }}>
+                  <div style={{ fontSize: 11, color: 'var(--accent)', marginBottom: 4 }}>
+                    👤 {language === 'zh' ? `检测到 ${parsedOutline.characters.length} 个角色` : `Detected ${parsedOutline.characters.length} characters`}
+                  </div>
+                  <div style={{ maxHeight: 80, overflow: 'auto' }}>
+                    {parsedOutline.characters.map((char, index) => (
+                      <div key={index} style={{ display: 'flex', gap: 4, marginBottom: 4, alignItems: 'center' }}>
+                        <span style={{ fontSize: 10, color: 'var(--text-muted)', minWidth: 50 }}>{char.name}</span>
+                        <span style={{ fontSize: 9 }}>→</span>
+                        <input
+                          placeholder={language === 'zh' ? '替换名(可选)' : 'Replace with'}
+                          value={parsedOutline.characters[index].replaceWith || ''}
+                          onChange={(e) => {
+                            const newOutline = { ...parsedOutline };
+                            newOutline.characters[index].replaceWith = e.target.value;
+                            setParsedOutline(newOutline);
+                          }}
+                          style={{ flex: 1, padding: 2, fontSize: 10, borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg-secondary)', color: 'var(--text-primary)' }}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* 世界观 */}
+              {parsedOutline.worldSetting && (
+                <div style={{ marginBottom: 8 }}>
+                  <div style={{ fontSize: 11, color: 'var(--accent)', marginBottom: 4 }}>
+                    🌍 {language === 'zh' ? '世界观设定' : 'World Setting'}
+                  </div>
+                  <textarea
+                    value={parsedOutline.worldSetting}
+                    onChange={(e) => setParsedOutline({ ...parsedOutline, worldSetting: e.target.value })}
+                    style={{
+                      width: '100%',
+                      minHeight: 40,
+                      maxHeight: 80,
+                      padding: 4,
+                      fontSize: 10,
+                      borderRadius: 4,
+                      border: '1px solid var(--border)',
+                      background: 'var(--bg-secondary)',
+                      color: 'var(--text-primary)',
+                      resize: 'vertical',
+                    }}
+                  />
+                </div>
+              )}
+
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  onClick={() => { setShowOutlinePreview(false); setParsedOutline(null); setSelectedChapters(new Set()); }}
+                  style={{ flex: 1, padding: 6, background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-secondary)', fontSize: 11 }}
+                >
+                  {language === 'zh' ? '取消' : 'Cancel'}
+                </button>
+                <button
+                  onClick={generateQueueFromParsedOutline}
+                  className="btn-primary"
+                  style={{ flex: 1, padding: 6, fontSize: 11 }}
+                >
+                  {language === 'zh' ? `生成队列 (${selectedChapters.size || parsedOutline.chapters?.length || 0}章)` : `Generate (${selectedChapters.size || parsedOutline.chapters?.length || 0} chapters)`}
                 </button>
               </div>
             </div>
@@ -1356,21 +1519,28 @@ Please give concise and creative suggestions:`;
               </div>
               {/* 角色列表 */}
               <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>
-                {language === 'zh' ? '角色设定' : 'Characters'}
+                {language === 'zh' ? '角色映射 (原人名 → 替换为)' : 'Character Mapping (Original → Replace with)'}
               </div>
               {characterMemory.map((char) => (
                 <div key={char.id} style={{ display: 'flex', gap: 4, marginBottom: 4, alignItems: 'center' }}>
                   <input
-                    value={char.name}
-                    onChange={(e) => updateCharacter(char.id, e.target.value, char.description)}
-                    placeholder={language === 'zh' ? '姓名' : 'Name'}
-                    style={{ flex: 1, padding: 4, fontSize: 11, borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg-secondary)', color: 'var(--text-primary)' }}
+                    value={char.originalName}
+                    onChange={(e) => updateCharacter(char.id, e.target.value, char.replaceWith, char.description)}
+                    placeholder={language === 'zh' ? '原人名' : 'Original'}
+                    style={{ flex: 1, padding: 4, fontSize: 10, borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg-secondary)', color: 'var(--text-primary)' }}
+                  />
+                  <span style={{ color: 'var(--text-muted)' }}>→</span>
+                  <input
+                    value={char.replaceWith}
+                    onChange={(e) => updateCharacter(char.id, char.originalName, e.target.value, char.description)}
+                    placeholder={language === 'zh' ? '替换名' : 'Replace'}
+                    style={{ flex: 1, padding: 4, fontSize: 10, borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg-secondary)', color: 'var(--text-primary)' }}
                   />
                   <input
                     value={char.description}
-                    onChange={(e) => updateCharacter(char.id, char.name, e.target.value)}
-                    placeholder={language === 'zh' ? '描述' : 'Description'}
-                    style={{ flex: 2, padding: 4, fontSize: 11, borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg-secondary)', color: 'var(--text-primary)' }}
+                    onChange={(e) => updateCharacter(char.id, char.originalName, char.replaceWith, e.target.value)}
+                    placeholder={language === 'zh' ? '描述' : 'Desc'}
+                    style={{ flex: 1.5, padding: 4, fontSize: 10, borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg-secondary)', color: 'var(--text-primary)' }}
                   />
                   <button onClick={() => deleteCharacter(char.id)} style={{ padding: 4, background: 'transparent', border: 'none', color: 'var(--danger)' }}>
                     <X size={12} />
@@ -1378,10 +1548,10 @@ Please give concise and creative suggestions:`;
                 </div>
               ))}
               <button
-                onClick={() => addCharacter('', '')}
+                onClick={() => addCharacter('', '', '')}
                 style={{ width: '100%', padding: 6, background: 'var(--bg-secondary)', border: '1px dashed var(--border)', borderRadius: 6, color: 'var(--text-muted)', fontSize: 11 }}
               >
-                + {language === 'zh' ? '添加角色' : 'Add Character'}
+                + {language === 'zh' ? '添加角色映射' : 'Add Character Mapping'}
               </button>
             </div>
           )}

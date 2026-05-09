@@ -331,10 +331,10 @@ interface AppState {
   parallelMode: boolean;
   setParallelMode: (mode: boolean) => void;
 
-  // 角色/设定记忆库
-  characterMemory: Array<{ id: string; name: string; description: string; createdAt: number }>;
-  addCharacter: (name: string, description: string) => void;
-  updateCharacter: (id: string, name: string, description: string) => void;
+  // 角色/设定记忆库（支持原人名→替换人名映射）
+  characterMemory: Array<{ id: string; originalName: string; replaceWith: string; description: string; createdAt: number }>;
+  addCharacter: (originalName: string, replaceWith: string, description: string) => void;
+  updateCharacter: (id: string, originalName: string, replaceWith: string, description: string) => void;
   deleteCharacter: (id: string) => void;
   worldSetting: string;
   setWorldSetting: (setting: string) => void;
@@ -461,19 +461,20 @@ export const useAppStore = create<AppState>()(
       parallelMode: false,
       setParallelMode: (parallelMode) => set({ parallelMode }),
 
-      // 角色/设定记忆库
+      // 角色/设定记忆库（支持原人名→替换人名映射）
       characterMemory: [],
-      addCharacter: (name, description) => set((state) => ({
+      addCharacter: (originalName, replaceWith, description) => set((state) => ({
         characterMemory: [...state.characterMemory, {
           id: Date.now().toString(),
-          name,
+          originalName,
+          replaceWith,
           description,
           createdAt: Date.now(),
         }],
       })),
-      updateCharacter: (id, name, description) => set((state) => ({
+      updateCharacter: (id, originalName, replaceWith, description) => set((state) => ({
         characterMemory: state.characterMemory.map((c) =>
-          c.id === id ? { ...c, name, description } : c
+          c.id === id ? { ...c, originalName, replaceWith, description } : c
         ),
       })),
       deleteCharacter: (id) => set((state) => ({
