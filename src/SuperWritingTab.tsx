@@ -25,8 +25,6 @@ import { executeModelQueue, regenerateQueueItem, callChatCompletionRaw } from '.
 import {
   buildCreationPrompt,
   buildNovelRewritePrompt,
-  buildNovelAutoStartPrompt,
-  parseNovelAutoStartResult,
   buildNovelApplyQuickEditPrompt,
   buildNovelNextOutlinePrompt,
   buildNovelContinueChapterPrompt,
@@ -34,6 +32,9 @@ import {
   convertParsedCreationToQueue,
   getExportTitle,
   getItemName,
+  buildNovelProjectPrompt,
+  buildNovelFirstChapterPlainPrompt,
+  parseJsonFromModelText,
 } from './creationUtils';
 import type { CreationMode } from './store';
 import ReactMarkdown from 'react-markdown';
@@ -113,6 +114,13 @@ export default function SuperWritingTab() {
   const [novelChapters, setNovelChapters] = useState<NovelChapterDraft[]>([]);
   const [novelRawText, setNovelRawText] = useState('');
   const [showAdvancedNovelSettings, setShowAdvancedNovelSettings] = useState(false);
+
+  // 小说生成步骤状态
+  const [novelGenerationStep, setNovelGenerationStep] = useState<'idle' | 'planning' | 'chapter' | 'done' | 'error'>('idle');
+  const [novelError, setNovelError] = useState('');
+
+  // 完整小说稿阅读区
+  const [showFullNovelReader, setShowFullNovelReader] = useState(false);
 
   // 快速修改状态
   const [quickHeroName, setQuickHeroName] = useState('');
@@ -320,25 +328,23 @@ export default function SuperWritingTab() {
     );
   };
 
-  // 快速生成 - 一次 API 完成创作
+  // 快速生成 - 一次 API 完成创作（非小说模式）
+  // 小说模式使用两步生成：handleGenerateNovel
   const handleFastGenerate = async () => {
     if (!outlineText.trim() || !apiKey) return;
+
+    // 小说模式使用专门的两步生成函数
+    if (creationMode === 'novel') {
+      await handleGenerateNovel();
+      return;
+    }
 
     setFastLoading(true);
     setFastError(null);
     setFastResult('');
 
     try {
-      // 根据创作类型构建 prompt
-      let prompt: string;
-      if (creationMode === 'novel') {
-        // 小说模式：一键生成设定+第一章（AI自动决定题材、风格、篇幅）
-        prompt = buildNovelAutoStartPrompt({
-          requirement: outlineText,
-        });
-      } else {
-        prompt = buildCreationPrompt(creationMode, outlineText);
-      }
+      const prompt = buildCreationPrompt(creationMode, outlineText);
 
       // 校验 prompt 不为空
       if (!prompt || !prompt.trim()) {
@@ -346,7 +352,7 @@ export default function SuperWritingTab() {
       }
 
       // 日志输出，便于调试
-      console.log('[NovelModelCall]', {
+      console.log('[FastGenerate]', {
         source: 'handleFastGenerate',
         creationMode,
         effectiveModelId,
@@ -361,30 +367,9 @@ export default function SuperWritingTab() {
         },
       });
 
-      // 小说模式：尝试解析 JSON
-      if (creationMode === 'novel') {
-        setNovelRawText(result);
-        const parsed = parseNovelAutoStartResult(result);
-        if (parsed) {
-          setNovelProject(parsed.project);
-          setNovelChapterResult(parsed.firstChapter);
-          setNovelChapters([parsed.firstChapter]);
-          // 清空快速修改字段
-          setQuickHeroName('');
-          setQuickLoveInterestName('');
-          setQuickTone('');
-          setQuickRelationship('');
-          setQuickEnding('');
-        } else {
-          // 解析失败，保留原始文本
-          setNovelProject(null);
-          setNovelChapterResult(null);
-        }
-      } else {
-        setFastResult(result);
-      }
+      setFastResult(result);
     } catch (error: any) {
-      console.error('[NovelModelError]', error);
+      console.error('[FastGenerateError]', error);
       // 提取更详细的错误信息
       let errorMessage = error.message || '生成失败';
       if (error.message?.includes('API 错误:')) {
@@ -393,6 +378,199 @@ export default function SuperWritingTab() {
         errorMessage = `API 错误: ${error.response.status || '未知'} ${error.response.statusText || ''}`;
       }
       setFastError(errorMessage);
+    } finally {
+      setFastLoading(false);
+    }
+  };
+
+  // 小说两步生成：第一步生成设定，第二步生成第一章正文
+  const handleGenerateNovel = async () => {
+    if (!outlineText.trim() || !apiKey) return;
+
+    // 校验 effectiveModelId 存在
+    if (!effectiveModelId) {
+      setNovelGenerationStep('error');
+      setNovelError(language === 'zh' ? '请先选择生成模型' : 'Please select a model first');
+      return;
+    }
+
+    // 清空旧错误
+    setNovelError('');
+    setFastError('');
+    setFastLoading(true);
+
+    // 清空旧结果（谨慎清空）
+    setNovelChapterResult(null);
+    setNovelRawText('');
+
+    // ========== 第一步：生成小说设定 ==========
+
+    setNovelGenerationStep('planning');
+
+    try {
+      const projectPrompt = buildNovelProjectPrompt({
+        requirement: outlineText,
+      });
+
+      console.log('[NovelGenerateStep]', {
+        step: 'planning',
+        effectiveModelId,
+        selectedWritingModelId,
+        promptLength: projectPrompt.length,
+      });
+
+      const rawProjectText = await callChatCompletionRaw(projectPrompt, {
+        modelId: effectiveModelId,
+      });
+
+      setNovelRawText(rawProjectText);
+
+      // 解析 NovelProject
+      const project = parseJsonFromModelText<NovelProject>(rawProjectText);
+
+      if (!project) {
+        // 解析失败，显示原始文本 fallback
+        setNovelGenerationStep('error');
+        setNovelError(language === 'zh' ? '小说设定解析失败，已显示模型原始返回' : 'Novel project parsing failed, showing raw output');
+        setNovelProject(null);
+        setFastLoading(false);
+        return; // 不继续生成第一章
+      }
+
+      // 解析成功
+      setNovelProject(project);
+
+      // ========== 第二步：生成第一章正文 ==========
+
+      setNovelGenerationStep('chapter');
+
+      const chapterPrompt = buildNovelFirstChapterPlainPrompt({
+        requirement: outlineText,
+        novelProject: project,
+        chapterPlan: project.chapters?.[0],
+      });
+
+      console.log('[NovelGenerateStep]', {
+        step: 'chapter',
+        effectiveModelId,
+        selectedWritingModelId,
+        promptLength: chapterPrompt.length,
+      });
+
+      const chapterText = await callChatCompletionRaw(chapterPrompt, {
+        modelId: effectiveModelId,
+      });
+
+      if (!chapterText || !chapterText.trim()) {
+        throw new Error(language === 'zh' ? '模型返回为空' : 'Model returned empty content');
+      }
+
+      // 构造 firstChapter（纯文本，不解析 JSON）
+      const firstChapter: NovelChapterDraft = {
+        chapterNo: 1,
+        title: project.chapters?.[0]?.title || (language === 'zh' ? '第一章' : 'Chapter 1'),
+        content: chapterText.trim(),
+        summary: '',
+        characterChanges: '',
+        clues: '',
+        nextChapterHint: '',
+      };
+
+      // 保存结果
+      setNovelChapterResult(firstChapter);
+      setNovelChapters([firstChapter]);
+      setNovelGenerationStep('done');
+
+      // 清空快速修改字段
+      setQuickHeroName('');
+      setQuickLoveInterestName('');
+      setQuickTone('');
+      setQuickRelationship('');
+      setQuickEnding('');
+
+    } catch (error: any) {
+      console.error('[NovelGenerateError]', error);
+      setNovelGenerationStep('error');
+      const errorMessage = error.message || (language === 'zh' ? '生成失败' : 'Generation failed');
+      if (error.message?.includes('API 错误:')) {
+        setNovelError(error.message);
+      } else if (error.response) {
+        setNovelError(`API 错误: ${error.response.status || '未知'} ${error.response.statusText || ''}`);
+      } else {
+        setNovelError(errorMessage);
+      }
+      // 如果 novelProject 已经存在，不要清空
+    } finally {
+      setFastLoading(false);
+    }
+  };
+
+  // 重新生成第一章（设定已存在，只重新生成正文）
+  const handleRegenerateFirstChapter = async () => {
+    if (!novelProject || !apiKey) return;
+
+    if (!effectiveModelId) {
+      setNovelError(language === 'zh' ? '请先选择生成模型' : 'Please select a model first');
+      return;
+    }
+
+    setNovelError('');
+    setFastLoading(true);
+    setNovelGenerationStep('chapter');
+
+    try {
+      const chapterPrompt = buildNovelFirstChapterPlainPrompt({
+        requirement: outlineText,
+        novelProject: novelProject,
+        chapterPlan: novelProject.chapters?.[0],
+      });
+
+      console.log('[NovelGenerateStep]', {
+        step: 'regenerate-chapter',
+        effectiveModelId,
+        promptLength: chapterPrompt.length,
+      });
+
+      const chapterText = await callChatCompletionRaw(chapterPrompt, {
+        modelId: effectiveModelId,
+      });
+
+      if (!chapterText || !chapterText.trim()) {
+        throw new Error(language === 'zh' ? '模型返回为空' : 'Model returned empty content');
+      }
+
+      const firstChapter: NovelChapterDraft = {
+        chapterNo: 1,
+        title: novelProject.chapters?.[0]?.title || (language === 'zh' ? '第一章' : 'Chapter 1'),
+        content: chapterText.trim(),
+        summary: '',
+        characterChanges: '',
+        clues: '',
+        nextChapterHint: '',
+      };
+
+      setNovelChapterResult(firstChapter);
+      setNovelChapters(prev => {
+        const newChapters = [...prev];
+        const existingIndex = newChapters.findIndex(c => c.chapterNo === 1);
+        if (existingIndex >= 0) {
+          newChapters[existingIndex] = firstChapter;
+        } else {
+          newChapters.push(firstChapter);
+        }
+        return newChapters.sort((a, b) => a.chapterNo - b.chapterNo);
+      });
+      setNovelGenerationStep('done');
+
+    } catch (error: any) {
+      console.error('[RegenerateFirstChapterError]', error);
+      setNovelGenerationStep('error');
+      const errorMessage = error.message || (language === 'zh' ? '重新生成失败' : 'Regeneration failed');
+      if (error.message?.includes('API 错误:')) {
+        setNovelError(error.message);
+      } else {
+        setNovelError(errorMessage);
+      }
     } finally {
       setFastLoading(false);
     }
@@ -611,7 +789,9 @@ export default function SuperWritingTab() {
     if (!novelProject || novelChapterQueue.length === 0 || !apiKey) return;
 
     setIsNovelQueueRunning(true);
-    const { updateQueueResult: _unused } = useAppStore.getState();
+
+    // 使用工作副本避免 React state 闭包问题
+    let workingChapters = [...novelChapters];
 
     for (let i = 0; i < novelChapterQueue.length; i++) {
       const item = novelChapterQueue[i];
@@ -625,16 +805,17 @@ export default function SuperWritingTab() {
       try {
         const prompt = buildNovelContinueChapterPrompt({
           novelProject,
-          chapters: novelChapters,
+          chapters: workingChapters, // 使用工作副本
           nextChapterIdea: batchChapterIdea || item.userIdea,
           nextChapterOutline: item.outline,
         });
 
-        console.log('[NovelModelCall]', {
-          source: 'handleRunNovelChapterQueue',
+        console.log('[NovelGenerateStep]', {
+          step: 'queue-chapter',
           chapterNo: item.chapterNo,
           effectiveModelId,
           promptLength: prompt.length,
+          workingChaptersCount: workingChapters.length,
         });
 
         const result = await callChatCompletionRaw(prompt, {
@@ -643,8 +824,11 @@ export default function SuperWritingTab() {
 
         const parsed = parseNovelChapterDraft(result);
         if (parsed) {
-          // 添加到章节列表
-          setNovelChapters(prev => [...prev, parsed]);
+          // 更新工作副本
+          workingChapters = [...workingChapters, parsed];
+
+          // 更新 React state
+          setNovelChapters(workingChapters);
           setNovelChapterResult(parsed);
 
           // 标记完成
@@ -652,20 +836,26 @@ export default function SuperWritingTab() {
             q.id === item.id ? { ...q, status: 'done' as const, result: parsed } : q
           ));
         } else {
-          throw new Error('解析失败');
+          throw new Error(language === 'zh' ? '章节解析失败' : 'Chapter parsing failed');
         }
       } catch (error: any) {
-        console.error('[NovelModelError]', error);
+        console.error('[NovelQueueError]', error);
         // 标记失败
         setNovelChapterQueue(prev => prev.map(q =>
           q.id === item.id ? { ...q, status: 'failed' as const, error: error.message } : q
         ));
-        // 停止队列
+        // 停止队列（小说章节有连续性，失败后不继续）
         break;
       }
     }
 
     setIsNovelQueueRunning(false);
+
+    // 批量生成完成后自动展开完整小说稿
+    const allDone = novelChapterQueue.every(q => q.status === 'done');
+    if (allDone && novelChapterQueue.length > 0) {
+      setShowFullNovelReader(true);
+    }
   };
 
   // 重试队列项
@@ -680,11 +870,19 @@ export default function SuperWritingTab() {
     ));
 
     try {
+      // 使用最新的章节列表
       const prompt = buildNovelContinueChapterPrompt({
         novelProject,
         chapters: novelChapters,
         nextChapterIdea: item.userIdea,
         nextChapterOutline: item.outline,
+      });
+
+      console.log('[NovelGenerateStep]', {
+        step: 'retry-chapter',
+        chapterNo: item.chapterNo,
+        effectiveModelId,
+        promptLength: prompt.length,
       });
 
       const result = await callChatCompletionRaw(prompt, {
@@ -693,16 +891,25 @@ export default function SuperWritingTab() {
 
       const parsed = parseNovelChapterDraft(result);
       if (parsed) {
-        setNovelChapters(prev => [...prev, parsed]);
+        setNovelChapters(prev => {
+          const newChapters = [...prev];
+          const existingIndex = newChapters.findIndex(c => c.chapterNo === parsed.chapterNo);
+          if (existingIndex >= 0) {
+            newChapters[existingIndex] = parsed;
+          } else {
+            newChapters.push(parsed);
+          }
+          return newChapters.sort((a, b) => a.chapterNo - b.chapterNo);
+        });
         setNovelChapterResult(parsed);
         setNovelChapterQueue(prev => prev.map(q =>
           q.id === itemId ? { ...q, status: 'done' as const, result: parsed } : q
         ));
       } else {
-        throw new Error('解析失败');
+        throw new Error(language === 'zh' ? '章节解析失败' : 'Chapter parsing failed');
       }
     } catch (error: any) {
-      console.error('[NovelModelError]', error);
+      console.error('[NovelRetryError]', error);
       setNovelChapterQueue(prev => prev.map(q =>
         q.id === itemId ? { ...q, status: 'failed' as const, error: error.message } : q
       ));
@@ -1273,8 +1480,8 @@ export default function SuperWritingTab() {
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
                   {language === 'zh'
-                    ? '输入一个小说想法，AI 会自动帮你分析题材、角色、世界观、大纲和章节规划。'
-                    : 'Enter a novel idea, AI will automatically analyze genre, characters, world, outline and chapter planning.'}
+                    ? '输入一个你想看的小说想法，AI 会自动补全人物、世界观、大纲和开篇。你可以什么都不改，直接开始阅读；也可以修改主角名字、风格或后续剧情。'
+                    : 'Enter a novel idea, AI will automatically complete characters, world, outline and opening. You can read as-is, or modify protagonist names, style, or plot.'}
                 </div>
                 <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 8 }}>
                   {language === 'zh'
@@ -1370,7 +1577,7 @@ export default function SuperWritingTab() {
                     <>
                       <Sparkles size={14} />
                       {creationMode === 'novel'
-                        ? (language === 'zh' ? 'AI 分析并生成小说方案' : 'Generate Novel Plan')
+                        ? (language === 'zh' ? '生成我的小说' : 'Generate My Novel')
                         : (language === 'zh' ? '快速生成' : 'Fast Generate')}
                     </>
                   )}
@@ -1408,8 +1615,8 @@ export default function SuperWritingTab() {
           </div>
         )}
 
-        {/* 小说模式加载状态 */}
-        {creationMode === 'novel' && fastLoading && !novelProject && (
+        {/* 小说模式分步加载状态 */}
+        {creationMode === 'novel' && fastLoading && novelGenerationStep !== 'done' && (
           <div style={{
             padding: 24,
             background: 'var(--bg-secondary)',
@@ -1419,11 +1626,109 @@ export default function SuperWritingTab() {
           }}>
             <RefreshCw size={32} className="spin" style={{ color: 'var(--accent)', marginBottom: 12 }} />
             <div style={{ color: 'var(--text-primary)', fontWeight: 500, marginBottom: 8 }}>
-              {language === 'zh' ? '正在生成小说设定和第一章...' : 'Generating novel setup and first chapter...'}
+              {novelGenerationStep === 'planning' && (language === 'zh' ? '正在生成小说设定...' : 'Generating novel setup...')}
+              {novelGenerationStep === 'chapter' && (language === 'zh' ? '正在生成第一章...' : 'Generating first chapter...')}
+              {novelGenerationStep === 'error' && (language === 'zh' ? '生成失败' : 'Generation failed')}
+              {novelGenerationStep === 'idle' && (language === 'zh' ? '准备生成...' : 'Preparing...')}
             </div>
             <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>
-              {language === 'zh' ? '预计需要30-60秒，请耐心等待' : 'Expected 30-60 seconds, please wait...'}
+              {novelGenerationStep === 'planning' && (language === 'zh' ? '预计 15-30 秒' : 'About 15-30 seconds')}
+              {novelGenerationStep === 'chapter' && (language === 'zh' ? '预计 20-40 秒' : 'About 20-40 seconds')}
             </div>
+          </div>
+        )}
+
+        {/* 小说生成错误状态 */}
+        {creationMode === 'novel' && novelGenerationStep === 'error' && !fastLoading && (
+          <div style={{
+            padding: 16,
+            background: 'var(--bg-secondary)',
+            borderRadius: 12,
+            border: '1px solid var(--danger)',
+          }}>
+            <div style={{ color: 'var(--danger)', fontWeight: 500, marginBottom: 12 }}>
+              {language === 'zh' ? '小说生成失败' : 'Novel Generation Failed'}
+            </div>
+            <div style={{ color: 'var(--text-secondary)', fontSize: 13, marginBottom: 12 }}>
+              {novelError}
+            </div>
+            {/* 如果有原始文本，显示 fallback */}
+            {novelRawText && !novelProject && (
+              <div style={{ marginBottom: 12 }}>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>
+                  {language === 'zh' ? '模型原始返回：' : 'Model raw output:'}
+                </div>
+                <div style={{
+                  background: 'var(--bg-tertiary)',
+                  borderRadius: 8,
+                  padding: 12,
+                  maxHeight: 300,
+                  overflow: 'auto',
+                  fontSize: 12,
+                  lineHeight: 1.6,
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                }}>
+                  {novelRawText.slice(0, 2000)}{novelRawText.length > 2000 ? '...' : ''}
+                </div>
+              </div>
+            )}
+            <button
+              onClick={() => {
+                setNovelGenerationStep('idle');
+                setNovelError('');
+                setNovelRawText('');
+              }}
+              style={{
+                padding: '8px 16px',
+                background: 'var(--accent)',
+                border: 'none',
+                borderRadius: 8,
+                color: 'white',
+                fontSize: 13,
+              }}
+            >
+              {language === 'zh' ? '重新生成' : 'Regenerate'}
+            </button>
+          </div>
+        )}
+
+        {/* 设定已生成但第一章未生成 */}
+        {creationMode === 'novel' && novelProject && !novelChapterResult && !fastLoading && novelGenerationStep !== 'error' && (
+          <div style={{
+            padding: 16,
+            background: 'var(--bg-secondary)',
+            borderRadius: 12,
+            border: '1px solid var(--accent)',
+          }}>
+            <div style={{ fontSize: 18, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8 }}>
+              《{novelProject.title}》
+            </div>
+            <div style={{ color: 'var(--text-muted)', fontSize: 13, marginBottom: 16 }}>
+              {language === 'zh' ? '小说设定已生成，但第一章暂未生成。' : 'Novel setup generated, but first chapter is not ready.'}
+            </div>
+            <button
+              onClick={handleRegenerateFirstChapter}
+              disabled={fastLoading}
+              style={{
+                padding: '10px 20px',
+                background: 'var(--accent)',
+                border: 'none',
+                borderRadius: 8,
+                color: 'white',
+                fontSize: 14,
+                fontWeight: 500,
+              }}
+            >
+              {fastLoading ? (
+                <>
+                  <RefreshCw size={14} className="spin" style={{ marginRight: 6 }} />
+                  {language === 'zh' ? '生成中...' : 'Generating...'}
+                </>
+              ) : (
+                language === 'zh' ? '生成第一章' : 'Generate First Chapter'
+              )}
+            </button>
           </div>
         )}
 
@@ -2196,6 +2501,91 @@ export default function SuperWritingTab() {
                 ))}
               </div>
             </div>
+          </div>
+        )}
+
+        {/* 完整小说稿阅读区 */}
+        {creationMode === 'novel' && novelChapters.length > 1 && (
+          <div style={{
+            padding: 16,
+            background: 'var(--bg-secondary)',
+            borderRadius: 12,
+            border: '1px solid var(--accent)',
+            marginTop: 12,
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <span style={{ fontWeight: 600, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <BookOpen size={16} style={{ color: 'var(--accent)' }} />
+                {language === 'zh' ? '完整小说稿' : 'Full Novel'}
+              </span>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  onClick={() => {
+                    const sortedChapters = [...novelChapters].sort((a, b) => a.chapterNo - b.chapterNo);
+                    const fullText = [
+                      novelProject?.title ? `《${novelProject.title}》` : '',
+                      '',
+                      ...sortedChapters.flatMap(chapter => [
+                        `第${chapter.chapterNo}章 ${chapter.title}`,
+                        '',
+                        chapter.content,
+                        '',
+                      ]),
+                    ].join('\n');
+                    navigator.clipboard.writeText(fullText);
+                  }}
+                  style={{ background: 'transparent', border: 'none', color: 'var(--accent)', fontSize: 12 }}
+                >
+                  {language === 'zh' ? '复制全文' : 'Copy All'}
+                </button>
+                <button
+                  onClick={() => setShowFullNovelReader(!showFullNovelReader)}
+                  style={{ background: 'transparent', border: 'none', color: 'var(--text-secondary)', fontSize: 12 }}
+                >
+                  {showFullNovelReader ? (language === 'zh' ? '收起' : 'Collapse') : (language === 'zh' ? '阅读完整小说' : 'Read Full')}
+                </button>
+              </div>
+            </div>
+
+            {showFullNovelReader && (
+              <div style={{
+                background: 'var(--bg-tertiary)',
+                borderRadius: 8,
+                padding: 20,
+                maxHeight: 600,
+                overflow: 'auto',
+                fontSize: 15,
+                lineHeight: 1.9,
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+              }}>
+                {novelProject?.title && (
+                  <div style={{ fontSize: 20, fontWeight: 600, marginBottom: 24, textAlign: 'center' }}>
+                    《{novelProject.title}》
+                  </div>
+                )}
+                {[...novelChapters]
+                  .sort((a, b) => a.chapterNo - b.chapterNo)
+                  .map((chapter, index) => (
+                    <div key={chapter.chapterNo} style={{ marginBottom: index < novelChapters.length - 1 ? 32 : 0 }}>
+                      <div style={{ fontSize: 16, fontWeight: 500, color: 'var(--accent)', marginBottom: 12 }}>
+                        第{chapter.chapterNo}章 {chapter.title}
+                      </div>
+                      <div style={{ color: 'var(--text-primary)' }}>
+                        {chapter.content}
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            )}
+
+            {!showFullNovelReader && (
+              <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>
+                {language === 'zh'
+                  ? `已生成 ${novelChapters.length} 章，点击"阅读完整小说"查看全部内容`
+                  : `${novelChapters.length} chapters generated, click "Read Full" to view all`}
+              </div>
+            )}
           </div>
         )}
 

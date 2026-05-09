@@ -1,5 +1,5 @@
 // 创作中心工具函数
-import { CreationMode, NovelTaskType, NovelRewriteType, NovelProject, NovelChapterDraft, NovelAutoStartResult } from './store';
+import { CreationMode, NovelTaskType, NovelRewriteType, NovelProject, NovelChapterPlan, NovelChapterDraft, NovelAutoStartResult } from './store';
 
 // ============ Prompt 构建函数 ============
 
@@ -1203,10 +1203,197 @@ ${previousChapter.slice(-3000)} ${previousChapter.length > 3000 ? '...(前文已
 （下一章可以写什么）`;
 }
 
-// ============ 一键生成小说（设定+第一章） ============
+// ============ 两步生成小说 ============
+
+/**
+ * 构建生成小说设定（NovelProject）的 Prompt
+ * 只生成 JSON，不包含第一章正文
+ */
+export function buildNovelProjectPrompt(options: {
+  requirement: string;
+}): string {
+  const { requirement } = options;
+
+  return `你是一个专业的小说策划。请根据用户的一句话想法，自动生成完整的小说企划。
+
+用户想法：
+${requirement}
+
+请输出 JSON 格式（不要输出 Markdown，不要解释，只输出纯 JSON）：
+
+{
+  "title": "小说名（吸引人的标题）",
+  "genre": "题材类型（自动判断：都市/玄幻/悬疑/言情/科幻/历史等）",
+  "style": "风格关键词（自动判断：治愈/爽文/细腻/暗黑/幽默/热血等）",
+  "logline": "一句话简介（有吸引力，概括核心卖点）",
+  "sellingPoints": "核心卖点（2-3个）",
+  "targetReaders": "目标读者",
+  "lengthSuggestion": "篇幅建议（自动判断：短篇10万字以内/中篇10-30万字/长篇30万字以上）",
+
+  "characters": [
+    {
+      "id": "char_1",
+      "name": "角色名",
+      "role": "protagonist/supporting/antagonist",
+      "identity": "身份/职业",
+      "personality": "性格特点",
+      "desire": "核心欲望",
+      "weakness": "性格弱点",
+      "relationship": "与主角关系",
+      "arc": "人物成长弧光",
+      "locked": false
+    }
+  ],
+
+  "world": {
+    "background": "故事背景",
+    "keyScenes": "关键场景",
+    "rules": "世界规则",
+    "forbiddenRules": "不可违背的规则"
+  },
+
+  "conflict": {
+    "external": "外部冲突",
+    "internal": "内心冲突",
+    "relationship": "关系冲突",
+    "stages": "阶段性阻碍"
+  },
+
+  "outline": {
+    "beginning": "开端",
+    "development": "发展",
+    "twist": "转折",
+    "climax": "高潮",
+    "ending": "结局"
+  },
+
+  "chapters": [
+    {
+      "id": "chap_1",
+      "chapterNo": 1,
+      "title": "章节标题",
+      "goal": "本章目标",
+      "mainEvent": "主要事件",
+      "conflict": "冲突点",
+      "hook": "结尾钩子",
+      "locked": false
+    }
+  ],
+
+  "firstChapterAdvice": {
+    "openingScene": "开场场景",
+    "characters": "出场人物",
+    "mood": "情绪基调",
+    "conflictIntro": "冲突引入",
+    "endingHook": "结尾钩子"
+  },
+
+  "notes": "其他建议"
+}
+
+要求：
+1. 用户只给一句话时，必须自动补全所有空白，包括题材、风格、篇幅，不要反问
+2. 至少生成3个角色（主角、重要配角、反派或阻力来源）
+3. 章节规划5-12个
+4. 只输出 JSON，不要其他文字
+5. 不要生成第一章正文
+6. 不要输出 firstChapter 字段
+7. 不要输出 content 正文字段`;
+}
+
+/**
+ * 构建生成第一章正文的 Prompt
+ * 输出纯文本，不是 JSON
+ */
+export function buildNovelFirstChapterPlainPrompt(options: {
+  requirement: string;
+  novelProject: NovelProject;
+  chapterPlan?: NovelChapterPlan;
+}): string {
+  const { novelProject, chapterPlan } = options;
+
+  const characterList = novelProject.characters
+    .map(c => `- ${c.name}（${c.role === 'protagonist' ? '主角' : c.role === 'antagonist' ? '反派' : '配角'}，${c.identity}，${c.personality}）`)
+    .join('\n');
+
+  return `你是一个专业的小说作家。请根据以下小说设定，写出第一章正文。
+
+小说标题：《${novelProject.title}》
+题材：${novelProject.genre}
+风格：${novelProject.style}
+一句话简介：${novelProject.logline}
+
+主要角色：
+${characterList}
+
+世界观：
+- 背景：${novelProject.world.background}
+- 规则：${novelProject.world.rules}
+${novelProject.world.forbiddenRules ? `- 不可违背：${novelProject.world.forbiddenRules}` : ''}
+
+${chapterPlan ? `第一章规划：
+- 标题：${chapterPlan.title}
+- 目标：${chapterPlan.goal}
+- 主要事件：${chapterPlan.mainEvent}
+- 冲突点：${chapterPlan.conflict}
+- 结尾钩子：${chapterPlan.hook}` : ''}
+
+${novelProject.firstChapterAdvice ? `开篇建议：
+- 开场场景：${novelProject.firstChapterAdvice.openingScene}
+- 出场人物：${novelProject.firstChapterAdvice.characters}
+- 情绪基调：${novelProject.firstChapterAdvice.mood}
+- 冲突引入：${novelProject.firstChapterAdvice.conflictIntro}
+- 结尾钩子：${novelProject.firstChapterAdvice.endingHook}` : ''}
+
+请直接写出第一章正文，要求：
+1. 不要输出 JSON，不要输出 Markdown，不要解释
+2. 只输出纯文本小说正文
+3. 使用上面列出的角色名，不要改名
+4. 遵守世界观规则，不要违背 forbiddenRules
+5. 有场景、动作、对白、心理、节奏和结尾钩子
+6. 不要写成大纲，要写真正的小说正文
+7. 不要突然完结，结尾要有钩子
+8. 字数控制在 1200-2000 字`;
+}
+
+/**
+ * 通用 JSON 解析函数
+ * 支持：纯 JSON、\`\`\`json 代码块、前后有说明文字
+ */
+export function parseJsonFromModelText<T>(text: string): T | null {
+  try {
+    let jsonStr = text.trim();
+
+    // 如果被 ```json 包裹，提取内容
+    if (jsonStr.startsWith('```')) {
+      const match = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
+      if (match) {
+        jsonStr = match[1].trim();
+      }
+    }
+
+    // 找到第一个完整 JSON 对象
+    const startIndex = jsonStr.indexOf('{');
+    const lastIndex = jsonStr.lastIndexOf('}');
+    if (startIndex === -1 || lastIndex === -1 || lastIndex <= startIndex) {
+      console.warn('[parseJsonFromModelText] 未找到有效 JSON 对象');
+      return null;
+    }
+    jsonStr = jsonStr.slice(startIndex, lastIndex + 1);
+
+    const parsed = JSON.parse(jsonStr);
+    return parsed as T;
+  } catch (e) {
+    console.error('[parseJsonFromModelText] 解析失败:', (e as Error).message?.slice(0, 100));
+    return null;
+  }
+}
+
+// ============ 一键生成小说（设定+第一章）- Legacy ============
 
 /**
  * 构建一键生成小说的 Prompt（返回设定+第一章正文）
+ * @deprecated 请使用 buildNovelProjectPrompt + buildNovelFirstChapterPlainPrompt 两步生成
  */
 export function buildNovelAutoStartPrompt(options: {
   requirement: string;
