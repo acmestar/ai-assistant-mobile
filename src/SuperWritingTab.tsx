@@ -121,6 +121,7 @@ export default function SuperWritingTab() {
 
   // 完整小说稿阅读区
   const [showFullNovelReader, setShowFullNovelReader] = useState(false);
+  const [fullNovelCopied, setFullNovelCopied] = useState(false);
 
   // 快速修改状态
   const [quickHeroName, setQuickHeroName] = useState('');
@@ -2524,23 +2525,42 @@ export default function SuperWritingTab() {
               </span>
               <div style={{ display: 'flex', gap: 8 }}>
                 <button
-                  onClick={() => {
-                    const sortedChapters = [...novelChapters].sort((a, b) => a.chapterNo - b.chapterNo);
-                    const fullText = [
-                      novelProject?.title ? `《${novelProject.title}》` : '',
-                      '',
-                      ...sortedChapters.flatMap(chapter => [
-                        `第${chapter.chapterNo}章 ${chapter.title}`,
+                  onClick={async () => {
+                    try {
+                      const sortedChapters = [...novelChapters].sort((a, b) => a.chapterNo - b.chapterNo);
+                      const fullText = [
+                        novelProject?.title ? `《${novelProject.title}》` : '',
                         '',
-                        chapter.content,
-                        '',
-                      ]),
-                    ].join('\n');
-                    navigator.clipboard.writeText(fullText);
+                        ...sortedChapters.flatMap(chapter => [
+                          `第${chapter.chapterNo}章 ${chapter.title}`,
+                          '',
+                          chapter.content,
+                          '',
+                        ]),
+                      ].join('\n');
+
+                      await navigator.clipboard.writeText(fullText);
+
+                      setFullNovelCopied(true);
+                      window.setTimeout(() => {
+                        setFullNovelCopied(false);
+                      }, 1500);
+                    } catch (error) {
+                      console.error('[CopyFullNovelError]', error);
+                      setNovelError(language === 'zh' ? '复制失败，请手动选择文本复制' : 'Copy failed, please copy manually');
+                    }
                   }}
-                  style={{ background: 'transparent', border: 'none', color: 'var(--accent)', fontSize: 12 }}
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    color: fullNovelCopied ? 'var(--accent)' : 'var(--accent)',
+                    fontSize: 12,
+                    fontWeight: fullNovelCopied ? 600 : 400,
+                  }}
                 >
-                  {language === 'zh' ? '复制全文' : 'Copy All'}
+                  {fullNovelCopied
+                    ? (language === 'zh' ? '已复制' : 'Copied')
+                    : (language === 'zh' ? '复制全文' : 'Copy All')}
                 </button>
                 <button
                   onClick={() => setShowFullNovelReader(!showFullNovelReader)}
