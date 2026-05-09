@@ -501,6 +501,15 @@ interface AppState {
   };
   deleteTask: (id: string) => void;
 
+  // 从聊天页发送到创作台的初始需求
+  pendingWritingRequirement: string;
+  setPendingWritingRequirement: (requirement: string) => void;
+  clearPendingWritingRequirement: () => void;
+
+  // 创作台默认模型
+  selectedWritingModelId: string;
+  setSelectedWritingModelId: (modelId: string) => void;
+
   // Actions
   createConversation: () => string;
   getCurrentConversation: () => Conversation | null;
@@ -882,6 +891,15 @@ export const useAppStore = create<AppState>()(
       deleteTask: (id) => set((state) => ({
         savedTasks: state.savedTasks.filter((t) => t.id !== id),
       })),
+
+      // 从聊天页发送到创作台的初始需求
+      pendingWritingRequirement: '',
+      setPendingWritingRequirement: (requirement) => set({ pendingWritingRequirement: requirement }),
+      clearPendingWritingRequirement: () => set({ pendingWritingRequirement: '' }),
+
+      // 创作台默认模型
+      selectedWritingModelId: '',
+      setSelectedWritingModelId: (modelId) => set({ selectedWritingModelId: modelId }),
 
       // Actions
       createConversation: () => {

@@ -14,7 +14,7 @@ import {
   FolderOpen,
   Download,
 } from 'lucide-react';
-import { useAppStore } from './store';
+import { useAppStore, CHAT_MODELS } from './store';
 import { executeModelQueue, regenerateQueueItem, callChatCompletionRaw } from './api';
 import {
   buildCreationPrompt,
@@ -68,6 +68,12 @@ export default function SuperWritingTab() {
     setActiveWritingDraft,
     characterMemory,
     worldSetting,
+    // 从聊天页传递的需求
+    pendingWritingRequirement,
+    clearPendingWritingRequirement,
+    // 创作台默认模型
+    selectedWritingModelId,
+    setSelectedWritingModelId,
   } = useAppStore();
 
   const [showOutlineParser, setShowOutlineParser] = useState(false);
@@ -83,6 +89,18 @@ export default function SuperWritingTab() {
   const [showOutlinePreview, setShowOutlinePreview] = useState(false);
   const [showTaskPanel, setShowTaskPanel] = useState(false);
   const [expandedResults, setExpandedResults] = useState<Set<string>>(new Set());
+
+  // 获取实际使用的模型ID（优先使用创作台默认模型，否则使用全局模型）
+  const effectiveModelId = selectedWritingModelId || chatModelId;
+
+  // 接收从聊天页传递的需求
+  useEffect(() => {
+    if (pendingWritingRequirement.trim()) {
+      setOutlineText(pendingWritingRequirement);
+      setShowOutlineParser(true);
+      clearPendingWritingRequirement();
+    }
+  }, [pendingWritingRequirement]);
 
   // 从 activeWritingDraft 恢复创作状态（页面刷新后）
   useEffect(() => {
@@ -207,7 +225,7 @@ export default function SuperWritingTab() {
       clearModelQueue();
       parsedOutline.chapters.forEach((chapter) => {
         addModelToQueue(
-          chatModelId,
+          effectiveModelId,
           chapter.content || `请根据大纲创作：${chapter.title}`,
           chapter.title
         );
@@ -215,9 +233,9 @@ export default function SuperWritingTab() {
     } else if (parsedCreation) {
       // 其他创作类型使用新的转换函数
       clearModelQueue();
-      const items = convertParsedCreationToQueue(creationMode, parsedCreation, chatModelId, language);
+      const items = convertParsedCreationToQueue(creationMode, parsedCreation, effectiveModelId, language);
       items.forEach((item) => {
-        addModelToQueue(chatModelId, item.instruction, item.title);
+        addModelToQueue(effectiveModelId, item.instruction, item.title);
       });
     }
 
@@ -431,8 +449,26 @@ export default function SuperWritingTab() {
           </span>
         </div>
 
-        <div style={{ display: 'flex', gap: 8 }}>
-          {/* 导出按钮 */}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {/* 默认创作模型选择器 */}
+          <select
+            value={effectiveModelId}
+            onChange={(e) => setSelectedWritingModelId(e.target.value)}
+            style={{
+              padding: '4px 8px',
+              background: 'var(--bg-tertiary)',
+              border: '1px solid var(--border)',
+              borderRadius: 8,
+              color: 'var(--text-secondary)',
+              fontSize: 11,
+              maxWidth: 120,
+            }}
+          >
+            <option value="">{language === 'zh' ? '默认模型' : 'Default'}</option>
+            {CHAT_MODELS.map((m) => (
+              <option key={m.id} value={m.id}>{m.name}</option>
+            ))}
+          </select>          {/* 导出按钮 */}
           {modelQueue.length > 0 && modelQueue.some(item => item.result) && (
             <div style={{ position: 'relative' }}>
               <button
