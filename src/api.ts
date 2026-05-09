@@ -26,6 +26,72 @@ export function cancelImageRequest(): void {
   }
 }
 
+// 不写聊天记录的 API 调用函数 - 用于创作中心等场景
+export async function callChatCompletionRaw(
+  prompt: string,
+  imageBase64?: string,
+  onChunk?: (chunk: string) => void
+): Promise<string> {
+  const { apiKey, chatModelId } = useAppStore.getState();
+  if (!apiKey) throw new Error('请先设置 API Key');
+
+  const model = CHAT_MODELS.find((m) => m.id === chatModelId) || CHAT_MODELS[0];
+
+  const messages: Array<{ role: string; content: string | Array<{ type: string; text?: string; image_url?: { url: string } }> }> = [];
+  messages.push({ role: 'user', content: prompt });
+
+  if (imageBase64) {
+    messages[0] = { role: 'user', content: [{ type: 'text', text: prompt }, { type: 'image_url', image_url: { url: imageBase64 } }] };
+  }
+
+  const resp = await fetch(`${API_BASE}/chat/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({ model: model.id, messages, max_tokens: 8192, stream: true }),
+  });
+
+  if (!resp.ok) {
+    const err = await resp.text();
+    throw new Error(`API 错误: ${resp.status} ${err.slice(0, 200)}`);
+  }
+
+  const reader = resp.body?.getReader();
+  if (!reader) throw new Error('无法读取响应流');
+
+  const decoder = new TextDecoder();
+  let fullContent = '';
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+
+    for (const line of lines) {
+      if (line.startsWith('data: ')) {
+        const data = line.slice(6);
+        if (data === '[DONE]') continue;
+
+        try {
+          const parsed = JSON.parse(data);
+          const content = parsed.choices?.[0]?.delta?.content || '';
+          if (content) {
+            fullContent += content;
+            onChunk?.(content);
+          }
+        } catch {
+          // 忽略解析错误
+        }
+      }
+    }
+  }
+
+  return fullContent;
+}
+
 // 重试机制
 async function fetchWithRetry(url: string, options: RequestInit, timeout: number = 120000, retries: number = 2): Promise<Response> {
   for (let attempt = 0; attempt <= retries; attempt++) {
@@ -516,11 +582,14 @@ async function generateGeminiImage(apiKey: string, modelId: string, prompt: stri
 // 执行模型队列 - 支持顺序和并行模式
 export async function executeModelQueue(
   onProgress?: (queueId: string, content: string, isComplete: boolean) => void,
-  onChapterComplete?: (title: string, content: string) => void  // 新增：章节完成时写入对话
+  onChapterComplete?: (title: string, content: string) => void,  // 章节完成时写入对话
+  options?: { saveToConversation?: boolean }  // 是否保存到聊天记录，默认 true
 ): Promise<void> {
   const { apiKey, modelQueue, setIsQueueRunning, updateQueueResult, setCurrentQueueIndex, getCurrentConversation, characterMemory, worldSetting, parallelMode, activeWritingDraft } = useAppStore.getState();
   if (!apiKey) throw new Error('请先设置 API Key');
   if (modelQueue.length === 0) return;
+
+  const saveToConversation = options?.saveToConversation !== false; // 默认 true
 
   setIsQueueRunning(true);
 
@@ -696,8 +765,10 @@ ${item.instruction}
 
           updateQueueResult(item.id, content);
           onProgress?.(item.id, content, true);
-          // 写入对话
-          onChapterComplete?.(item.title || `内容 ${index + 1}`, content);
+          // 写入对话（仅当 saveToConversation 为 true 时）
+          if (saveToConversation) {
+            onChapterComplete?.(item.title || `内容 ${index + 1}`, content);
+          }
 
         } catch (e) {
           const errorMsg = `错误: ${e instanceof Error ? e.message : '请求失败'}`;
@@ -807,8 +878,10 @@ ${item.instruction}
           updateQueueResult(item.id, content);
           onProgress?.(item.id, content, true);
 
-          // 写入对话
-          onChapterComplete?.(item.title || `内容 ${i + 1}`, content);
+          // 写入对话（仅当 saveToConversation 为 true 时）
+          if (saveToConversation) {
+            onChapterComplete?.(item.title || `内容 ${i + 1}`, content);
+          }
 
           // 生成摘要（而非完整内容）供后续内容参考
           const summary = content.length > 500

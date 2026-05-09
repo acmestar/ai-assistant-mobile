@@ -76,7 +76,7 @@ export default function VirtualCompanyTab() {
       )}
 
       {/* 内容区 */}
-      <div style={{ flex: 1, overflow: 'hidden' }}>
+      <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
         {viewMode === 'list' && (
           <CompanyListPage
             onSelectCompany={handleSelectCompany}

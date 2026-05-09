@@ -18,6 +18,7 @@ import {
   Zap,
   Target,
   Briefcase,
+  AlertTriangle,
 } from 'lucide-react';
 import { useAppStore } from '../store';
 import {
@@ -39,7 +40,6 @@ import {
   GenerationSourceSummary,
   getTaskTypeForAgent,
 } from './modelRouter';
-import MeetingProgress, { getMorningMeetingSteps, ProgressStep } from './MeetingProgress';
 import GenerationInfo from './GenerationInfo';
 
 interface CompanyMeetingPageProps {
@@ -58,10 +58,14 @@ export default function CompanyMeetingPage({ companyId, meetingType, onBack }: C
   const [linkUrl, setLinkUrl] = useState('');
   const [userMode, setUserMode] = useState<UserMode>('standard');
   const [isRunning, setIsRunning] = useState(false);
-  const [progressSteps, setProgressSteps] = useState<ProgressStep[]>([]);
   const [agentSpeeches, setAgentSpeeches] = useState<AgentSpeech[]>([]);
   const [minutes, setMinutes] = useState<MorningMeetingMinutes | null>(null);
   const [expandedView, setExpandedView] = useState<string | null>(null);
+
+  // 进度和当前步骤显示
+  const [progress, setProgress] = useState(0);
+  const [currentStep, setCurrentStep] = useState('');
+  const [error, setError] = useState<string | null>(null);
 
   // 确认操作
   const [showTaskConfirm, setShowTaskConfirm] = useState(false);
@@ -106,13 +110,6 @@ export default function CompanyMeetingPage({ companyId, meetingType, onBack }: C
     }
   };
 
-  // 更新进度步骤
-  const updateStep = (stepId: string, status: ProgressStep['status'], message?: string) => {
-    setProgressSteps(prev => prev.map(step =>
-      step.id === stepId ? { ...step, status, message } : step
-    ));
-  };
-
   // 开始会议
   const handleStartMeeting = async () => {
     if (!apiKey) {
@@ -133,10 +130,9 @@ export default function CompanyMeetingPage({ companyId, meetingType, onBack }: C
     setAgentSpeeches([]);
     setMinutes(null);
     setSourceSummary(null);
-
-    // 初始化进度步骤
-    const steps = getMorningMeetingSteps(language);
-    setProgressSteps(steps);
+    setProgress(0);
+    setCurrentStep(language === 'zh' ? '正在初始化...' : 'Initializing...');
+    setError(null);
 
     // 创建会话 ID
     const sessionId = `meeting-${Date.now()}`;
@@ -145,7 +141,8 @@ export default function CompanyMeetingPage({ companyId, meetingType, onBack }: C
 
     try {
       // Step 1: 读取公司上下文
-      updateStep('context', 'running', language === 'zh' ? '正在读取公司档案...' : 'Loading company profile...');
+      setProgress(5);
+      setCurrentStep(language === 'zh' ? '正在读取公司档案...' : 'Loading company profile...');
       const contextSnapshot: CompanyContextSnapshot = {
         companyName: company.name,
         purpose: company.purpose,
@@ -159,19 +156,19 @@ export default function CompanyMeetingPage({ companyId, meetingType, onBack }: C
         risks: company.risks?.filter(r => r.status === 'active').map(r => r.title),
         agents: company.agents,
       };
-      updateStep('context', 'completed');
-      updateStep('goals', 'running', language === 'zh' ? '正在加载公司目标...' : 'Loading company goals...');
-      updateStep('goals', 'completed');
+      setProgress(10);
+      setCurrentStep(language === 'zh' ? '正在加载公司目标...' : 'Loading company goals...');
 
       // Step 2: 检索相关记忆
-      updateStep('memories', 'running', language === 'zh' ? '正在检索相关公司记忆...' : 'Retrieving relevant memories...');
+      setProgress(15);
+      setCurrentStep(language === 'zh' ? '正在检索相关公司记忆...' : 'Retrieving relevant memories...');
       const relatedMemories = (company.memories || []).slice(-5);
-      updateStep('memories', 'completed');
 
       // Step 3: 提取内容（图片需要识别）
       let extractedContent = content;
       if (inputType === 'image' && imageUrl) {
-        updateStep('image', 'running', language === 'zh' ? '正在识别图片内容...' : 'Analyzing image...');
+        setProgress(20);
+        setCurrentStep(language === 'zh' ? '正在识别图片内容...' : 'Analyzing image...');
         const imageResult = await callModel<string>(
           'image_understanding',
           {
@@ -183,13 +180,11 @@ export default function CompanyMeetingPage({ companyId, meetingType, onBack }: C
         if (imageResult.success && imageResult.data) {
           extractedContent = imageResult.data;
         }
-        updateStep('image', 'completed');
-      } else {
-        updateStep('image', 'completed');
       }
 
       // Step 4: 内容摘要
-      updateStep('summary', 'running', language === 'zh' ? '正在整理今日信息摘要...' : 'Summarizing...');
+      setProgress(25);
+      setCurrentStep(language === 'zh' ? '正在整理今日信息摘要...' : 'Summarizing...');
       await callModel<string>(
         'content_summary',
         {
@@ -199,7 +194,6 @@ ${extractedContent}`,
         },
         { mode: userMode, companyId, meetingId: sessionId }
       );
-      updateStep('summary', 'completed');
 
       // Step 5-10: 各角色发言（使用 getTaskTypeForAgent 动态分配）
       const agents = company.agents || [];
@@ -207,9 +201,10 @@ ${extractedContent}`,
 
       for (let i = 0; i < agents.length; i++) {
         const agent = agents[i];
-        const stepId = ['strategy', 'opportunity', 'technical', 'risk', 'opposition', 'final'][i] || 'final';
 
-        updateStep(stepId, 'running', `${agent.name}（${agent.role}）正在发言...`);
+        const progressPercent = 30 + Math.round((i / agents.length) * 50);
+        setProgress(progressPercent);
+        setCurrentStep(`${agent.name}（${agent.role}）正在发言...`);
 
         // 使用 getTaskTypeForAgent 动态获取 TaskType
         const taskType = getTaskTypeForAgent(agent, meetingType);
@@ -255,12 +250,11 @@ ${extractedContent}`,
           });
           setAgentSpeeches([...currentSpeeches]);
         }
-
-        updateStep(stepId, 'completed');
       }
 
       // Step 11: 生成会议纪要
-      updateStep('final', 'running', language === 'zh' ? '正在整合最终晨会纪要...' : 'Synthesizing final minutes...');
+      setProgress(85);
+      setCurrentStep(language === 'zh' ? '正在整合最终晨会纪要...' : 'Synthesizing final minutes...');
       const minutesPrompt = buildMinutesPrompt(
         extractedContent,
         contextSnapshot,
@@ -339,8 +333,6 @@ ${JSON.stringify(minutesResult.data)}
         setPendingTasks(extractedTasks);
         setPendingMemories(extractedMemories);
 
-        updateStep('final', 'completed');
-
         // 生成来源摘要
         const summary2 = generateSourceSummary(sessionId, userMode, 'gpt-5.5');
         setSourceSummary(summary2);
@@ -385,11 +377,15 @@ ${JSON.stringify(minutesResult.data)}
 
         addCompanyMeeting(companyId, meeting);
         setSavedMeetingId(meetingId);
+        setProgress(100);
+        setCurrentStep(language === 'zh' ? '会议完成' : 'Meeting completed');
       }
 
     } catch (error: any) {
       console.error('会议失败:', error);
-      alert(error.message || (language === 'zh' ? '会议失败，请重试' : 'Meeting failed, please retry'));
+      setError(error.message || (language === 'zh' ? '会议失败，请重试' : 'Meeting failed, please retry'));
+      setProgress(0);
+      setCurrentStep('');
     } finally {
       setIsRunning(false);
     }
@@ -489,7 +485,7 @@ ${minutes.todayActions?.map((a, i) => `${i + 1}. ${a}`).join('\n') || '无'}
 
   // 渲染输入页面
   const renderInputPage = () => (
-    <div style={{ flex: 1, overflow: 'auto', padding: 16, display: 'flex', flexDirection: 'column', gap: 16 }}>
+    <div style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: 16, display: 'flex', flexDirection: 'column', gap: 16 }}>
       {/* 公司信息 */}
       <div style={{
         padding: 16,
@@ -733,17 +729,106 @@ ${minutes.todayActions?.map((a, i) => `${i + 1}. ${a}`).join('\n') || '无'}
 
   // 渲染进度页面
   const renderProgressPage = () => (
-    <MeetingProgress
-      steps={progressSteps}
-      companyName={company.name}
-      meetingType={meetingType}
-      language={language}
-    />
+    <div style={{
+      flex: 1,
+      minHeight: 0,
+      overflow: 'auto',
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: 40,
+    }}>
+      {error ? (
+        <>
+          <div style={{
+            width: 80,
+            height: 80,
+            borderRadius: '50%',
+            background: 'rgba(239, 68, 68, 0.1)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            marginBottom: 24,
+          }}>
+            <AlertTriangle size={36} style={{ color: 'var(--danger)' }} />
+          </div>
+          <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 8, color: 'var(--danger)' }}>
+            {language === 'zh' ? '会议出错' : 'Meeting Error'}
+          </h3>
+          <p style={{ fontSize: 14, color: 'var(--text-muted)', marginBottom: 24, textAlign: 'center', maxWidth: 300 }}>
+            {error}
+          </p>
+          <button
+            onClick={() => {
+              setError(null);
+              setProgress(0);
+              setCurrentStep('');
+            }}
+            style={{
+              padding: '12px 24px',
+              background: 'var(--accent)',
+              border: 'none',
+              borderRadius: 8,
+              color: 'white',
+              fontSize: 14,
+              fontWeight: 500,
+            }}
+          >
+            {language === 'zh' ? '重新开始' : 'Retry'}
+          </button>
+        </>
+      ) : (
+        <>
+          <div style={{
+            width: 80,
+            height: 80,
+            borderRadius: '50%',
+            background: 'var(--accent-dim)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            marginBottom: 24,
+          }}>
+            <RefreshCw size={36} style={{ color: 'var(--accent)' }} className="spin" />
+          </div>
+
+          <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 8, color: 'var(--text-primary)' }}>
+            {language === 'zh' ? 'AI 晨会进行中' : 'AI Morning Meeting'}
+          </h3>
+
+          <p style={{ fontSize: 14, color: 'var(--text-muted)', marginBottom: 24, textAlign: 'center' }}>
+            {currentStep}
+          </p>
+
+          <div style={{
+            width: '100%',
+            maxWidth: 300,
+            height: 6,
+            background: 'var(--bg-tertiary)',
+            borderRadius: 3,
+            overflow: 'hidden',
+          }}>
+            <div style={{
+              width: `${progress}%`,
+              height: '100%',
+              background: 'var(--accent)',
+              borderRadius: 3,
+              transition: 'width 0.3s ease',
+            }} />
+          </div>
+
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 8 }}>
+            {progress}%
+          </p>
+        </>
+      )}
+    </div>
   );
 
   // 渲染结果页面
   const renderResultPage = () => (
-    <div style={{ flex: 1, overflow: 'auto', padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+    <div style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
       {/* 操作按钮 */}
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
         <button

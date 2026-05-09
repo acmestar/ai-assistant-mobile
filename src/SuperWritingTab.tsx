@@ -15,7 +15,7 @@ import {
   Download,
 } from 'lucide-react';
 import { useAppStore } from './store';
-import { sendChatMessageStream, executeModelQueue, regenerateQueueItem } from './api';
+import { executeModelQueue, regenerateQueueItem, callChatCompletionRaw } from './api';
 import {
   buildCreationPrompt,
   convertParsedCreationToQueue,
@@ -159,10 +159,8 @@ export default function SuperWritingTab() {
       // 根据创作类型使用不同的 Prompt
       const prompt = buildCreationPrompt(creationMode, outlineText);
 
-      let result = '';
-      await sendChatMessageStream(prompt, undefined, (chunk: string) => {
-        result += chunk;
-      });
+      // 使用不写聊天记录的 API
+      const result = await callChatCompletionRaw(prompt, undefined, () => {});
 
       // 解析 JSON
       const jsonMatch = result.match(/\{[\s\S]*\}/);
@@ -231,7 +229,8 @@ export default function SuperWritingTab() {
   // 执行队列
   const handleExecuteQueue = async () => {
     if (modelQueue.length === 0 || !apiKey) return;
-    await executeModelQueue();
+    // 创作中心不保存到聊天记录
+    await executeModelQueue(undefined, undefined, { saveToConversation: false });
   };
 
   // 单项重生成
@@ -247,14 +246,16 @@ export default function SuperWritingTab() {
         });
         updateQueueResult(queueId, result);
       } else {
-        // 非 novel 模式：直接重新执行该 item 的 instruction
+        // 非 novel 模式：直接重新执行该 item 的 instruction（不写聊天记录）
         const item = modelQueue.find(q => q.id === queueId);
         if (!item || !item.instruction.trim()) return;
 
-        let result = '';
-        await sendChatMessageStream(item.instruction, undefined, (chunk: string) => {
-          result += chunk;
-          updateQueueResult(queueId, result);
+        const result = await callChatCompletionRaw(item.instruction, undefined, (chunk) => {
+          // 实时更新进度
+          const currentItem = useAppStore.getState().modelQueue.find(q => q.id === queueId);
+          if (currentItem) {
+            updateQueueResult(queueId, (currentItem.result || '') + chunk);
+          }
         });
         updateQueueResult(queueId, result);
       }
@@ -590,30 +591,21 @@ export default function SuperWritingTab() {
             borderRadius: 12,
             border: '1px solid var(--border)',
           }}>
-            {/* 创作类型选择 */}
-            <div style={{ marginBottom: 12 }}>
-              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>
-                {language === 'zh' ? '选择创作类型' : 'Select Creation Type'}
-              </div>
-              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                {EXAMPLE_TARGETS.map((target, i: number) => (
-                  <button
-                    key={i}
-                    onClick={() => setCreationMode(target.mode)}
-                    style={{
-                      padding: '4px 8px',
-                      fontSize: 11,
-                      background: creationMode === target.mode ? 'var(--accent)' : 'var(--bg-tertiary)',
-                      border: 'none',
-                      borderRadius: 6,
-                      color: creationMode === target.mode ? 'white' : 'var(--text-secondary)',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    {target.icon} {target.category}
-                  </button>
-                ))}
-              </div>
+            {/* 当前创作类型显示 */}
+            <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{
+                padding: '4px 10px',
+                background: 'var(--accent-dim)',
+                borderRadius: 6,
+                fontSize: 12,
+                color: 'var(--accent)',
+                fontWeight: 500,
+              }}>
+                {EXAMPLE_TARGETS.find(t => t.mode === creationMode)?.icon} {EXAMPLE_TARGETS.find(t => t.mode === creationMode)?.category}
+              </span>
+              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                {language === 'zh' ? '（点击上方按钮切换类型）' : '(Click buttons above to change type)'}
+              </span>
             </div>
 
             <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 8, color: 'var(--text-primary)' }}>
