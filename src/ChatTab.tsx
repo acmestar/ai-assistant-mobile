@@ -736,14 +736,24 @@ ${outlineText}`;
     if (isQueueRunning || modelQueue.length === 0) return;
 
     try {
-      await executeModelQueue((queueId, content, isComplete) => {
-        // 实时更新结果
-        updateQueueResult(queueId, content);
-        // 完成时自动展开该项
-        if (isComplete) {
-          setExpandedResults(prev => new Set(prev).add(queueId));
+      await executeModelQueue(
+        (queueId, content, isComplete) => {
+          // 实时更新结果
+          updateQueueResult(queueId, content);
+          // 完成时自动展开该项
+          if (isComplete) {
+            setExpandedResults(prev => new Set(prev).add(queueId));
+          }
+        },
+        (title, content) => {
+          // 章节完成时写入对话
+          const { addMessage } = useAppStore.getState();
+          // 先添加用户指令（章节标题）
+          addMessage(`【${title}】`, 'user');
+          // 再添加AI回复（章节内容）
+          addMessage(content, 'assistant');
         }
-      });
+      );
     } catch (e) {
       setError(String(e));
     }

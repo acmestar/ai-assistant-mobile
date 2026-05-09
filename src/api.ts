@@ -511,7 +511,8 @@ async function generateGeminiImage(apiKey: string, modelId: string, prompt: stri
 
 // 执行模型队列 - 支持顺序和并行模式
 export async function executeModelQueue(
-  onProgress?: (queueId: string, content: string, isComplete: boolean) => void
+  onProgress?: (queueId: string, content: string, isComplete: boolean) => void,
+  onChapterComplete?: (title: string, content: string) => void  // 新增：章节完成时写入对话
 ): Promise<void> {
   const { apiKey, modelQueue, setIsQueueRunning, updateQueueResult, setCurrentQueueIndex, getCurrentConversation, characterMemory, worldSetting, parallelMode } = useAppStore.getState();
   if (!apiKey) throw new Error('请先设置 API Key');
@@ -625,6 +626,8 @@ export async function executeModelQueue(
 
           updateQueueResult(item.id, content);
           onProgress?.(item.id, content, true);
+          // 写入对话
+          onChapterComplete?.(item.title || `第${index + 1}章`, content);
 
         } catch (e) {
           const errorMsg = `错误: ${e instanceof Error ? e.message : '请求失败'}`;
@@ -696,6 +699,9 @@ export async function executeModelQueue(
           // 完成后更新结果
           updateQueueResult(item.id, content);
           onProgress?.(item.id, content, true);
+
+          // 写入对话
+          onChapterComplete?.(item.title || `第${i + 1}章`, content);
 
           // 将结果添加到对话历史（作为上下文供后续模型使用）
           contextMessages.push({ role: 'user', content: item.instruction });
