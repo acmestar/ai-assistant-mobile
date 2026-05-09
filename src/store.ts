@@ -418,6 +418,7 @@ interface AppState {
   aiCompanies: AICompany[];
   currentCompanyId: string | null;
   createAICompany: (companyData: Partial<AICompany> & { name: string; purpose: string }) => string;
+  addAICompany: (company: AICompany) => void;
   updateAICompany: (id: string, updates: Partial<AICompany>) => void;
   deleteAICompany: (id: string) => void;
   setCurrentCompanyId: (id: string | null) => void;
@@ -705,6 +706,10 @@ export const useAppStore = create<AppState>()(
         }));
         return id;
       },
+      addAICompany: (company) => set((state) => ({
+        aiCompanies: [company, ...state.aiCompanies],
+        currentCompanyId: company.id,
+      })),
       updateAICompany: (id, updates) => set((state) => ({
         aiCompanies: state.aiCompanies.map((c) =>
           c.id === id ? { ...c, ...updates, updatedAt: new Date().toISOString() } : c

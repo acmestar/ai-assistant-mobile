@@ -6,8 +6,23 @@ import CompanyListPage from './CompanyListPage';
 import CompanyWorkspace from './CompanyWorkspace';
 import CreateCompanyPage from './CreateCompanyPage';
 import CompanyMeetingPage from './CompanyMeetingPage';
+import CompanyRequirementPage from './CompanyRequirementPage';
+import { RequirementAnalysis, AICompany, CompanyAgent } from './types';
 
-type ViewMode = 'list' | 'workspace' | 'create' | 'meeting';
+type ViewMode = 'list' | 'workspace' | 'create' | 'meeting' | 'requirement';
+
+// 根据角色获取部门
+function getDepartmentForRole(role: string): string {
+  if (role.includes('CEO') || role.includes('创始人') || role.includes('总经理')) return '管理层';
+  if (role.includes('产品') || role.includes('PM')) return '产品部';
+  if (role.includes('技术') || role.includes('开发') || role.includes('CTO')) return '技术部';
+  if (role.includes('市场') || role.includes('营销') || role.includes('CMO')) return '市场部';
+  if (role.includes('运营') || role.includes('COO')) return '运营部';
+  if (role.includes('财务') || role.includes('CFO')) return '财务部';
+  if (role.includes('法务') || role.includes('合规')) return '法务部';
+  if (role.includes('人事') || role.includes('HR')) return '人事部';
+  return '顾问团';
+}
 
 export default function VirtualCompanyTab() {
   const { language, currentCompanyId, setCurrentCompanyId } = useAppStore();
@@ -53,6 +68,99 @@ export default function VirtualCompanyTab() {
     setViewMode('workspace');
   };
 
+  // 智能建档
+  const handleSmartCreate = () => {
+    setViewMode('requirement');
+  };
+
+  // 从需求分析创建长期公司
+  const handleCreateCompanyFromAnalysis = (analysis: RequirementAnalysis) => {
+    const companyId = `company-${Date.now()}`;
+    const now = new Date().toISOString();
+
+    // 生成默认团队成员
+    const agents: CompanyAgent[] = analysis.suggestedAgents.map((agent, index) => ({
+      id: `agent-${companyId}-${index}`,
+      name: agent.role,
+      role: agent.role,
+      department: getDepartmentForRole(agent.role),
+      personality: agent.personality || '专业、严谨',
+      background: agent.background || '多年行业经验',
+      responsibilities: [agent.responsibility],
+      focusAreas: [],
+      speakingStyle: '专业客观',
+      decisionPower: '建议权',
+      reviewOrder: index,
+    }));
+
+    const newCompany: AICompany = {
+      id: companyId,
+      name: analysis.suggestedCompanyProfile?.name || '未命名公司',
+      purpose: analysis.suggestedCompanyProfile?.purpose || '',
+      industry: analysis.suggestedCompanyProfile?.industry || analysis.industry,
+      stage: analysis.suggestedCompanyProfile?.stage || analysis.stage,
+      targetUsers: analysis.targetUsers ? [analysis.targetUsers] : undefined,
+      businessModel: analysis.suggestedCompanyProfile?.businessModel,
+      agents,
+      memories: [],
+      goals: [],
+      tasks: [],
+      risks: [],
+      meetings: [],
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    useAppStore.getState().addAICompany(newCompany);
+    setSelectedCompanyId(companyId);
+    setCurrentCompanyId(companyId);
+    setViewMode('workspace');
+  };
+
+  // 从需求分析开始临时顾问会议
+  const handleStartTempMeeting = (analysis: RequirementAnalysis) => {
+    const companyId = `temp-company-${Date.now()}`;
+    const now = new Date().toISOString();
+
+    // 创建临时公司档案
+    const agents: CompanyAgent[] = analysis.suggestedAgents.map((agent, index) => ({
+      id: `agent-${companyId}-${index}`,
+      name: agent.role,
+      role: agent.role,
+      department: getDepartmentForRole(agent.role),
+      personality: agent.personality || '专业、严谨',
+      background: agent.background || '多年行业经验',
+      responsibilities: [agent.responsibility],
+      focusAreas: [],
+      speakingStyle: '专业客观',
+      decisionPower: '建议权',
+      reviewOrder: index,
+    }));
+
+    const tempCompany: AICompany = {
+      id: companyId,
+      name: analysis.suggestedCompanyProfile?.name || '临时顾问团',
+      purpose: analysis.suggestedCompanyProfile?.purpose || analysis.summary,
+      industry: analysis.industry,
+      stage: analysis.stage,
+      targetUsers: analysis.targetUsers ? [analysis.targetUsers] : undefined,
+      agents,
+      memories: [],
+      goals: [],
+      tasks: [],
+      risks: [],
+      meetings: [],
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    useAppStore.getState().addAICompany(tempCompany);
+    setSelectedCompanyId(companyId);
+    setCurrentCompanyId(companyId);
+    setMeetingType(analysis.suggestedMeetingType);
+    setViewMode('meeting');
+  };
+
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       {/* Header - 只在列表页显示 */}
@@ -81,6 +189,7 @@ export default function VirtualCompanyTab() {
           <CompanyListPage
             onSelectCompany={handleSelectCompany}
             onCreateCompany={handleCreateCompany}
+            onSmartCreate={handleSmartCreate}
           />
         )}
 
@@ -104,6 +213,14 @@ export default function VirtualCompanyTab() {
             companyId={selectedCompanyId}
             meetingType={meetingType}
             onBack={handleMeetingBack}
+          />
+        )}
+
+        {viewMode === 'requirement' && (
+          <CompanyRequirementPage
+            onBack={handleBackToList}
+            onCreateCompany={handleCreateCompanyFromAnalysis}
+            onStartTempMeeting={handleStartTempMeeting}
           />
         )}
       </div>

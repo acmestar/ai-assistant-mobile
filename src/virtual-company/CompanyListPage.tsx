@@ -5,13 +5,15 @@ import {
   Plus,
   ChevronRight,
   Trash2,
+  Sparkles,
 } from 'lucide-react';
 import { useAppStore } from '../store';
 import { AICompany } from './types';
 
-export default function CompanyListPage({ onSelectCompany, onCreateCompany }: {
+export default function CompanyListPage({ onSelectCompany, onCreateCompany, onSmartCreate }: {
   onSelectCompany: (companyId: string) => void;
   onCreateCompany: () => void;
+  onSmartCreate: () => void;
 }) {
   const { language, aiCompanies, deleteAICompany } = useAppStore();
 
@@ -41,10 +43,10 @@ export default function CompanyListPage({ onSelectCompany, onCreateCompany }: {
           </span>
         </div>
         <button
-          onClick={onCreateCompany}
+          onClick={onSmartCreate}
           style={{
             padding: '6px 12px',
-            background: 'var(--accent)',
+            background: 'linear-gradient(135deg, var(--accent), var(--accent-blue))',
             border: 'none',
             borderRadius: 8,
             color: 'white',
@@ -54,8 +56,25 @@ export default function CompanyListPage({ onSelectCompany, onCreateCompany }: {
             gap: 4,
           }}
         >
+          <Sparkles size={14} />
+          {language === 'zh' ? '智能建档' : 'Smart Create'}
+        </button>
+        <button
+          onClick={onCreateCompany}
+          style={{
+            padding: '6px 12px',
+            background: 'var(--bg-tertiary)',
+            border: '1px solid var(--border)',
+            borderRadius: 8,
+            color: 'var(--text-secondary)',
+            fontSize: 12,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 4,
+          }}
+        >
           <Plus size={14} />
-          {language === 'zh' ? '创建公司' : 'Create'}
+          {language === 'zh' ? '手动创建' : 'Manual'}
         </button>
       </div>
 

@@ -571,3 +571,52 @@ export interface MorningMeetingMinutes {
   todayActions: string[];
   followUpSuggestions: string[];
 }
+
+// ========== 需求智能分析结构 ==========
+
+// 需求意图类型
+export type IntentType =
+  | 'company_creation'      // 真的想开公司
+  | 'project_review'        // 项目评审
+  | 'business_problem'      // 业务问题诊断
+  | 'personal_advice'        // 个人咨询
+  | 'content_strategy'       // 内容策略
+  | 'product_planning';      // 产品规划
+
+// 建议的公司/项目资料
+export interface SuggestedCompanyProfile {
+  name: string;
+  purpose: string;
+  industry?: string;
+  stage?: string;
+  businessModel?: string;
+  targetCustomers?: string;
+  coreOffer?: string;
+}
+
+// 建议的团队成员
+export interface SuggestedAgent {
+  role: string;
+  responsibility: string;
+  background?: string;
+  personality?: string;
+}
+
+// 需求分析结果
+export interface RequirementAnalysis {
+  id: string;
+  rawRequirement: string;
+  intentType: IntentType;
+  summary: string;
+  industry?: string;
+  stage?: string;
+  goal?: string;
+  targetUsers?: string;
+  mainProblems: string[];
+  suggestedCompanyProfile?: SuggestedCompanyProfile;
+  suggestedAgents: SuggestedAgent[];
+  suggestedMeetingType: MeetingType;
+  recommendedNextAction: string;
+  createdAt: number;
+  updatedAt: number;
+}

@@ -11,6 +11,7 @@ export type TaskType =
   | 'company_positioning_analysis'
   | 'company_goal_decomposition'
   | 'agent_team_generation'
+  | 'requirement_analysis'
 
   // 公司会议
   | 'morning_meeting_analysis'
@@ -189,6 +190,7 @@ export const TASK_RESPONSIBILITIES: Partial<Record<TaskType, string>> = {
   company_positioning_analysis: '分析公司定位和差异化',
   company_goal_decomposition: '拆解公司目标',
   agent_team_generation: '生成公司团队角色',
+  requirement_analysis: '分析用户需求并生成公司/项目资料草稿',
 
   // 会议
   morning_meeting_analysis: '分析晨会信息对公司的影响',
@@ -270,6 +272,7 @@ const STANDARD_MODEL_ROUTER: Record<TaskType, ModelId> = {
   company_positioning_analysis: 'gpt-5.5',
   company_goal_decomposition: 'gpt-5.5',
   agent_team_generation: 'gpt-5.5',
+  requirement_analysis: 'gpt-5.5',
 
   // 公司会议核心分析
   morning_meeting_analysis: 'gpt-5.5',
@@ -348,6 +351,7 @@ const FAST_MODEL_ROUTER: Partial<Record<TaskType, ModelId>> = {
   company_intent_understanding: 'gemini-3.1-flash',
   company_profile_generation: 'kimi-2.5',
   agent_team_generation: 'kimi-2.5',
+  requirement_analysis: 'kimi-2.5',
   morning_meeting_analysis: 'kimi-2.5',
   content_summary: 'gemini-3.1-flash',
   image_understanding: 'gemini-3.1-flash',
@@ -363,6 +367,7 @@ const DEEP_MODEL_ROUTER: Partial<Record<TaskType, ModelId>> = {
   company_positioning_analysis: 'gpt-5.5',
   company_goal_decomposition: 'gpt-5.5',
   agent_team_generation: 'gpt-5.5',
+  requirement_analysis: 'gpt-5.5',
 
   morning_meeting_analysis: 'gpt-5.5',
   strategy_meeting_analysis: 'gpt-5.5',
