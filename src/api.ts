@@ -529,11 +529,23 @@ export async function executeModelQueue(
     }
   }
 
-  // 添加角色/世界观设定作为系统上下文
+  // 构建系统提示词
+  const systemPrompt = `你是一位专业的小说作家。请根据提供的章节大纲和要求进行创作。
+
+创作要求：
+1. 严格按照大纲的剧情走向写作，不要偏离主线
+2. 保持人物性格一致，符合角色设定
+3. 文笔流畅，场景描写生动，对话自然
+4. 注意伏笔和呼应，保持故事的连贯性
+5. 每章字数控制在2000-5000字`;
+
+  contextMessages.unshift({ role: 'system', content: systemPrompt });
+
+  // 添加角色/世界观设定
   if (characterMemory.length > 0 || worldSetting) {
-    let systemContext = '';
+    let settingContext = '';
     if (worldSetting) {
-      systemContext += `【世界观设定】\n${worldSetting}\n\n`;
+      settingContext += `【世界观设定】\n${worldSetting}\n\n`;
     }
     if (characterMemory.length > 0) {
       // 生成角色替换规则
@@ -548,36 +560,49 @@ export async function executeModelQueue(
         .join('、');
 
       if (replacements || keepOriginal) {
-        systemContext += '【角色替换规则】\n';
-        if (replacements) systemContext += replacements + '\n';
-        if (keepOriginal) systemContext += `- ${keepOriginal}保持不变\n`;
-        systemContext += '\n';
+        settingContext += '【角色替换规则】\n';
+        if (replacements) settingContext += replacements + '\n';
+        if (keepOriginal) settingContext += `- ${keepOriginal}保持不变\n`;
+        settingContext += '\n';
       }
 
       // 角色描述
-      systemContext += '【角色设定】\n';
+      settingContext += '【角色设定】\n';
       characterMemory.forEach(c => {
         const displayName = c.replaceWith.trim() || c.originalName;
-        systemContext += `- ${displayName}：${c.description}\n`;
+        settingContext += `- ${displayName}：${c.description}\n`;
       });
     }
-    // 将系统上下文作为第一条用户消息插入
-    contextMessages.unshift({ role: 'user', content: systemContext });
-    contextMessages.unshift({ role: 'assistant', content: '好的，我已经了解了世界观和角色设定，会按照这些设定进行创作。' });
+
+    contextMessages.push({ role: 'user', content: settingContext });
+    contextMessages.push({ role: 'assistant', content: '好的，我已经了解了世界观和角色设定，会严格按照这些设定进行创作。' });
   }
+
+  // 用于顺序模式下存储前面章节的摘要
+  const chapterSummaries: Array<{ title: string; summary: string }> = [];
 
   try {
     if (parallelMode) {
-      // 并行模式：所有项同时执行
+      // 并行模式：所有项同时执行（每章独立，不看前面内容）
       const promises = modelQueue.map(async (item, index) => {
         if (!item.instruction.trim()) return;
 
         setCurrentQueueIndex(index);
 
         try {
+          // 构建指令：明确告诉模型这是写章节
+          const instruction = `请根据以下大纲创作章节内容：
+
+${item.instruction}
+
+注意：
+- 这是独立的章节创作，请完整写出本章内容
+- 严格遵循大纲中的剧情走向和细节要求
+- 如果大纲中有具体场景、对话要点，请落实到文字中`;
+
           const messages = [
             ...contextMessages,
-            { role: 'user' as const, content: item.instruction },
+            { role: 'user' as const, content: instruction },
           ];
 
           const resp = await fetch(`${API_BASE}/chat/completions`, {
@@ -638,7 +663,7 @@ export async function executeModelQueue(
 
       await Promise.all(promises);
     } else {
-      // 顺序模式：逐个执行，后续可看到前面的结果
+      // 顺序模式：逐个执行，后续章节可看到前面章节的摘要（而非完整内容）
       for (let i = 0; i < modelQueue.length; i++) {
         const item = modelQueue[i];
         if (!item.instruction.trim()) continue;
@@ -646,10 +671,29 @@ export async function executeModelQueue(
         setCurrentQueueIndex(i);
 
         try {
-          // 构建消息：上下文 + 当前指令
+          // 构建前面章节的摘要上下文（避免 token 爆炸）
+          let previousContext = '';
+          if (chapterSummaries.length > 0) {
+            previousContext = '【前面章节摘要】\n';
+            chapterSummaries.forEach((s) => {
+              previousContext += `${s.title}：${s.summary}\n`;
+            });
+            previousContext += '\n请承接前面的剧情，保持连贯性。\n\n';
+          }
+
+          // 构建指令
+          const instruction = previousContext + `请根据以下大纲创作章节内容：
+
+${item.instruction}
+
+注意：
+- 严格遵循大纲中的剧情走向和细节要求
+- 与前面章节保持连贯，人物性格一致
+- 如果大纲中有具体场景、对话要点，请落实到文字中`;
+
           const messages = [
             ...contextMessages,
-            { role: 'user' as const, content: item.instruction },
+            { role: 'user' as const, content: instruction },
           ];
 
           const resp = await fetch(`${API_BASE}/chat/completions`, {
@@ -703,9 +747,14 @@ export async function executeModelQueue(
           // 写入对话
           onChapterComplete?.(item.title || `第${i + 1}章`, content);
 
-          // 将结果添加到对话历史（作为上下文供后续模型使用）
-          contextMessages.push({ role: 'user', content: item.instruction });
-          contextMessages.push({ role: 'assistant', content });
+          // 生成摘要（而非完整内容）供后续章节参考
+          const summary = content.length > 500
+            ? content.slice(0, 200) + '...' + content.slice(-200)  // 取开头和结尾各200字作为摘要
+            : content;
+          chapterSummaries.push({
+            title: item.title || `第${i + 1}章`,
+            summary: summary.slice(0, 500)  // 限制摘要长度
+          });
 
         } catch (e) {
           const errorMsg = `错误: ${e instanceof Error ? e.message : '请求失败'}`;
