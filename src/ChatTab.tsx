@@ -127,7 +127,6 @@ export default function ChatTab() {
     characters: Array<{ name: string; description: string; replaceWith?: string }>;
     worldSetting: string;
   } | null>(null); // 解析结果
-  const [selectedChapters, setSelectedChapters] = useState<Set<number>>(new Set()); // 选中的章节
   const [isAnalyzing, setIsAnalyzing] = useState(false); // AI解析中
   const [showExportPanel, setShowExportPanel] = useState(false); // 导出面板
   const [showTaskPanel, setShowTaskPanel] = useState(false); // 任务面板
@@ -1346,7 +1345,7 @@ ${characterMemory.map(c => `- ${c.replaceWith || c.originalName}：${c.descripti
               {parsedOutline.chapters && parsedOutline.chapters.length > 0 && (
                 <div style={{ marginBottom: 8 }}>
                   <div style={{ fontSize: 11, color: 'var(--accent)', marginBottom: 4 }}>
-                    📖 {language === 'zh' ? `检测到 ${parsedOutline.chapters.length} 个章节（点击展开编辑详情）` : `Detected ${parsedOutline.chapters.length} chapters (click to expand)`}
+                    📖 {language === 'zh' ? `检测到 ${parsedOutline.chapters.length} 个章节（点击展开查看详情）` : `Detected ${parsedOutline.chapters.length} chapters (click to expand)`}
                   </div>
                   <div style={{ maxHeight: 200, overflow: 'auto', background: 'var(--bg-secondary)', borderRadius: 4, padding: 4 }}>
                     {parsedOutline.chapters.map((chapter, index) => (
@@ -1367,18 +1366,6 @@ ${characterMemory.map(c => `- ${c.replaceWith || c.originalName}：${c.descripti
                             cursor: 'pointer',
                           }}
                         >
-                          <input
-                            type="checkbox"
-                            checked={selectedChapters.has(index)}
-                            onChange={(e) => {
-                              e.stopPropagation();
-                              const newSet = new Set(selectedChapters);
-                              if (newSet.has(index)) newSet.delete(index);
-                              else newSet.add(index);
-                              setSelectedChapters(newSet);
-                            }}
-                            style={{ width: 12, height: 12 }}
-                          />
                           <span style={{ flex: 1, fontSize: 11, color: 'var(--text-primary)', fontWeight: 500 }}>{chapter.title}</span>
                           <span style={{ color: 'var(--text-muted)' }}>
                             {expandedResults.has(`chapter-${index}`) ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
@@ -1512,7 +1499,7 @@ ${characterMemory.map(c => `- ${c.replaceWith || c.originalName}：${c.descripti
                   </button>
                 )}
                 <button
-                  onClick={() => { setShowOutlinePreview(false); setParsedOutline(null); setOutlineText(''); setSelectedChapters(new Set()); }}
+                  onClick={() => { setShowOutlinePreview(false); setParsedOutline(null); setOutlineText(''); }}
                   style={{ flex: 1, padding: 6, background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-secondary)', fontSize: 11 }}
                 >
                   {language === 'zh' ? '取消' : 'Cancel'}
@@ -1524,7 +1511,7 @@ ${characterMemory.map(c => `- ${c.replaceWith || c.originalName}：${c.descripti
                 >
                   {modelQueue.length > 0
                     ? (language === 'zh' ? '重新生成队列' : 'Regenerate Queue')
-                    : (language === 'zh' ? `生成队列 (${selectedChapters.size || parsedOutline.chapters?.length || 0}章)` : `Generate (${selectedChapters.size || parsedOutline.chapters?.length || 0} chapters)`)}
+                    : (language === 'zh' ? `生成队列 (${parsedOutline.chapters?.length || 0}章)` : `Generate (${parsedOutline.chapters?.length || 0} chapters)`)}
                 </button>
               </div>
             </div>
