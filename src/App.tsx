@@ -33,13 +33,23 @@ export default function App() {
       flexDirection: 'column',
       paddingTop: 'env(safe-area-inset-top, 0)',
     }}>
-      {/* Main Content */}
+      {/* Main Content - KeepAlive 模式，所有 Tab 始终挂载 */}
       <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
-        {activeTab === 'chat' && <ChatTab />}
-        {activeTab === 'image' && <ImageTab />}
-        {activeTab === 'super-writing' && <SuperWritingTab />}
-        {activeTab === 'virtual-company' && <VirtualCompanyTab />}
-        {activeTab === 'settings' && <SettingsTab />}
+        <div style={{ display: activeTab === 'chat' ? 'flex' : 'none', height: '100%', minHeight: 0, flexDirection: 'column' }}>
+          <ChatTab />
+        </div>
+        <div style={{ display: activeTab === 'image' ? 'flex' : 'none', height: '100%', minHeight: 0, flexDirection: 'column' }}>
+          <ImageTab />
+        </div>
+        <div style={{ display: activeTab === 'super-writing' ? 'flex' : 'none', height: '100%', minHeight: 0, flexDirection: 'column' }}>
+          <SuperWritingTab />
+        </div>
+        <div style={{ display: activeTab === 'virtual-company' ? 'flex' : 'none', height: '100%', minHeight: 0, flexDirection: 'column' }}>
+          <VirtualCompanyTab />
+        </div>
+        <div style={{ display: activeTab === 'settings' ? 'flex' : 'none', height: '100%', minHeight: 0, flexDirection: 'column' }}>
+          <SettingsTab />
+        </div>
       </div>
 
       {/* Tab Bar */}
