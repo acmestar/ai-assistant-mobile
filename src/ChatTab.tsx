@@ -675,12 +675,15 @@ ${outlineText}`;
       addModelToQueue(chatModelId, instruction, chapter.title);
     });
 
-    // 添加角色到记忆库（保留用户设置的替换名）
+    // 添加角色到记忆库（包括新增的角色）
     if (parsedOutline.characters) {
       // 先清空旧角色
       useAppStore.setState({ characterMemory: [] });
-      parsedOutline.characters.forEach((char: { name: string; description: string; replaceWith?: string }) => {
-        addCharacter(char.name, char.replaceWith || '', char.description);
+      parsedOutline.characters.forEach((char: { name: string; description?: string; replaceWith?: string }) => {
+        // 只添加有名字的角色
+        if (char.name.trim()) {
+          addCharacter(char.name, char.replaceWith || '', char.description || '');
+        }
       });
     }
 
@@ -689,7 +692,6 @@ ${outlineText}`;
       setWorldSetting(parsedOutline.worldSetting);
     }
 
-    // 不清空解析结果，保留大纲内容以便返回查看
     setShowOutlinePreview(false);
     hapticFeedback('medium');
   };
@@ -1420,10 +1422,22 @@ ${characterMemory.map(c => `- ${c.replaceWith || c.originalName}：${c.descripti
                   <div style={{ fontSize: 11, color: 'var(--accent)', marginBottom: 4 }}>
                     👤 {language === 'zh' ? `检测到 ${parsedOutline.characters.length} 个角色` : `Detected ${parsedOutline.characters.length} characters`}
                   </div>
-                  <div style={{ maxHeight: 80, overflow: 'auto' }}>
+                  <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 4 }}>
+                    {language === 'zh' ? '可修改角色名或添加新角色，生成时会自然融入文章' : 'Modify names or add new characters, they will naturally appear in the story'}
+                  </div>
+                  <div style={{ maxHeight: 100, overflow: 'auto' }}>
                     {parsedOutline.characters.map((char, index) => (
                       <div key={index} style={{ display: 'flex', gap: 4, marginBottom: 4, alignItems: 'center' }}>
-                        <span style={{ fontSize: 10, color: 'var(--text-muted)', minWidth: 50 }}>{char.name}</span>
+                        <input
+                          value={char.name}
+                          onChange={(e) => {
+                            const newOutline = { ...parsedOutline };
+                            newOutline.characters[index].name = e.target.value;
+                            setParsedOutline(newOutline);
+                          }}
+                          placeholder={language === 'zh' ? '原角色名' : 'Original name'}
+                          style={{ flex: 1, padding: 2, fontSize: 10, borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg-secondary)', color: 'var(--text-primary)' }}
+                        />
                         <span style={{ fontSize: 9 }}>→</span>
                         <input
                           placeholder={language === 'zh' ? '替换名(可选)' : 'Replace with'}
@@ -1435,8 +1449,29 @@ ${characterMemory.map(c => `- ${c.replaceWith || c.originalName}：${c.descripti
                           }}
                           style={{ flex: 1, padding: 2, fontSize: 10, borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg-secondary)', color: 'var(--text-primary)' }}
                         />
+                        <button
+                          onClick={() => {
+                            const newOutline = { ...parsedOutline };
+                            newOutline.characters.splice(index, 1);
+                            setParsedOutline(newOutline);
+                          }}
+                          style={{ padding: 2, background: 'transparent', border: 'none', color: 'var(--danger)' }}
+                        >
+                          <X size={10} />
+                        </button>
                       </div>
                     ))}
+                    {/* 添加新角色 */}
+                    <button
+                      onClick={() => {
+                        const newOutline = { ...parsedOutline };
+                        newOutline.characters.push({ name: '', replaceWith: '', description: '' });
+                        setParsedOutline(newOutline);
+                      }}
+                      style={{ width: '100%', padding: 4, background: 'var(--bg-secondary)', border: '1px dashed var(--border)', borderRadius: 4, color: 'var(--text-muted)', fontSize: 10 }}
+                    >
+                      + {language === 'zh' ? '添加新角色' : 'Add new character'}
+                    </button>
                   </div>
                 </div>
               )}
@@ -1466,9 +1501,18 @@ ${characterMemory.map(c => `- ${c.replaceWith || c.originalName}：${c.descripti
                 </div>
               )}
 
-              <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                {/* 如果已有队列，显示返回队列按钮 */}
+                {modelQueue.length > 0 && (
+                  <button
+                    onClick={() => { setShowOutlinePreview(false); hapticFeedback('light'); }}
+                    style={{ flex: 1, padding: 6, background: 'var(--bg-tertiary)', border: '1px solid var(--accent)', borderRadius: 6, color: 'var(--accent)', fontSize: 11 }}
+                  >
+                    ← {language === 'zh' ? '返回队列' : 'Back to Queue'}
+                  </button>
+                )}
                 <button
-                  onClick={() => { setShowOutlinePreview(false); setParsedOutline(null); setSelectedChapters(new Set()); }}
+                  onClick={() => { setShowOutlinePreview(false); setParsedOutline(null); setOutlineText(''); setSelectedChapters(new Set()); }}
                   style={{ flex: 1, padding: 6, background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-secondary)', fontSize: 11 }}
                 >
                   {language === 'zh' ? '取消' : 'Cancel'}
@@ -1478,7 +1522,9 @@ ${characterMemory.map(c => `- ${c.replaceWith || c.originalName}：${c.descripti
                   className="btn-primary"
                   style={{ flex: 1, padding: 6, fontSize: 11 }}
                 >
-                  {language === 'zh' ? `生成队列 (${selectedChapters.size || parsedOutline.chapters?.length || 0}章)` : `Generate (${selectedChapters.size || parsedOutline.chapters?.length || 0} chapters)`}
+                  {modelQueue.length > 0
+                    ? (language === 'zh' ? '重新生成队列' : 'Regenerate Queue')
+                    : (language === 'zh' ? `生成队列 (${selectedChapters.size || parsedOutline.chapters?.length || 0}章)` : `Generate (${selectedChapters.size || parsedOutline.chapters?.length || 0} chapters)`)}
                 </button>
               </div>
             </div>

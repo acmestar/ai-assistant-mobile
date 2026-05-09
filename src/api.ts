@@ -552,30 +552,38 @@ export async function executeModelQueue(
       settingContext += `【世界观设定】\n${worldSetting}\n\n`;
     }
     if (characterMemory.length > 0) {
-      // 生成角色替换规则
+      // 角色替换规则
       const replacements = characterMemory
         .filter(c => c.replaceWith.trim())
         .map(c => `- 文中的"${c.originalName}"请替换为"${c.replaceWith}"`)
         .join('\n');
 
-      const keepOriginal = characterMemory
-        .filter(c => !c.replaceWith.trim())
-        .map(c => `"${c.originalName}"`)
-        .join('、');
-
-      if (replacements || keepOriginal) {
-        settingContext += '【角色替换规则】\n';
-        if (replacements) settingContext += replacements + '\n';
-        if (keepOriginal) settingContext += `- ${keepOriginal}保持不变\n`;
-        settingContext += '\n';
-      }
-
-      // 角色描述
+      // 角色设定（包括新增角色）
       settingContext += '【角色设定】\n';
       characterMemory.forEach(c => {
         const displayName = c.replaceWith.trim() || c.originalName;
-        settingContext += `- ${displayName}：${c.description}\n`;
+        if (c.description.trim()) {
+          settingContext += `- ${displayName}：${c.description}\n`;
+        } else {
+          settingContext += `- ${displayName}\n`;
+        }
       });
+
+      // 如果有替换规则，单独列出
+      if (replacements) {
+        settingContext += '\n【角色替换规则】\n' + replacements + '\n';
+      }
+
+      // 提示新增角色如何融入
+      const newCharacters = characterMemory.filter(c => !c.originalName.trim() || c.originalName === c.replaceWith);
+      if (newCharacters.length > 0) {
+        settingContext += '\n【新增角色提示】\n';
+        settingContext += '以下角色是新加入的，请在文章中自然地引入他们，让他们合理地出现在剧情中：\n';
+        newCharacters.forEach(c => {
+          const name = c.replaceWith.trim() || c.originalName;
+          settingContext += `- ${name}\n`;
+        });
+      }
     }
 
     contextMessages.push({ role: 'user', content: settingContext });
