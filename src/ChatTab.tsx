@@ -1634,6 +1634,17 @@ ${characterMemory.map(c => `- ${c.replaceWith || c.originalName}：${c.descripti
                         {item.title || model?.name}
                         {!isEnabled && <span style={{ marginLeft: 4, fontSize: 10 }}>({language === 'zh' ? '已禁用' : 'Disabled'})</span>}
                       </span>
+                      {/* 模型标签 */}
+                      <span style={{
+                        fontSize: 9,
+                        padding: '2px 6px',
+                        background: 'var(--bg-tertiary)',
+                        borderRadius: 4,
+                        color: 'var(--text-muted)',
+                        border: '1px solid var(--border)',
+                      }}>
+                        {model?.name || item.modelId}
+                      </span>
                       {isRunning && (
                         <div style={{ width: 12, height: 12, border: '2px solid var(--accent)', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
                       )}
