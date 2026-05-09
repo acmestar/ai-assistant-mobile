@@ -122,6 +122,7 @@ export default function SuperWritingTab() {
   // 完整小说稿阅读区
   const [showFullNovelReader, setShowFullNovelReader] = useState(false);
   const [fullNovelCopied, setFullNovelCopied] = useState(false);
+  const [fullNovelCopyError, setFullNovelCopyError] = useState('');
 
   // 快速修改状态
   const [quickHeroName, setQuickHeroName] = useState('');
@@ -395,14 +396,18 @@ export default function SuperWritingTab() {
       return;
     }
 
-    // 清空旧错误
+    // 清空旧错误和旧结果（重新生成整本小说时清空所有）
     setNovelError('');
     setFastError('');
     setFastLoading(true);
 
-    // 清空旧结果（谨慎清空）
+    // 清空旧小说残留
+    setNovelProject(null);
     setNovelChapterResult(null);
+    setNovelChapters([]);
     setNovelRawText('');
+    setShowFullNovelReader(false);
+    setFullNovelCopied(false);
 
     // ========== 第一步：生成小说设定 ==========
 
@@ -818,6 +823,7 @@ export default function SuperWritingTab() {
           step: 'queue-chapter',
           chapterNo: item.chapterNo,
           effectiveModelId,
+          selectedWritingModelId,
           promptLength: prompt.length,
           workingChaptersCount: workingChapters.length,
         });
@@ -887,6 +893,7 @@ export default function SuperWritingTab() {
         step: 'retry-chapter',
         chapterNo: item.chapterNo,
         effectiveModelId,
+        selectedWritingModelId,
         promptLength: prompt.length,
       });
 
@@ -2518,15 +2525,17 @@ export default function SuperWritingTab() {
             border: '1px solid var(--accent)',
             marginTop: 12,
           }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
               <span style={{ fontWeight: 600, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 6 }}>
                 <BookOpen size={16} style={{ color: 'var(--accent)' }} />
                 {language === 'zh' ? '完整小说稿' : 'Full Novel'}
               </span>
-              <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                 <button
                   onClick={async () => {
                     try {
+                      setFullNovelCopyError('');
+
                       const sortedChapters = [...novelChapters].sort((a, b) => a.chapterNo - b.chapterNo);
                       const fullText = [
                         novelProject?.title ? `《${novelProject.title}》` : '',
@@ -2539,6 +2548,10 @@ export default function SuperWritingTab() {
                         ]),
                       ].join('\n');
 
+                      if (!fullText.trim()) {
+                        throw new Error(language === 'zh' ? '没有可复制的小说内容' : 'No novel content to copy');
+                      }
+
                       await navigator.clipboard.writeText(fullText);
 
                       setFullNovelCopied(true);
@@ -2547,7 +2560,11 @@ export default function SuperWritingTab() {
                       }, 1500);
                     } catch (error) {
                       console.error('[CopyFullNovelError]', error);
-                      setNovelError(language === 'zh' ? '复制失败，请手动选择文本复制' : 'Copy failed, please copy manually');
+                      setFullNovelCopyError(
+                        language === 'zh'
+                          ? '复制失败，请手动选择文本复制'
+                          : 'Copy failed, please copy manually'
+                      );
                     }
                   }}
                   style={{
@@ -2570,6 +2587,17 @@ export default function SuperWritingTab() {
                 </button>
               </div>
             </div>
+
+            {/* 复制失败提示 */}
+            {fullNovelCopyError && (
+              <div style={{
+                fontSize: 12,
+                color: 'var(--danger)',
+                marginBottom: 8,
+              }}>
+                {fullNovelCopyError}
+              </div>
+            )}
 
             {showFullNovelReader && (
               <div style={{
