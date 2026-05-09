@@ -663,9 +663,8 @@ ${outlineText}`;
   const generateQueueFromParsedOutline = () => {
     if (!parsedOutline || !parsedOutline.chapters?.length) return;
 
-    // 清空现有队列和角色
+    // 清空现有队列
     clearModelQueue();
-    useAppStore.setState({ characterMemory: [] });
 
     // 添加章节到队列
     parsedOutline.chapters.forEach((chapter: { title: string; content?: string; order: number }) => {
@@ -676,10 +675,12 @@ ${outlineText}`;
       addModelToQueue(chatModelId, instruction, chapter.title);
     });
 
-    // 添加角色到记忆库
+    // 添加角色到记忆库（保留用户设置的替换名）
     if (parsedOutline.characters) {
-      parsedOutline.characters.forEach((char: { name: string; description: string }) => {
-        addCharacter(char.name, '', char.description);
+      // 先清空旧角色
+      useAppStore.setState({ characterMemory: [] });
+      parsedOutline.characters.forEach((char: { name: string; description: string; replaceWith?: string }) => {
+        addCharacter(char.name, char.replaceWith || '', char.description);
       });
     }
 
@@ -688,9 +689,8 @@ ${outlineText}`;
       setWorldSetting(parsedOutline.worldSetting);
     }
 
+    // 不清空解析结果，保留大纲内容以便返回查看
     setShowOutlinePreview(false);
-    setParsedOutline(null);
-    setOutlineText('');
     hapticFeedback('medium');
   };
 
@@ -1514,7 +1514,12 @@ ${characterMemory.map(c => `- ${c.replaceWith || c.originalName}：${c.descripti
                 {/* 返回提示 */}
                 <div
                   onClick={() => {
-                    setShowOutlineParser(true);
+                    // 如果有解析结果，显示预览；否则显示解析器
+                    if (parsedOutline) {
+                      setShowOutlinePreview(true);
+                    } else {
+                      setShowOutlineParser(true);
+                    }
                     hapticFeedback('light');
                   }}
                   style={{
@@ -1528,7 +1533,9 @@ ${characterMemory.map(c => `- ${c.replaceWith || c.originalName}：${c.descripti
                     marginBottom: 4,
                   }}
                 >
-                  ← {language === 'zh' ? '返回大纲解析' : 'Back to Outline Parser'}
+                  ← {parsedOutline
+                    ? (language === 'zh' ? '返回大纲预览' : 'Back to Outline Preview')
+                    : (language === 'zh' ? '返回大纲解析' : 'Back to Outline Parser')}
                 </div>
                 {modelQueue.map((item, index) => {
                   const model = CHAT_MODELS.find(m => m.id === item.modelId);
