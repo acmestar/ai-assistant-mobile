@@ -317,6 +317,7 @@ interface AppState {
 
   // 模型队列（支持重复模型、顺序执行）
   modelQueue: Array<{ id: string; modelId: string; instruction: string; result?: string; title?: string }>;
+  _lastClearedQueue: Array<{ id: string; modelId: string; instruction: string; result?: string; title?: string }> | null;
   setModelQueue: (queue: Array<{ id: string; modelId: string; instruction: string; result?: string; title?: string }>) => void;
   addModelToQueue: (modelId: string, instruction?: string, title?: string) => void;
   removeModelFromQueue: (id: string) => void;
@@ -324,6 +325,7 @@ interface AppState {
   updateQueueResult: (id: string, result: string) => void;
   updateQueueTitle: (id: string, title: string) => void;
   clearModelQueue: () => void;
+  undoClearModelQueue: () => void;
   isQueueRunning: boolean;
   setIsQueueRunning: (running: boolean) => void;
   currentQueueIndex: number;
@@ -425,6 +427,7 @@ export const useAppStore = create<AppState>()(
 
       // 模型队列
       modelQueue: [],
+      _lastClearedQueue: null,
       setModelQueue: (modelQueue) => set({ modelQueue }),
       addModelToQueue: (modelId, instruction = '', title = '') => set((state) => ({
         modelQueue: [...state.modelQueue, {
@@ -453,7 +456,24 @@ export const useAppStore = create<AppState>()(
           item.id === id ? { ...item, title } : item
         ),
       })),
-      clearModelQueue: () => set({ modelQueue: [], currentQueueIndex: 0 }),
+      clearModelQueue: () => {
+        const { modelQueue } = get();
+        // 保存到撤销缓存
+        set({
+          _lastClearedQueue: modelQueue,
+          modelQueue: [],
+          currentQueueIndex: 0
+        });
+      },
+      undoClearModelQueue: () => {
+        const { _lastClearedQueue } = get();
+        if (_lastClearedQueue && _lastClearedQueue.length > 0) {
+          set({
+            modelQueue: _lastClearedQueue,
+            _lastClearedQueue: null,
+          });
+        }
+      },
       isQueueRunning: false,
       setIsQueueRunning: (isQueueRunning) => set({ isQueueRunning }),
       currentQueueIndex: 0,
