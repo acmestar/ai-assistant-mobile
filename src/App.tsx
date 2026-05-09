@@ -64,7 +64,7 @@ export default function App() {
         </button>
         <button className={`tab-item ${activeTab === 'super-writing' ? 'active' : ''}`} onClick={() => setActiveTab('super-writing')}>
           <Pencil size={22} />
-          <span>{language === 'zh' ? '写作' : 'Write'}</span>
+          <span>{language === 'zh' ? '创作台' : 'Create'}</span>
         </button>
         <button className={`tab-item ${activeTab === 'virtual-company' ? 'active' : ''}`} onClick={() => setActiveTab('virtual-company')}>
           <Building2 size={22} />

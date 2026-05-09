@@ -656,12 +656,14 @@ export default function ChatTab() {
           {/* 发送到创作台按钮 */}
           <button
             onClick={() => {
-              // 将当前输入内容发送到创作台
-              const contentToSend = input.trim() || (conversation?.messages?.slice(-1)?.[0]?.content) || '';
+              // 只发送当前输入框内容，不发送整个聊天记录
+              const contentToSend = input.trim();
               if (contentToSend) {
                 useAppStore.getState().setPendingWritingRequirement(contentToSend);
                 useAppStore.getState().setActiveTab('super-writing');
                 hapticFeedback('medium');
+              } else {
+                setError(language === 'zh' ? '请先输入创作需求' : 'Please enter your creation request');
               }
             }}
             style={{
@@ -673,7 +675,7 @@ export default function ChatTab() {
               display: 'flex',
               alignItems: 'center',
             }}
-            title={language === 'zh' ? '发送到创作台' : 'Send to Writing Studio'}
+            title={language === 'zh' ? '转到创作台' : 'Go to Create'}
           >
             <Pencil size={16} />
           </button>

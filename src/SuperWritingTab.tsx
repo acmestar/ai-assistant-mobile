@@ -1,4 +1,4 @@
-// 超级写作 - 独立标签页
+// 创作台 - 独立标签页
 import { useState, useEffect } from 'react';
 import {
   Pencil,
@@ -90,6 +90,14 @@ export default function SuperWritingTab() {
   const [showTaskPanel, setShowTaskPanel] = useState(false);
   const [expandedResults, setExpandedResults] = useState<Set<string>>(new Set());
 
+  // 生成模式：快速生成（一次API）或分步创作（大纲+队列）
+  const [generationMode, setGenerationMode] = useState<'fast' | 'structured'>('fast');
+
+  // 快速生成结果
+  const [fastResult, setFastResult] = useState<string>('');
+  const [fastLoading, setFastLoading] = useState(false);
+  const [fastError, setFastError] = useState<string | null>(null);
+
   // 获取实际使用的模型ID（优先使用创作台默认模型，否则使用全局模型）
   const effectiveModelId = selectedWritingModelId || chatModelId;
 
@@ -148,7 +156,7 @@ export default function SuperWritingTab() {
 
     const draft = {
       id: activeWritingDraft?.id || Date.now().toString(),
-      title: '超级写作',
+      title: '创作台',
       outlineText,
       creationMode,
       parsedOutline,
@@ -247,8 +255,48 @@ export default function SuperWritingTab() {
   // 执行队列
   const handleExecuteQueue = async () => {
     if (modelQueue.length === 0 || !apiKey) return;
-    // 创作中心不保存到聊天记录
-    await executeModelQueue(undefined, undefined, { saveToConversation: false });
+
+    const { updateQueueResult } = useAppStore.getState();
+
+    // 创作中心不保存到聊天记录，但需要传入 onProgress 回调更新 UI
+    await executeModelQueue(
+      (queueId, content, isComplete) => {
+        // 实时更新结果
+        updateQueueResult(queueId, content);
+        // 完成时自动展开该项
+        if (isComplete) {
+          setExpandedResults(prev => new Set(prev).add(queueId));
+        }
+      },
+      undefined, // onChapterComplete 不需要，因为不写聊天记录
+      { saveToConversation: false }
+    );
+  };
+
+  // 快速生成 - 一次 API 完成创作
+  const handleFastGenerate = async () => {
+    if (!outlineText.trim() || !apiKey) return;
+
+    setFastLoading(true);
+    setFastError(null);
+    setFastResult('');
+
+    try {
+      // 根据创作类型构建 prompt
+      const prompt = buildCreationPrompt(creationMode, outlineText);
+
+      // 使用流式输出
+      const result = await callChatCompletionRaw(prompt, undefined, (chunk) => {
+        setFastResult(prev => prev + chunk);
+      });
+
+      setFastResult(result);
+    } catch (error: any) {
+      console.error('快速生成失败:', error);
+      setFastError(error.message || '生成失败');
+    } finally {
+      setFastLoading(false);
+    }
   };
 
   // 单项重生成
@@ -445,7 +493,7 @@ export default function SuperWritingTab() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <Pencil size={18} style={{ color: 'var(--accent)' }} />
           <span style={{ fontWeight: 600, fontSize: 14 }}>
-            {language === 'zh' ? '超级写作' : 'Super Writing'}
+            {language === 'zh' ? '创作台' : 'Create'}
           </span>
         </div>
 
@@ -644,6 +692,51 @@ export default function SuperWritingTab() {
               </span>
             </div>
 
+            {/* 生成模式选择 */}
+            <div style={{ marginBottom: 12, padding: 10, background: 'var(--bg-tertiary)', borderRadius: 8 }}>
+              <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 8 }}>
+                {language === 'zh' ? '生成模式' : 'Generation Mode'}
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  onClick={() => setGenerationMode('fast')}
+                  style={{
+                    flex: 1,
+                    padding: '8px 12px',
+                    background: generationMode === 'fast' ? 'var(--accent)' : 'var(--bg-secondary)',
+                    border: generationMode === 'fast' ? '1px solid var(--accent)' : '1px solid var(--border)',
+                    borderRadius: 8,
+                    color: generationMode === 'fast' ? 'white' : 'var(--text-secondary)',
+                    fontSize: 12,
+                    textAlign: 'center',
+                  }}
+                >
+                  <div style={{ fontWeight: 600 }}>⚡ {language === 'zh' ? '快速生成' : 'Fast'}</div>
+                  <div style={{ fontSize: 10, opacity: 0.8, marginTop: 2 }}>
+                    {language === 'zh' ? '1次请求完成' : '1 API call'}
+                  </div>
+                </button>
+                <button
+                  onClick={() => setGenerationMode('structured')}
+                  style={{
+                    flex: 1,
+                    padding: '8px 12px',
+                    background: generationMode === 'structured' ? 'var(--accent)' : 'var(--bg-secondary)',
+                    border: generationMode === 'structured' ? '1px solid var(--accent)' : '1px solid var(--border)',
+                    borderRadius: 8,
+                    color: generationMode === 'structured' ? 'white' : 'var(--text-secondary)',
+                    fontSize: 12,
+                    textAlign: 'center',
+                  }}
+                >
+                  <div style={{ fontWeight: 600 }}>📋 {language === 'zh' ? '分步创作' : 'Structured'}</div>
+                  <div style={{ fontSize: 10, opacity: 0.8, marginTop: 2 }}>
+                    {language === 'zh' ? '大纲+队列逐步生成' : 'Outline + Queue'}
+                  </div>
+                </button>
+              </div>
+            </div>
+
             <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 8, color: 'var(--text-primary)' }}>
               {language === 'zh' ? '描述你的创作目标' : 'Describe your creation goal'}
             </div>
@@ -667,21 +760,42 @@ export default function SuperWritingTab() {
               }}
             />
             <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-              <button
-                onClick={handleParseOutline}
-                disabled={!outlineText.trim() || isAnalyzing}
-                className="btn-primary"
-                style={{ flex: 1, padding: 10 }}
-              >
-                {isAnalyzing ? (
-                  <>
-                    <RefreshCw size={14} className="spin" />
-                    {language === 'zh' ? '解析中...' : 'Parsing...'}
-                  </>
-                ) : (
-                  language === 'zh' ? '开始解析' : 'Parse'
-                )}
-              </button>
+              {generationMode === 'fast' ? (
+                <button
+                  onClick={handleFastGenerate}
+                  disabled={!outlineText.trim() || fastLoading}
+                  className="btn-primary"
+                  style={{ flex: 1, padding: 10 }}
+                >
+                  {fastLoading ? (
+                    <>
+                      <RefreshCw size={14} className="spin" />
+                      {language === 'zh' ? '生成中...' : 'Generating...'}
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles size={14} />
+                      {language === 'zh' ? '快速生成' : 'Fast Generate'}
+                    </>
+                  )}
+                </button>
+              ) : (
+                <button
+                  onClick={handleParseOutline}
+                  disabled={!outlineText.trim() || isAnalyzing}
+                  className="btn-primary"
+                  style={{ flex: 1, padding: 10 }}
+                >
+                  {isAnalyzing ? (
+                    <>
+                      <RefreshCw size={14} className="spin" />
+                      {language === 'zh' ? '解析中...' : 'Parsing...'}
+                    </>
+                  ) : (
+                    language === 'zh' ? '解析大纲' : 'Parse Outline'
+                  )}
+                </button>
+              )}
               <button
                 onClick={() => setShowOutlineParser(false)}
                 style={{
@@ -695,6 +809,52 @@ export default function SuperWritingTab() {
                 {language === 'zh' ? '取消' : 'Cancel'}
               </button>
             </div>
+          </div>
+        )}
+
+        {/* 快速生成结果 */}
+        {(fastResult || fastError || fastLoading) && (
+          <div style={{
+            padding: 16,
+            background: 'var(--bg-secondary)',
+            borderRadius: 12,
+            border: '1px solid var(--accent)',
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
+                ✨ {language === 'zh' ? '生成结果' : 'Result'}
+              </span>
+              {fastResult && (
+                <button
+                  onClick={() => navigator.clipboard.writeText(fastResult)}
+                  style={{ background: 'transparent', border: 'none', color: 'var(--accent)', fontSize: 12 }}
+                >
+                  {language === 'zh' ? '复制' : 'Copy'}
+                </button>
+              )}
+            </div>
+            {fastLoading && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-muted)' }}>
+                <RefreshCw size={16} className="spin" />
+                {language === 'zh' ? '生成中...' : 'Generating...'}
+              </div>
+            )}
+            {fastError && (
+              <div style={{ color: 'var(--danger)', fontSize: 13 }}>{fastError}</div>
+            )}
+            {fastResult && (
+              <div style={{
+                background: 'var(--bg-tertiary)',
+                borderRadius: 8,
+                padding: 12,
+                maxHeight: 400,
+                overflow: 'auto',
+                fontSize: 13,
+                lineHeight: 1.8,
+              }}>
+                <ReactMarkdown>{fastResult}</ReactMarkdown>
+              </div>
+            )}
           </div>
         )}
 
