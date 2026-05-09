@@ -122,7 +122,7 @@ export default function ChatTab() {
   const [outlineText, setOutlineText] = useState(''); // 大纲文本
   const [showOutlinePreview, setShowOutlinePreview] = useState(false); // 大纲预览
   const [parsedOutline, setParsedOutline] = useState<{
-    chapters: Array<{ title: string; order: number }>;
+    chapters: Array<{ title: string; content?: string; order: number }>;
     characters: Array<{ name: string; description: string; replaceWith?: string }>;
     worldSetting: string;
   } | null>(null); // 解析结果
@@ -581,25 +581,39 @@ export default function ChatTab() {
       const { apiKey } = useAppStore.getState();
       if (!apiKey) throw new Error('请先设置 API Key');
 
-      const prompt = `请分析以下小说大纲，提取章节列表、角色信息和世界观设定。
+      const prompt = `你是一位专业的小说策划编辑。请分析以下小说大纲，完成以下任务：
 
-要求：
-1. 只返回JSON格式，不要其他内容
-2. 格式如下：
+1. **提取并深化章节内容**：不仅提取原大纲的章节信息，还要根据上下文合理扩展和丰富每个章节的细节，包括：
+   - 具体的场景描写
+   - 人物对话要点
+   - 情感变化和内心活动
+   - 关键转折点
+   - 伏笔和呼应
+
+2. **提取角色信息**：包括性格特点、外貌特征、人物关系等
+
+3. **提取世界观设定**：包括时代背景、力量体系、社会结构等
+
+返回JSON格式：
 {
   "chapters": [
-    {"title": "第一章：少年觉醒", "order": 1},
-    {"title": "第二章：拜师学艺", "order": 2}
+    {
+      "title": "第一章：少年觉醒",
+      "content": "【场景】清晨，青云山脚下的小村庄。李明独自上山砍柴，在密林深处发现一块散发微光的奇异石头。当他触碰石头的瞬间，一股暖流涌入体内...\n\n【关键情节】\n- 李明触碰石头后昏迷，醒来发现自己能看到别人头顶的气运颜色\n- 他预见到村庄将在三日后遭遇山洪，无人相信他\n- 村中恶霸张三嘲笑他，李明看到张三头顶是死气缠绕\n\n【人物互动】李明与村长的对话展现他的焦急与无奈...\n\n【情感线】从好奇到恐惧再到坚定..."
+    }
   ],
   "characters": [
-    {"name": "李明", "description": "少年主角，性格勇敢"},
-    {"name": "王老", "description": "隐世高人，李明的师父"}
+    {"name": "李明", "description": "16岁少年，黑发黑瞳，性格坚韧但有些冲动。父母早亡，由奶奶抚养长大。获得预知能力后变得沉稳。"},
+    {"name": "王老", "description": "外表70岁的白发老者，实则是隐世百年的剑道宗师。性格古怪但心地善良，看中李明的天赋。"}
   ],
-  "worldSetting": "修仙世界，剑道为尊..."
+  "worldSetting": "修仙世界，以剑道为尊。境界分为：炼气、筑基、金丹、元婴、化神。各大门派明争暗斗，凡人如蝼蚁..."
 }
-3. 只提取明确的章节标题，不要提取正文内容
-4. 角色只提取有名字的主要角色
-5. 世界观提取核心设定即可
+
+重要提示：
+- 每个章节的content必须详细，至少200字以上
+- 要根据大纲整体脉络合理推断和补充细节
+- 保持人物性格一致性和剧情连贯性
+- 为后续章节埋下伏笔
 
 大纲内容：
 ${outlineText}`;
@@ -610,7 +624,7 @@ ${outlineText}`;
         body: JSON.stringify({
           model: 'grok-4.2', // 使用 Grok 解析
           messages: [{ role: 'user', content: prompt }],
-          max_tokens: 2000,
+          max_tokens: 8000,
         }),
       });
 
@@ -653,10 +667,11 @@ ${outlineText}`;
     useAppStore.setState({ characterMemory: [] });
 
     // 添加章节到队列
-    parsedOutline.chapters.forEach((chapter: { title: string; order: number }) => {
-      const instruction = language === 'zh'
-        ? `请写${chapter.title}`
-        : `Please write ${chapter.title}`;
+    parsedOutline.chapters.forEach((chapter: { title: string; content?: string; order: number }) => {
+      // 将章节标题和详细内容都作为指令
+      const instruction = chapter.content
+        ? `【${chapter.title}】\n\n章节剧情要求：\n${chapter.content}`
+        : `请写${chapter.title}`;
       addModelToQueue(chatModelId, instruction, chapter.title);
     });
 
@@ -1225,23 +1240,70 @@ ${outlineText}`;
               {parsedOutline.chapters && parsedOutline.chapters.length > 0 && (
                 <div style={{ marginBottom: 8 }}>
                   <div style={{ fontSize: 11, color: 'var(--accent)', marginBottom: 4 }}>
-                    📖 {language === 'zh' ? `检测到 ${parsedOutline.chapters.length} 个章节` : `Detected ${parsedOutline.chapters.length} chapters`}
+                    📖 {language === 'zh' ? `检测到 ${parsedOutline.chapters.length} 个章节（点击展开编辑详情）` : `Detected ${parsedOutline.chapters.length} chapters (click to expand)`}
                   </div>
-                  <div style={{ maxHeight: 100, overflow: 'auto', background: 'var(--bg-secondary)', borderRadius: 4, padding: 4 }}>
+                  <div style={{ maxHeight: 200, overflow: 'auto', background: 'var(--bg-secondary)', borderRadius: 4, padding: 4 }}>
                     {parsedOutline.chapters.map((chapter, index) => (
-                      <div key={index} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '2px 0' }}>
-                        <input
-                          type="checkbox"
-                          checked={selectedChapters.has(index)}
-                          onChange={() => {
-                            const newSet = new Set(selectedChapters);
-                            if (newSet.has(index)) newSet.delete(index);
-                            else newSet.add(index);
-                            setSelectedChapters(newSet);
+                      <div key={index} style={{ marginBottom: 4, border: '1px solid var(--border)', borderRadius: 4, overflow: 'hidden' }}>
+                        <div
+                          onClick={() => {
+                            const newSet = new Set(expandedResults);
+                            if (newSet.has(`chapter-${index}`)) newSet.delete(`chapter-${index}`);
+                            else newSet.add(`chapter-${index}`);
+                            setExpandedResults(newSet);
                           }}
-                          style={{ width: 12, height: 12 }}
-                        />
-                        <span style={{ fontSize: 11, color: 'var(--text-primary)' }}>{chapter.title}</span>
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 4,
+                            padding: '4px 6px',
+                            background: 'var(--bg-tertiary)',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selectedChapters.has(index)}
+                            onChange={(e) => {
+                              e.stopPropagation();
+                              const newSet = new Set(selectedChapters);
+                              if (newSet.has(index)) newSet.delete(index);
+                              else newSet.add(index);
+                              setSelectedChapters(newSet);
+                            }}
+                            style={{ width: 12, height: 12 }}
+                          />
+                          <span style={{ flex: 1, fontSize: 11, color: 'var(--text-primary)', fontWeight: 500 }}>{chapter.title}</span>
+                          <span style={{ color: 'var(--text-muted)' }}>
+                            {expandedResults.has(`chapter-${index}`) ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                          </span>
+                        </div>
+                        {expandedResults.has(`chapter-${index}`) && chapter.content && (
+                          <div style={{ padding: 4 }}>
+                            <textarea
+                              value={chapter.content}
+                              onChange={(e) => {
+                                const newOutline = { ...parsedOutline };
+                                newOutline.chapters[index].content = e.target.value;
+                                setParsedOutline(newOutline);
+                              }}
+                              placeholder={language === 'zh' ? '章节详细内容...' : 'Chapter details...'}
+                              style={{
+                                width: '100%',
+                                minHeight: 80,
+                                maxHeight: 150,
+                                padding: 4,
+                                fontSize: 10,
+                                borderRadius: 4,
+                                border: '1px solid var(--border)',
+                                background: 'var(--bg-secondary)',
+                                color: 'var(--text-primary)',
+                                resize: 'vertical',
+                                lineHeight: 1.4,
+                              }}
+                            />
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
