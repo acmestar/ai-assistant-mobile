@@ -15,6 +15,52 @@ export type CreationMode =
   | 'short_drama'
   | 'free';
 
+// 小说子模式类型
+export type NovelTaskType =
+  | 'premise'      // 故事设定
+  | 'outline'      // 小说大纲
+  | 'chapter_outline'  // 章节大纲
+  | 'chapter_draft'    // 章节正文
+  | 'continue'     // 续写
+  | 'polish';      // 润色
+
+// 小说子模式显示名称
+export const NOVEL_TASK_TYPE_NAMES: Record<NovelTaskType, { zh: string; en: string; descZh: string; descEn: string }> = {
+  premise: { zh: '故事设定', en: 'Premise', descZh: '用于生成小说核心设定、主线矛盾、人物雏形', descEn: 'Generate core premise, main conflict, character prototypes' },
+  outline: { zh: '小说大纲', en: 'Outline', descZh: '用于生成总纲、分卷大纲、主线/副线', descEn: 'Generate overall outline, volume breakdown, main/sub plots' },
+  chapter_outline: { zh: '章节大纲', en: 'Chapter Outline', descZh: '用于生成单章目标、场景、冲突、结尾钩子', descEn: 'Generate chapter goals, scenes, conflicts, ending hooks' },
+  chapter_draft: { zh: '章节正文', en: 'Chapter Draft', descZh: '用于根据章节大纲生成正文', descEn: 'Generate chapter content from outline' },
+  continue: { zh: '续写', en: 'Continue', descZh: '用于根据已有正文继续往下写', descEn: 'Continue writing from existing content' },
+  polish: { zh: '润色', en: 'Polish', descZh: '用于优化已有正文的语言、节奏、画面感', descEn: 'Polish language, pacing, imagery' },
+};
+
+// 小说改写类型
+export type NovelRewriteType =
+  | 'enhance_imagery'      // 增强画面感
+  | 'enhance_emotion'      // 增强情绪张力
+  | 'optimize_dialogue'    // 优化对白
+  | 'add_conflict'         // 增加冲突
+  | 'slow_pacing'          // 放慢节奏
+  | 'fast_pacing'          // 加快节奏
+  | 'strengthen_suspense'  // 强化悬念
+  | 'strengthen_hook'      // 强化结尾钩子
+  | 'fix_character'        // 修复人物崩坏
+  | 'reduce_ai_taste';     // 减少AI味
+
+// 小说改写显示名称
+export const NOVEL_REWRITE_NAMES: Record<NovelRewriteType, { zh: string; en: string }> = {
+  enhance_imagery: { zh: '增强画面感', en: 'Enhance Imagery' },
+  enhance_emotion: { zh: '增强情绪张力', en: 'Enhance Emotion' },
+  optimize_dialogue: { zh: '优化对白', en: 'Optimize Dialogue' },
+  add_conflict: { zh: '增加冲突', en: 'Add Conflict' },
+  slow_pacing: { zh: '放慢节奏', en: 'Slow Pacing' },
+  fast_pacing: { zh: '加快节奏', en: 'Fast Pacing' },
+  strengthen_suspense: { zh: '强化悬念', en: 'Strengthen Suspense' },
+  strengthen_hook: { zh: '强化结尾钩子', en: 'Strengthen Hook' },
+  fix_character: { zh: '修复人物崩坏', en: 'Fix Character' },
+  reduce_ai_taste: { zh: '减少AI味', en: 'Reduce AI Taste' },
+};
+
 // 创作类型显示名称
 export const CREATION_MODE_NAMES: Record<CreationMode, { zh: string; en: string }> = {
   novel: { zh: '小说', en: 'Novel' },

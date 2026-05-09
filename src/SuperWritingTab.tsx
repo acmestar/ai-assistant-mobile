@@ -13,11 +13,15 @@ import {
   Save,
   FolderOpen,
   Download,
+  BookOpen,
+  Wand2,
 } from 'lucide-react';
-import { useAppStore, CHAT_MODELS } from './store';
+import { useAppStore, CHAT_MODELS, NovelTaskType, NovelRewriteType, NOVEL_TASK_TYPE_NAMES, NOVEL_REWRITE_NAMES } from './store';
 import { executeModelQueue, regenerateQueueItem, callChatCompletionRaw } from './api';
 import {
   buildCreationPrompt,
+  buildNovelPrompt,
+  buildNovelRewritePrompt,
   convertParsedCreationToQueue,
   getExportTitle,
   getItemName,
@@ -94,10 +98,19 @@ export default function SuperWritingTab() {
   // 生成模式：快速生成（一次API）或分步创作（大纲+队列）
   const [generationMode, setGenerationMode] = useState<'fast' | 'structured'>('fast');
 
+  // 小说子模式状态
+  const [novelTaskType, setNovelTaskType] = useState<NovelTaskType>('chapter_draft');
+  const [novelGenre, setNovelGenre] = useState<string>('');
+  const [novelStyle, setNovelStyle] = useState<string>('');
+  const [novelChapterInfo, setNovelChapterInfo] = useState<string>('');
+
   // 快速生成结果
   const [fastResult, setFastResult] = useState<string>('');
   const [fastLoading, setFastLoading] = useState(false);
   const [fastError, setFastError] = useState<string | null>(null);
+
+  // 小说改写状态
+  const [rewriteLoading, setRewriteLoading] = useState(false);
 
   // 获取实际使用的模型ID（优先使用创作台默认模型，否则使用全局模型）
   const effectiveModelId = selectedWritingModelId || chatModelId;
@@ -287,7 +300,17 @@ export default function SuperWritingTab() {
 
     try {
       // 根据创作类型构建 prompt
-      const prompt = buildCreationPrompt(creationMode, outlineText);
+      let prompt: string;
+      if (creationMode === 'novel') {
+        // 小说模式使用专用 prompt
+        prompt = buildNovelPrompt(novelTaskType, outlineText, {
+          genre: novelGenre,
+          style: novelStyle,
+          chapterInfo: novelChapterInfo,
+        });
+      } else {
+        prompt = buildCreationPrompt(creationMode, outlineText);
+      }
 
       // 使用流式输出，传入创作台默认模型
       const result = await callChatCompletionRaw(prompt, {
@@ -338,6 +361,25 @@ export default function SuperWritingTab() {
     } catch (error: any) {
       console.error('重生成失败:', error);
       updateQueueResult(queueId, `错误: ${error.message}`);
+    }
+  };
+
+  // 小说改写处理
+  const handleNovelRewrite = async (rewriteType: NovelRewriteType) => {
+    if (!fastResult.trim() || !apiKey) return;
+
+    setRewriteLoading(true);
+    try {
+      const prompt = buildNovelRewritePrompt(rewriteType, fastResult);
+      const result = await callChatCompletionRaw(prompt, {
+        modelId: effectiveModelId,
+      });
+      setFastResult(result);
+    } catch (error: any) {
+      console.error('改写失败:', error);
+      setFastError(error.message || '改写失败');
+    } finally {
+      setRewriteLoading(false);
     }
   };
 
@@ -702,6 +744,103 @@ export default function SuperWritingTab() {
               </span>
             </div>
 
+            {/* 小说子模式选择器 - 仅在小说模式下显示 */}
+            {creationMode === 'novel' && (
+              <div style={{ marginBottom: 12, padding: 12, background: 'var(--bg-tertiary)', borderRadius: 8 }}>
+                <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <BookOpen size={14} style={{ color: 'var(--accent)' }} />
+                  {language === 'zh' ? '小说子模式' : 'Novel Task Type'}
+                </div>
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(80px, 1fr))',
+                  gap: 6,
+                }}>
+                  {(Object.keys(NOVEL_TASK_TYPE_NAMES) as NovelTaskType[]).map((taskType) => (
+                    <button
+                      key={taskType}
+                      onClick={() => setNovelTaskType(taskType)}
+                      style={{
+                        padding: '8px 6px',
+                        background: novelTaskType === taskType ? 'var(--accent)' : 'var(--bg-secondary)',
+                        border: novelTaskType === taskType ? '1px solid var(--accent)' : '1px solid var(--border)',
+                        borderRadius: 6,
+                        color: novelTaskType === taskType ? 'white' : 'var(--text-secondary)',
+                        fontSize: 11,
+                        textAlign: 'center',
+                        cursor: 'pointer',
+                        minWidth: 0,
+                        maxWidth: '100%',
+                        boxSizing: 'border-box',
+                        overflowWrap: 'anywhere',
+                        wordBreak: 'break-word',
+                      }}
+                      title={language === 'zh' ? NOVEL_TASK_TYPE_NAMES[taskType].descZh : NOVEL_TASK_TYPE_NAMES[taskType].descEn}
+                    >
+                      {language === 'zh' ? NOVEL_TASK_TYPE_NAMES[taskType].zh : NOVEL_TASK_TYPE_NAMES[taskType].en}
+                    </button>
+                  ))}
+                </div>
+                <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 6 }}>
+                  {language === 'zh' ? NOVEL_TASK_TYPE_NAMES[novelTaskType].descZh : NOVEL_TASK_TYPE_NAMES[novelTaskType].descEn}
+                </div>
+              </div>
+            )}
+
+            {/* 小说额外字段 - 仅在小说模式下显示 */}
+            {creationMode === 'novel' && (
+              <div style={{ marginBottom: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <input
+                  type="text"
+                  value={novelGenre}
+                  onChange={(e) => setNovelGenre(e.target.value)}
+                  placeholder={language === 'zh' ? '题材：玄幻、都市、悬疑...' : 'Genre: Fantasy, Urban, Mystery...'}
+                  style={{
+                    flex: 1,
+                    minWidth: 100,
+                    padding: '8px 10px',
+                    background: 'var(--bg-tertiary)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 6,
+                    color: 'var(--text-primary)',
+                    fontSize: 12,
+                  }}
+                />
+                <input
+                  type="text"
+                  value={novelStyle}
+                  onChange={(e) => setNovelStyle(e.target.value)}
+                  placeholder={language === 'zh' ? '风格：爽文、热血、细腻...' : 'Style: Cool, Passionate, Delicate...'}
+                  style={{
+                    flex: 1,
+                    minWidth: 100,
+                    padding: '8px 10px',
+                    background: 'var(--bg-tertiary)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 6,
+                    color: 'var(--text-primary)',
+                    fontSize: 12,
+                  }}
+                />
+                <input
+                  type="text"
+                  value={novelChapterInfo}
+                  onChange={(e) => setNovelChapterInfo(e.target.value)}
+                  placeholder={language === 'zh' ? '章节/字数：第3章，3000字' : 'Chapter: Ch.3, 3000 words'}
+                  style={{
+                    flex: 1,
+                    minWidth: 100,
+                    padding: '8px 10px',
+                    background: 'var(--bg-tertiary)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 6,
+                    color: 'var(--text-primary)',
+                    fontSize: 12,
+                  }}
+                />
+              </div>
+            )}
+
             {/* 生成模式选择 */}
             <div style={{ marginBottom: 12, padding: 10, background: 'var(--bg-tertiary)', borderRadius: 8 }}>
               <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 8 }}>
@@ -863,6 +1002,51 @@ export default function SuperWritingTab() {
                 lineHeight: 1.8,
               }}>
                 <ReactMarkdown>{fastResult}</ReactMarkdown>
+              </div>
+            )}
+
+            {/* 小说改写按钮 - 仅在小说模式且有结果时显示 */}
+            {creationMode === 'novel' && fastResult && !fastLoading && (
+              <div style={{ marginTop: 12 }}>
+                <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Wand2 size={14} style={{ color: 'var(--accent)' }} />
+                  {language === 'zh' ? '继续优化' : 'Continue Optimization'}
+                </div>
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(90px, 1fr))',
+                  gap: 6,
+                }}>
+                  {(Object.keys(NOVEL_REWRITE_NAMES) as NovelRewriteType[]).map((rewriteType) => (
+                    <button
+                      key={rewriteType}
+                      onClick={() => handleNovelRewrite(rewriteType)}
+                      disabled={rewriteLoading}
+                      style={{
+                        padding: '6px 8px',
+                        background: 'var(--bg-tertiary)',
+                        border: '1px solid var(--border)',
+                        borderRadius: 6,
+                        color: 'var(--text-secondary)',
+                        fontSize: 11,
+                        cursor: rewriteLoading ? 'wait' : 'pointer',
+                        opacity: rewriteLoading ? 0.6 : 1,
+                        minWidth: 0,
+                        maxWidth: '100%',
+                        boxSizing: 'border-box',
+                        overflowWrap: 'anywhere',
+                        wordBreak: 'break-word',
+                        transition: 'all 0.15s ease',
+                      }}
+                    >
+                      {rewriteLoading ? (
+                        <RefreshCw size={10} className="spin" />
+                      ) : (
+                        language === 'zh' ? NOVEL_REWRITE_NAMES[rewriteType].zh : NOVEL_REWRITE_NAMES[rewriteType].en
+                      )}
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
           </div>
