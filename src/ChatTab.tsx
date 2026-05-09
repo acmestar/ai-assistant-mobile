@@ -1253,8 +1253,8 @@ ${characterMemory.map(c => `- ${c.replaceWith || c.originalName}：${c.descripti
             <span style={{ fontWeight: 600, fontSize: 14, color: 'var(--text-primary)' }}>
               📝 {language === 'zh' ? '批量创作' : 'Batch Creation'}
             </span>
-            <button onClick={() => setShowQueuePanel(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', padding: 4 }}>
-              <X size={16} />
+            <button onClick={() => setShowQueuePanel(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', padding: 4, fontSize: 12 }}>
+              {language === 'zh' ? '收回 ↑' : 'Collapse ↑'}
             </button>
           </div>
 
@@ -1316,7 +1316,7 @@ ${characterMemory.map(c => `- ${c.replaceWith || c.originalName}：${c.descripti
                   onClick={() => { setOutlineText(''); setShowOutlineParser(false); }}
                   style={{ flex: 1, padding: 6, background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-secondary)', fontSize: 11 }}
                 >
-                  {language === 'zh' ? '取消' : 'Cancel'}
+                  {language === 'zh' ? '重新解析' : 'Re-parse'}
                 </button>
                 <button
                   onClick={parseOutlineByAI}
