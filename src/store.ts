@@ -133,6 +133,35 @@ export interface NovelProject {
   notes?: string;
 }
 
+// 章节正文草稿
+export interface NovelChapterDraft {
+  chapterNo: number;
+  title: string;
+  content: string;           // 正文内容
+  summary: string;           // 本章摘要
+  characterChanges: string;  // 人物状态变化
+  clues: string;             // 伏笔/线索
+  nextChapterHint: string;   // 下一章建议
+}
+
+// 一键生成结果
+export interface NovelAutoStartResult {
+  project: NovelProject;
+  firstChapter: NovelChapterDraft;
+}
+
+// 章节队列项
+export interface NovelChapterQueueItem {
+  id: string;
+  chapterNo: number;
+  title: string;
+  outline: string;           // 章节大纲
+  userIdea?: string;         // 用户想法
+  status: 'pending' | 'running' | 'done' | 'failed';
+  result?: NovelChapterDraft;
+  error?: string;
+}
+
 // 创建空的小说企划
 export function createEmptyNovelProject(): NovelProject {
   return {

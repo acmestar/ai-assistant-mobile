@@ -1,5 +1,5 @@
 // 创作中心工具函数
-import { CreationMode, NovelTaskType, NovelRewriteType, NovelProject } from './store';
+import { CreationMode, NovelTaskType, NovelRewriteType, NovelProject, NovelChapterDraft, NovelAutoStartResult } from './store';
 
 // ============ Prompt 构建函数 ============
 
@@ -1201,4 +1201,400 @@ ${previousChapter.slice(-3000)} ${previousChapter.length > 3000 ? '...(前文已
 
 ## 下一章建议
 （下一章可以写什么）`;
+}
+
+// ============ 一键生成小说（设定+第一章） ============
+
+/**
+ * 构建一键生成小说的 Prompt（返回设定+第一章正文）
+ */
+export function buildNovelAutoStartPrompt(options: {
+  requirement: string;
+  genre?: string;
+  style?: string;
+  chapterInfo?: string;
+}): string {
+  const { requirement, genre, style, chapterInfo } = options;
+
+  const genreHint = genre ? `\n用户指定题材：${genre}` : '';
+  const styleHint = style ? `\n用户指定风格：${style}` : '';
+  const lengthHint = chapterInfo ? `\n用户指定篇幅：${chapterInfo}` : '';
+
+  return `你是一个专业的小说策划和作家。请根据用户的一句话想法，自动生成完整的小说企划和第一章正文。
+
+用户想法：
+${requirement}
+${genreHint}${styleHint}${lengthHint}
+
+请输出 JSON 格式（不要输出 Markdown，不要解释，只输出纯 JSON）：
+
+{
+  "project": {
+    "title": "小说名（吸引人的标题）",
+    "genre": "题材类型",
+    "style": "风格关键词",
+    "logline": "一句话简介（有吸引力，概括核心卖点）",
+    "sellingPoints": "核心卖点（2-3个）",
+    "targetReaders": "目标读者",
+    "lengthSuggestion": "篇幅建议",
+
+    "characters": [
+      {
+        "id": "char_1",
+        "name": "角色名",
+        "role": "主角/配角/反派",
+        "identity": "身份/职业",
+        "personality": "性格特点",
+        "desire": "核心欲望",
+        "weakness": "性格弱点",
+        "relationship": "与主角关系",
+        "arc": "人物成长弧光",
+        "locked": false
+      }
+    ],
+
+    "world": {
+      "background": "故事背景",
+      "keyScenes": "关键场景",
+      "rules": "世界规则",
+      "forbiddenRules": "不可违背的规则"
+    },
+
+    "conflict": {
+      "external": "外部冲突",
+      "internal": "内心冲突",
+      "relationship": "关系冲突",
+      "stages": "阶段性阻碍"
+    },
+
+    "outline": {
+      "beginning": "开端",
+      "development": "发展",
+      "twist": "转折",
+      "climax": "高潮",
+      "ending": "结局"
+    },
+
+    "chapters": [
+      {
+        "id": "chap_1",
+        "chapterNo": 1,
+        "title": "章节标题",
+        "goal": "本章目标",
+        "mainEvent": "主要事件",
+        "conflict": "冲突点",
+        "hook": "结尾钩子",
+        "locked": false
+      }
+    ],
+
+    "firstChapterAdvice": {
+      "openingScene": "开场场景",
+      "characters": "出场人物",
+      "mood": "情绪基调",
+      "conflictIntro": "冲突引入",
+      "endingHook": "结尾钩子"
+    },
+
+    "notes": "其他建议"
+  },
+
+  "firstChapter": {
+    "chapterNo": 1,
+    "title": "第一章标题",
+    "content": "第一章正文内容（真正的小说正文，不是大纲，要有场景、动作、对白、心理、节奏和结尾钩子，字数2000-4000字）",
+    "summary": "本章摘要（100字以内）",
+    "characterChanges": "人物状态变化",
+    "clues": "伏笔/线索",
+    "nextChapterHint": "下一章建议"
+  }
+}
+
+要求：
+1. 用户只给一句话时，必须自动补全所有空白，不要反问
+2. 优先生成"好看、上头、有代入感"的小说
+3. 至少生成3个角色（主角、重要配角、反派或阻力来源）
+4. 章节规划5-12个
+5. 第一章必须是真正小说正文，不是大纲
+6. 正文要有场景、动作、对白、心理、节奏和结尾钩子
+7. 第一章字数2000-4000字，移动端可读
+8. 只输出 JSON，不要其他文字`;
+}
+
+/**
+ * 解析一键生成结果
+ */
+export function parseNovelAutoStartResult(text: string): NovelAutoStartResult | null {
+  try {
+    let jsonStr = text.trim();
+
+    // 如果被 ```json 包裹，提取内容
+    if (jsonStr.startsWith('```')) {
+      const match = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
+      if (match) {
+        jsonStr = match[1].trim();
+      }
+    }
+
+    // 尝试找到 JSON 对象的起始和结束
+    const startIndex = jsonStr.indexOf('{');
+    const lastIndex = jsonStr.lastIndexOf('}');
+    if (startIndex !== -1 && lastIndex !== -1) {
+      jsonStr = jsonStr.slice(startIndex, lastIndex + 1);
+    }
+
+    const parsed = JSON.parse(jsonStr);
+
+    // 验证必要字段
+    if (!parsed.project || !parsed.firstChapter) {
+      console.warn('[parseNovelAutoStartResult] 缺少 project 或 firstChapter');
+      return null;
+    }
+
+    return {
+      project: parsed.project,
+      firstChapter: parsed.firstChapter,
+    };
+  } catch (e) {
+    console.error('[parseNovelAutoStartResult] 解析失败:', e);
+    return null;
+  }
+}
+
+/**
+ * 构建快速修改 Prompt
+ */
+export function buildNovelApplyQuickEditPrompt(options: {
+  novelProject: NovelProject;
+  currentChapter: NovelChapterDraft;
+  quickHeroName?: string;
+  quickLoveInterestName?: string;
+  quickTone?: string;
+  quickRelationship?: string;
+  quickEnding?: string;
+}): string {
+  const { novelProject, currentChapter, quickHeroName, quickLoveInterestName, quickTone, quickRelationship, quickEnding } = options;
+
+  const edits: string[] = [];
+  if (quickHeroName) edits.push(`主角名字改为：${quickHeroName}`);
+  if (quickLoveInterestName) edits.push(`另一位主角名字改为：${quickLoveInterestName}`);
+  if (quickTone) edits.push(`风格调整为：${quickTone}`);
+  if (quickRelationship) edits.push(`关系类型改为：${quickRelationship}`);
+  if (quickEnding) edits.push(`结局倾向改为：${quickEnding}`);
+
+  return `你是一个专业的小说编辑。请根据用户的修改要求，更新小说设定并重写当前章节。
+
+当前小说设定：
+${JSON.stringify(novelProject, null, 2)}
+
+当前章节：
+标题：${currentChapter.title}
+正文：${currentChapter.content.slice(0, 1000)}...
+
+用户修改要求：
+${edits.join('\n')}
+
+请输出 JSON 格式：
+
+{
+  "project": { ...更新后的完整 NovelProject },
+  "chapter": { ...重写后的 NovelChapterDraft }
+}
+
+要求：
+1. 只修改用户要求的字段，其他保持不变
+2. 如果用户只改名字，就只替换名字，不要大改剧情和世界观
+3. 重写章节时必须使用新的设定
+4. 正文要有场景、动作、对白、心理、节奏和结尾钩子
+5. 只输出 JSON`;
+}
+
+/**
+ * 构建下一章大纲 Prompt
+ */
+export function buildNovelNextOutlinePrompt(options: {
+  novelProject: NovelProject;
+  chapters: NovelChapterDraft[];
+  nextChapterIdea?: string;
+}): string {
+  const { novelProject, chapters, nextChapterIdea } = options;
+
+  const nextChapterNo = chapters.length + 1;
+  const chapterPlan = novelProject.chapters.find(c => c.chapterNo === nextChapterNo);
+
+  // 构建已有章节摘要
+  const chapterSummaries = chapters.map(c => `第 ${c.chapterNo} 章《${c.title}》：${c.summary}`).join('\n');
+
+  // 获取最后一章内容（截取后部分）
+  const lastChapter = chapters[chapters.length - 1];
+  const lastChapterContent = lastChapter?.content?.slice(-2000) || '';
+
+  return `你是一个专业的小说策划。请根据已有内容，生成下一章的大纲。
+
+小说名：${novelProject.title}
+题材：${novelProject.genre}
+风格：${novelProject.style}
+
+【角色设定】
+${novelProject.characters.map(c => `- ${c.name}（${c.role}）：${c.identity}，性格${c.personality}`).join('\n')}
+
+【故事大纲】
+开端：${novelProject.outline.beginning}
+发展：${novelProject.outline.development}
+转折：${novelProject.outline.twist}
+高潮：${novelProject.outline.climax}
+结局：${novelProject.outline.ending}
+
+【已有章节摘要】
+${chapterSummaries}
+
+【上一章结尾】
+${lastChapterContent}
+
+${chapterPlan ? `【原章节规划】
+章节标题：${chapterPlan.title}
+本章目标：${chapterPlan.goal}
+主要事件：${chapterPlan.mainEvent}
+冲突点：${chapterPlan.conflict}
+结尾钩子：${chapterPlan.hook}` : ''}
+
+${nextChapterIdea ? `【用户希望下一章】\n${nextChapterIdea}` : ''}
+
+请输出下一章的大纲，包括：
+1. 章节标题
+2. 本章目标
+3. 主要事件（3-5个）
+4. 冲突点
+5. 情绪变化
+6. 人物关系推进
+7. 需要延续的伏笔
+8. 新增伏笔/线索
+9. 结尾钩子
+10. 正文写作建议
+
+要求：
+1. 必须承接上一章
+2. 不要推翻前文
+3. 不要突然完结
+4. 人物姓名、身份、性格必须与设定一致`;
+}
+
+/**
+ * 构建续写正文 Prompt
+ */
+export function buildNovelContinueChapterPrompt(options: {
+  novelProject: NovelProject;
+  chapters: NovelChapterDraft[];
+  nextChapterIdea?: string;
+  nextChapterOutline?: string;
+}): string {
+  const { novelProject, chapters, nextChapterIdea, nextChapterOutline } = options;
+
+  const nextChapterNo = chapters.length + 1;
+  const chapterPlan = novelProject.chapters.find(c => c.chapterNo === nextChapterNo);
+
+  // 构建已有章节摘要
+  const chapterSummaries = chapters.map(c => `第 ${c.chapterNo} 章《${c.title}》：${c.summary}`).join('\n');
+
+  // 获取最后一章内容
+  const lastChapter = chapters[chapters.length - 1];
+  const lastChapterContent = lastChapter?.content || '';
+
+  // 锁定角色信息
+  const lockedCharacters = novelProject.characters.filter(c => c.locked);
+  const lockedInfo = lockedCharacters.length > 0
+    ? `\n【用户已锁定的角色，必须严格遵守】：\n${lockedCharacters.map(c => `- ${c.name}：${c.identity}，性格${c.personality}`).join('\n')}`
+    : '';
+
+  return `你是一个专业的小说作家。请根据小说企划和已有内容，续写下一章正文。
+
+小说名：${novelProject.title}
+题材：${novelProject.genre}
+风格：${novelProject.style}
+
+【角色设定】
+${novelProject.characters.map(c => `- ${c.name}（${c.role}）：${c.identity}，性格${c.personality}`).join('\n')}
+${lockedInfo}
+
+【世界观/背景】
+${novelProject.world.background}
+
+【已有章节摘要】
+${chapterSummaries}
+
+【上一章完整内容】
+${lastChapterContent.slice(-3000)}${lastChapterContent.length > 3000 ? '...(前文已省略)' : ''}
+
+${chapterPlan ? `【章节规划】
+章节标题：${chapterPlan.title}
+本章目标：${chapterPlan.goal}
+主要事件：${chapterPlan.mainEvent}
+冲突点：${chapterPlan.conflict}
+结尾钩子：${chapterPlan.hook}` : ''}
+
+${nextChapterIdea ? `【用户希望下一章】\n${nextChapterIdea}` : ''}
+
+${nextChapterOutline ? `【下一章大纲】\n${nextChapterOutline}` : ''}
+
+请输出 JSON 格式：
+
+{
+  "chapterNo": ${nextChapterNo},
+  "title": "章节标题",
+  "content": "正文内容（真正的小说正文，要有场景、动作、对白、心理、节奏和结尾钩子，字数2000-4000字）",
+  "summary": "本章摘要（100字以内）",
+  "characterChanges": "人物状态变化",
+  "clues": "伏笔/线索",
+  "nextChapterHint": "下一章建议"
+}
+
+要求：
+1. content 必须是真正小说正文，不是大纲
+2. 承接上一章最后的情绪和事件
+3. 遵守小说设定，人物姓名、身份、性格必须一致
+4. 不要跳剧情，不要突然完结
+5. 正文要有场景、动作、对白、心理、节奏和结尾钩子
+6. 只输出 JSON`;
+}
+
+/**
+ * 解析章节草稿 JSON
+ */
+export function parseNovelChapterDraft(text: string): NovelChapterDraft | null {
+  try {
+    let jsonStr = text.trim();
+
+    if (jsonStr.startsWith('```')) {
+      const match = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
+      if (match) {
+        jsonStr = match[1].trim();
+      }
+    }
+
+    const startIndex = jsonStr.indexOf('{');
+    const lastIndex = jsonStr.lastIndexOf('}');
+    if (startIndex !== -1 && lastIndex !== -1) {
+      jsonStr = jsonStr.slice(startIndex, lastIndex + 1);
+    }
+
+    const parsed = JSON.parse(jsonStr);
+
+    if (!parsed.content) {
+      console.warn('[parseNovelChapterDraft] 缺少 content');
+      return null;
+    }
+
+    return {
+      chapterNo: parsed.chapterNo || 1,
+      title: parsed.title || '',
+      content: parsed.content || '',
+      summary: parsed.summary || '',
+      characterChanges: parsed.characterChanges || '',
+      clues: parsed.clues || '',
+      nextChapterHint: parsed.nextChapterHint || '',
+    };
+  } catch (e) {
+    console.error('[parseNovelChapterDraft] 解析失败:', e);
+    return null;
+  }
 }

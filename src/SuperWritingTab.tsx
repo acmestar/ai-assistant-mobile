@@ -19,17 +19,18 @@ import {
   Unlock,
   Plus,
   X,
-  Edit3,
 } from 'lucide-react';
-import { useAppStore, CHAT_MODELS, NovelRewriteType, NOVEL_REWRITE_NAMES, NovelProject, NovelCharacter, NovelChapterPlan } from './store';
+import { useAppStore, CHAT_MODELS, NovelRewriteType, NOVEL_REWRITE_NAMES, NovelProject, NovelCharacter, NovelChapterPlan, NovelChapterDraft, NovelChapterQueueItem } from './store';
 import { executeModelQueue, regenerateQueueItem, callChatCompletionRaw } from './api';
 import {
   buildCreationPrompt,
   buildNovelRewritePrompt,
-  buildNovelPlanningPrompt,
-  parseNovelPlanJSON,
-  buildNovelFirstChapterPrompt,
-  buildNovelContinuePrompt,
+  buildNovelAutoStartPrompt,
+  parseNovelAutoStartResult,
+  buildNovelApplyQuickEditPrompt,
+  buildNovelNextOutlinePrompt,
+  buildNovelContinueChapterPrompt,
+  parseNovelChapterDraft,
   convertParsedCreationToQueue,
   getExportTitle,
   getItemName,
@@ -108,14 +109,32 @@ export default function SuperWritingTab() {
 
   // 小说企划状态
   const [novelProject, setNovelProject] = useState<NovelProject | null>(null);
-  const [novelPlanRawText, setNovelPlanRawText] = useState('');
-  const [novelChapterResult, setNovelChapterResult] = useState('');
-  const [novelCurrentChapterIndex, setNovelCurrentChapterIndex] = useState(0);
+  const [novelChapterResult, setNovelChapterResult] = useState<NovelChapterDraft | null>(null);
+  const [novelChapters, setNovelChapters] = useState<NovelChapterDraft[]>([]);
+  const [novelRawText, setNovelRawText] = useState('');
+  const [showAdvancedNovelSettings, setShowAdvancedNovelSettings] = useState(false);
 
   // 小说额外设置
   const [novelGenre, setNovelGenre] = useState<string>('');
   const [novelStyle, setNovelStyle] = useState<string>('');
   const [novelChapterInfo, setNovelChapterInfo] = useState<string>('');
+
+  // 快速修改状态
+  const [quickHeroName, setQuickHeroName] = useState('');
+  const [quickLoveInterestName, setQuickLoveInterestName] = useState('');
+  const [quickTone, setQuickTone] = useState('');
+  const [quickRelationship, setQuickRelationship] = useState('');
+  const [quickEnding, setQuickEnding] = useState('');
+
+  // 续写状态
+  const [nextChapterIdea, setNextChapterIdea] = useState('');
+  const [nextChapterOutline, setNextChapterOutline] = useState('');
+
+  // 章节队列状态
+  const [novelChapterQueue, setNovelChapterQueue] = useState<NovelChapterQueueItem[]>([]);
+  const [batchChapterCount, setBatchChapterCount] = useState<number>(3);
+  const [batchChapterIdea, setBatchChapterIdea] = useState('');
+  const [isNovelQueueRunning, setIsNovelQueueRunning] = useState(false);
 
   // 快速生成结果
   const [fastResult, setFastResult] = useState<string>('');
@@ -318,8 +337,8 @@ export default function SuperWritingTab() {
       // 根据创作类型构建 prompt
       let prompt: string;
       if (creationMode === 'novel') {
-        // 小说模式：生成完整企划（返回 JSON）
-        prompt = buildNovelPlanningPrompt({
+        // 小说模式：一键生成设定+第一章
+        prompt = buildNovelAutoStartPrompt({
           requirement: outlineText,
           genre: novelGenre,
           style: novelStyle,
@@ -335,13 +354,11 @@ export default function SuperWritingTab() {
       }
 
       // 日志输出，便于调试
-      console.log('[FastGenerate]', {
+      console.log('[NovelModelCall]', {
+        source: 'handleFastGenerate',
         creationMode,
-        selectedWritingModelId,
-        chatModelId,
         effectiveModelId,
         promptLength: prompt.length,
-        promptPreview: prompt.slice(0, 200),
       });
 
       // 使用流式输出，传入创作台默认模型
@@ -354,24 +371,31 @@ export default function SuperWritingTab() {
 
       // 小说模式：尝试解析 JSON
       if (creationMode === 'novel') {
-        const parsed = parseNovelPlanJSON(result);
+        setNovelRawText(result);
+        const parsed = parseNovelAutoStartResult(result);
         if (parsed) {
-          setNovelProject(parsed);
-          setNovelPlanRawText(result);
+          setNovelProject(parsed.project);
+          setNovelChapterResult(parsed.firstChapter);
+          setNovelChapters([parsed.firstChapter]);
+          // 清空快速修改字段
+          setQuickHeroName('');
+          setQuickLoveInterestName('');
+          setQuickTone('');
+          setQuickRelationship('');
+          setQuickEnding('');
         } else {
           // 解析失败，保留原始文本
           setNovelProject(null);
-          setNovelPlanRawText(result);
+          setNovelChapterResult(null);
         }
       } else {
         setFastResult(result);
       }
     } catch (error: any) {
-      console.error('[FastGenerateError]', error);
+      console.error('[NovelModelError]', error);
       // 提取更详细的错误信息
       let errorMessage = error.message || '生成失败';
       if (error.message?.includes('API 错误:')) {
-        // 已经是格式化的 API 错误
         errorMessage = error.message;
       } else if (error.response) {
         errorMessage = `API 错误: ${error.response.status || '未知'} ${error.response.statusText || ''}`;
@@ -382,66 +406,320 @@ export default function SuperWritingTab() {
     }
   };
 
-  // 生成第一章
-  const handleGenerateFirstChapter = async () => {
-    if (!novelProject || !apiKey) return;
-
-    setFastLoading(true);
-    setFastError(null);
-
-    try {
-      const prompt = buildNovelFirstChapterPrompt({
-        requirement: outlineText,
-        novelProject,
-        chapterIndex: 0,
-      });
-
-      const result = await callChatCompletionRaw(prompt, {
-        modelId: effectiveModelId,
-        onChunk: (chunk) => {
-          setNovelChapterResult(prev => prev + chunk);
-        },
-      });
-
-      setNovelChapterResult(result);
-      setNovelCurrentChapterIndex(1);
-    } catch (error: any) {
-      console.error('[GenerateFirstChapterError]', error);
-      setFastError(error.message || '生成失败');
-    } finally {
-      setFastLoading(false);
-    }
-  };
-
-  // 续写下一章
-  const handleContinueChapter = async () => {
+  // 应用快速修改
+  const handleApplyQuickEdit = async () => {
     if (!novelProject || !novelChapterResult || !apiKey) return;
 
     setFastLoading(true);
     setFastError(null);
 
     try {
-      const prompt = buildNovelContinuePrompt({
+      const prompt = buildNovelApplyQuickEditPrompt({
         novelProject,
-        previousChapter: novelChapterResult,
-        chapterIndex: novelCurrentChapterIndex,
+        currentChapter: novelChapterResult,
+        quickHeroName,
+        quickLoveInterestName,
+        quickTone,
+        quickRelationship,
+        quickEnding,
+      });
+
+      console.log('[NovelModelCall]', {
+        source: 'handleApplyQuickEdit',
+        effectiveModelId,
+        promptLength: prompt.length,
       });
 
       const result = await callChatCompletionRaw(prompt, {
         modelId: effectiveModelId,
-        onChunk: (chunk) => {
-          setNovelChapterResult(prev => prev + chunk);
-        },
       });
 
-      setNovelChapterResult(result);
-      setNovelCurrentChapterIndex(prev => prev + 1);
+      // 解析 JSON
+      let jsonStr = result.trim();
+      if (jsonStr.startsWith('```')) {
+        const match = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
+        if (match) jsonStr = match[1].trim();
+      }
+      const startIndex = jsonStr.indexOf('{');
+      const lastIndex = jsonStr.lastIndexOf('}');
+      if (startIndex !== -1 && lastIndex !== -1) {
+        jsonStr = jsonStr.slice(startIndex, lastIndex + 1);
+      }
+
+      const parsed = JSON.parse(jsonStr);
+      if (parsed.project && parsed.chapter) {
+        setNovelProject(parsed.project);
+        setNovelChapterResult(parsed.chapter);
+        // 更新 novelChapters 中的当前章节
+        setNovelChapters(prev => {
+          const newChapters = [...prev];
+          const currentIndex = newChapters.findIndex(c => c.chapterNo === parsed.chapter.chapterNo);
+          if (currentIndex >= 0) {
+            newChapters[currentIndex] = parsed.chapter;
+          }
+          return newChapters;
+        });
+      }
     } catch (error: any) {
-      console.error('[ContinueChapterError]', error);
+      console.error('[NovelModelError]', error);
+      setFastError(error.message || '修改失败');
+    } finally {
+      setFastLoading(false);
+    }
+  };
+
+  // 智能续写下一章
+  const handleContinueNextChapter = async () => {
+    if (!novelProject || novelChapters.length === 0 || !apiKey) return;
+
+    setFastLoading(true);
+    setFastError(null);
+
+    try {
+      const prompt = buildNovelContinueChapterPrompt({
+        novelProject,
+        chapters: novelChapters,
+        nextChapterIdea,
+        nextChapterOutline: undefined,
+      });
+
+      console.log('[NovelModelCall]', {
+        source: 'handleContinueNextChapter',
+        effectiveModelId,
+        chapterCount: novelChapters.length,
+        promptLength: prompt.length,
+      });
+
+      const result = await callChatCompletionRaw(prompt, {
+        modelId: effectiveModelId,
+      });
+
+      const parsed = parseNovelChapterDraft(result);
+      if (parsed) {
+        setNovelChapterResult(parsed);
+        setNovelChapters(prev => [...prev, parsed]);
+        setNextChapterIdea('');
+        setNextChapterOutline('');
+      } else {
+        setFastError(language === 'zh' ? '解析章节失败' : 'Failed to parse chapter');
+      }
+    } catch (error: any) {
+      console.error('[NovelModelError]', error);
       setFastError(error.message || '续写失败');
     } finally {
       setFastLoading(false);
     }
+  };
+
+  // 生成下一章大纲
+  const handleGenerateNextOutline = async () => {
+    if (!novelProject || novelChapters.length === 0 || !apiKey) return;
+
+    setFastLoading(true);
+    setFastError(null);
+
+    try {
+      const prompt = buildNovelNextOutlinePrompt({
+        novelProject,
+        chapters: novelChapters,
+        nextChapterIdea,
+      });
+
+      console.log('[NovelModelCall]', {
+        source: 'handleGenerateNextOutline',
+        effectiveModelId,
+        promptLength: prompt.length,
+      });
+
+      const result = await callChatCompletionRaw(prompt, {
+        modelId: effectiveModelId,
+      });
+
+      setNextChapterOutline(result);
+    } catch (error: any) {
+      console.error('[NovelModelError]', error);
+      setFastError(error.message || '生成大纲失败');
+    } finally {
+      setFastLoading(false);
+    }
+  };
+
+  // 根据大纲写正文
+  const handleWriteFromNextOutline = async () => {
+    if (!novelProject || novelChapters.length === 0 || !nextChapterOutline || !apiKey) return;
+
+    setFastLoading(true);
+    setFastError(null);
+
+    try {
+      const prompt = buildNovelContinueChapterPrompt({
+        novelProject,
+        chapters: novelChapters,
+        nextChapterIdea,
+        nextChapterOutline,
+      });
+
+      console.log('[NovelModelCall]', {
+        source: 'handleWriteFromNextOutline',
+        effectiveModelId,
+        promptLength: prompt.length,
+      });
+
+      const result = await callChatCompletionRaw(prompt, {
+        modelId: effectiveModelId,
+      });
+
+      const parsed = parseNovelChapterDraft(result);
+      if (parsed) {
+        setNovelChapterResult(parsed);
+        setNovelChapters(prev => [...prev, parsed]);
+        setNextChapterIdea('');
+        setNextChapterOutline('');
+      } else {
+        setFastError(language === 'zh' ? '解析章节失败' : 'Failed to parse chapter');
+      }
+    } catch (error: any) {
+      console.error('[NovelModelError]', error);
+      setFastError(error.message || '生成失败');
+    } finally {
+      setFastLoading(false);
+    }
+  };
+
+  // 创建章节队列
+  const handleCreateNovelChapterQueue = () => {
+    if (!novelProject) return;
+
+    const lastChapterNo = novelChapters.length > 0
+      ? Math.max(...novelChapters.map(c => c.chapterNo))
+      : 0;
+
+    const queueItems: NovelChapterQueueItem[] = [];
+    const count = Math.min(batchChapterCount, novelProject.chapters.length - lastChapterNo);
+
+    for (let i = 0; i < count; i++) {
+      const chapterNo = lastChapterNo + i + 1;
+      const plan = novelProject.chapters.find(c => c.chapterNo === chapterNo);
+
+      queueItems.push({
+        id: `queue_${Date.now()}_${i}`,
+        chapterNo,
+        title: plan?.title || `第 ${chapterNo} 章`,
+        outline: plan ? `章节标题：${plan.title}\n本章目标：${plan.goal}\n主要事件：${plan.mainEvent}\n冲突点：${plan.conflict}\n结尾钩子：${plan.hook}` : '',
+        userIdea: batchChapterIdea,
+        status: 'pending',
+      });
+    }
+
+    setNovelChapterQueue(queueItems);
+  };
+
+  // 执行章节队列
+  const handleRunNovelChapterQueue = async () => {
+    if (!novelProject || novelChapterQueue.length === 0 || !apiKey) return;
+
+    setIsNovelQueueRunning(true);
+    const { updateQueueResult: _unused } = useAppStore.getState();
+
+    for (let i = 0; i < novelChapterQueue.length; i++) {
+      const item = novelChapterQueue[i];
+      if (item.status !== 'pending') continue;
+
+      // 标记为运行中
+      setNovelChapterQueue(prev => prev.map(q =>
+        q.id === item.id ? { ...q, status: 'running' as const } : q
+      ));
+
+      try {
+        const prompt = buildNovelContinueChapterPrompt({
+          novelProject,
+          chapters: novelChapters,
+          nextChapterIdea: batchChapterIdea || item.userIdea,
+          nextChapterOutline: item.outline,
+        });
+
+        console.log('[NovelModelCall]', {
+          source: 'handleRunNovelChapterQueue',
+          chapterNo: item.chapterNo,
+          effectiveModelId,
+          promptLength: prompt.length,
+        });
+
+        const result = await callChatCompletionRaw(prompt, {
+          modelId: effectiveModelId,
+        });
+
+        const parsed = parseNovelChapterDraft(result);
+        if (parsed) {
+          // 添加到章节列表
+          setNovelChapters(prev => [...prev, parsed]);
+          setNovelChapterResult(parsed);
+
+          // 标记完成
+          setNovelChapterQueue(prev => prev.map(q =>
+            q.id === item.id ? { ...q, status: 'done' as const, result: parsed } : q
+          ));
+        } else {
+          throw new Error('解析失败');
+        }
+      } catch (error: any) {
+        console.error('[NovelModelError]', error);
+        // 标记失败
+        setNovelChapterQueue(prev => prev.map(q =>
+          q.id === item.id ? { ...q, status: 'failed' as const, error: error.message } : q
+        ));
+        // 停止队列
+        break;
+      }
+    }
+
+    setIsNovelQueueRunning(false);
+  };
+
+  // 重试队列项
+  const handleRetryNovelQueueItem = async (itemId: string) => {
+    if (!novelProject || !apiKey) return;
+
+    const item = novelChapterQueue.find(q => q.id === itemId);
+    if (!item) return;
+
+    setNovelChapterQueue(prev => prev.map(q =>
+      q.id === itemId ? { ...q, status: 'running' as const, error: undefined } : q
+    ));
+
+    try {
+      const prompt = buildNovelContinueChapterPrompt({
+        novelProject,
+        chapters: novelChapters,
+        nextChapterIdea: item.userIdea,
+        nextChapterOutline: item.outline,
+      });
+
+      const result = await callChatCompletionRaw(prompt, {
+        modelId: effectiveModelId,
+      });
+
+      const parsed = parseNovelChapterDraft(result);
+      if (parsed) {
+        setNovelChapters(prev => [...prev, parsed]);
+        setNovelChapterResult(parsed);
+        setNovelChapterQueue(prev => prev.map(q =>
+          q.id === itemId ? { ...q, status: 'done' as const, result: parsed } : q
+        ));
+      } else {
+        throw new Error('解析失败');
+      }
+    } catch (error: any) {
+      console.error('[NovelModelError]', error);
+      setNovelChapterQueue(prev => prev.map(q =>
+        q.id === itemId ? { ...q, status: 'failed' as const, error: error.message } : q
+      ));
+    }
+  };
+
+  // 删除队列项
+  const handleRemoveNovelQueueItem = (itemId: string) => {
+    setNovelChapterQueue(prev => prev.filter(q => q.id !== itemId));
   };
 
   // 更新小说企划字段
@@ -602,8 +880,8 @@ export default function SuperWritingTab() {
 
   // 小说改写处理 - 基于章节正文
   const handleNovelRewrite = async (rewriteType: NovelRewriteType) => {
-    const textToRewrite = novelChapterResult || fastResult;
-    if (!textToRewrite.trim() || !apiKey) return;
+    const textToRewrite = novelChapterResult?.content || fastResult;
+    if (!textToRewrite?.trim() || !apiKey) return;
 
     setRewriteLoading(true);
     try {
@@ -613,7 +891,15 @@ export default function SuperWritingTab() {
       });
       // 优先更新章节正文
       if (novelChapterResult) {
-        setNovelChapterResult(result);
+        const updatedChapter: NovelChapterDraft = {
+          ...novelChapterResult,
+          content: result,
+        };
+        setNovelChapterResult(updatedChapter);
+        // 同步更新 novelChapters
+        setNovelChapters(prev => prev.map(c =>
+          c.chapterNo === novelChapterResult.chapterNo ? updatedChapter : c
+        ));
       } else {
         setFastResult(result);
       }
@@ -1201,8 +1487,9 @@ export default function SuperWritingTab() {
                 <button
                   onClick={() => {
                     setNovelProject(null);
-                    setNovelPlanRawText('');
-                    setNovelChapterResult('');
+                    setNovelRawText('');
+                    setNovelChapterResult(null);
+                    setNovelChapters([]);
                   }}
                   style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: 12 }}
                 >
@@ -1622,37 +1909,29 @@ export default function SuperWritingTab() {
               )}
             </div>
 
-            {/* 下一步操作按钮 */}
+            {/* 下一步操作按钮 - 编辑完整设定 */}
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <button
-                onClick={handleGenerateFirstChapter}
-                disabled={fastLoading}
-                className="btn-primary"
-                style={{ flex: 1, padding: 10, minWidth: 120 }}
-              >
-                <Sparkles size={14} style={{ marginRight: 4 }} />
-                {language === 'zh' ? '生成第一章' : 'Generate Chapter 1'}
-              </button>
-              <button
-                onClick={() => {
-                  setNovelProject(null);
-                  setNovelPlanRawText('');
-                }}
+                onClick={() => setShowAdvancedNovelSettings(!showAdvancedNovelSettings)}
                 style={{
-                  padding: '10px 16px',
+                  flex: 1,
+                  padding: 10,
                   background: 'var(--bg-tertiary)',
                   border: '1px solid var(--border)',
                   borderRadius: 8,
                   color: 'var(--text-secondary)',
+                  fontSize: 12,
                 }}
               >
-                {language === 'zh' ? '重新生成方案' : 'Regenerate'}
+                {showAdvancedNovelSettings
+                  ? (language === 'zh' ? '收起完整设定' : 'Hide Settings')
+                  : (language === 'zh' ? '编辑完整设定' : 'Edit Full Settings')}
               </button>
             </div>
           </div>
         )}
 
-        {/* 小说章节正文结果 */}
+        {/* 小说章节正文结果 - 正文优先展示 */}
         {creationMode === 'novel' && novelChapterResult && (
           <div style={{
             padding: 16,
@@ -1660,53 +1939,284 @@ export default function SuperWritingTab() {
             borderRadius: 12,
             border: '1px solid var(--accent)',
           }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <span style={{ fontWeight: 600, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                <Edit3 size={16} style={{ color: 'var(--accent)' }} />
-                {language === 'zh' ? `第 ${novelCurrentChapterIndex} 章` : `Chapter ${novelCurrentChapterIndex}`}
-              </span>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button
-                  onClick={() => navigator.clipboard.writeText(novelChapterResult)}
-                  style={{ background: 'transparent', border: 'none', color: 'var(--accent)', fontSize: 12 }}
-                >
-                  {language === 'zh' ? '复制' : 'Copy'}
-                </button>
+            {/* 小说标题和章节标题 */}
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ fontSize: 18, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>
+                {novelProject?.title || '小说'}
+              </div>
+              <div style={{ fontSize: 14, color: 'var(--accent)' }}>
+                {language === 'zh' ? `第 ${novelChapterResult.chapterNo} 章` : `Chapter ${novelChapterResult.chapterNo}`}：{novelChapterResult.title}
               </div>
             </div>
+
+            {/* 正文内容 */}
             <div style={{
               background: 'var(--bg-tertiary)',
               borderRadius: 8,
-              padding: 12,
-              maxHeight: 500,
+              padding: 16,
+              marginBottom: 12,
+              fontSize: 14,
+              lineHeight: 1.9,
+              maxHeight: 600,
               overflow: 'auto',
-              fontSize: 13,
-              lineHeight: 1.8,
             }}>
-              <ReactMarkdown>{novelChapterResult}</ReactMarkdown>
+              <ReactMarkdown>{novelChapterResult.content}</ReactMarkdown>
             </div>
 
-            {/* 续写和润色按钮 */}
-            <div style={{ marginTop: 12 }}>
-              <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
-                <Wand2 size={14} style={{ color: 'var(--accent)' }} />
-                {language === 'zh' ? '继续创作' : 'Continue Writing'}
+            {/* 复制按钮 */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+              <button
+                onClick={() => navigator.clipboard.writeText(novelChapterResult.content)}
+                style={{ background: 'transparent', border: 'none', color: 'var(--accent)', fontSize: 12 }}
+              >
+                {language === 'zh' ? '复制正文' : 'Copy'}
+              </button>
+            </div>
+
+            {/* 续写设置区 */}
+            <div style={{ marginBottom: 12, padding: 12, background: 'var(--bg-tertiary)', borderRadius: 8 }}>
+              <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 8 }}>
+                {language === 'zh' ? '下一章你想看什么？（可不填，AI 自动续写）' : 'What do you want next? (Optional)'}
               </div>
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
+              <textarea
+                value={nextChapterIdea}
+                onChange={(e) => setNextChapterIdea(e.target.value)}
+                placeholder={language === 'zh' ? '例如：让他们误会加深 / 写甜一点 / 让反派出现' : 'e.g., More misunderstandings / Sweeter / Introduce villain'}
+                rows={2}
+                style={{
+                  width: '100%',
+                  padding: 8,
+                  background: 'var(--bg-primary)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 6,
+                  color: 'var(--text-primary)',
+                  fontSize: 12,
+                  resize: 'vertical',
+                }}
+              />
+              <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
                 <button
-                  onClick={handleContinueChapter}
+                  onClick={handleContinueNextChapter}
+                  disabled={fastLoading}
+                  className="btn-primary"
+                  style={{ padding: '8px 12px', fontSize: 12 }}
+                >
+                  {fastLoading ? <RefreshCw size={12} className="spin" /> : <Sparkles size={12} />}
+                  {language === 'zh' ? '智能续写下一章' : 'Continue'}
+                </button>
+                <button
+                  onClick={handleGenerateNextOutline}
                   disabled={fastLoading}
                   style={{
-                    padding: '6px 12px',
-                    background: 'var(--accent)',
-                    border: 'none',
+                    padding: '8px 12px',
+                    background: 'var(--bg-primary)',
+                    border: '1px solid var(--border)',
                     borderRadius: 6,
-                    color: 'white',
+                    color: 'var(--text-secondary)',
                     fontSize: 12,
                   }}
                 >
-                  {language === 'zh' ? '续写下一章' : 'Continue'}
+                  {language === 'zh' ? '先生成大纲' : 'Outline First'}
                 </button>
+              </div>
+            </div>
+
+            {/* 下一章大纲 */}
+            {nextChapterOutline && (
+              <div style={{ marginBottom: 12, padding: 12, background: 'var(--bg-tertiary)', borderRadius: 8 }}>
+                <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 8 }}>
+                  {language === 'zh' ? '下一章大纲（可编辑）' : 'Next Chapter Outline (Editable)'}
+                </div>
+                <textarea
+                  value={nextChapterOutline}
+                  onChange={(e) => setNextChapterOutline(e.target.value)}
+                  rows={6}
+                  style={{
+                    width: '100%',
+                    padding: 8,
+                    background: 'var(--bg-primary)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 6,
+                    color: 'var(--text-primary)',
+                    fontSize: 12,
+                    resize: 'vertical',
+                  }}
+                />
+                <button
+                  onClick={handleWriteFromNextOutline}
+                  disabled={fastLoading}
+                  className="btn-primary"
+                  style={{ marginTop: 8, padding: '8px 12px', fontSize: 12 }}
+                >
+                  {language === 'zh' ? '根据大纲写正文' : 'Write from Outline'}
+                </button>
+              </div>
+            )}
+
+            {/* 快速修改区 */}
+            <div style={{ marginBottom: 12, padding: 12, background: 'var(--bg-tertiary)', borderRadius: 8 }}>
+              <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 8 }}>
+                ⚡ {language === 'zh' ? '快速定制' : 'Quick Customization'}
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+                <input
+                  type="text"
+                  value={quickHeroName}
+                  onChange={(e) => setQuickHeroName(e.target.value)}
+                  placeholder={language === 'zh' ? '主角名字' : 'Hero Name'}
+                  style={{ padding: '6px 8px', background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 12 }}
+                />
+                <input
+                  type="text"
+                  value={quickLoveInterestName}
+                  onChange={(e) => setQuickLoveInterestName(e.target.value)}
+                  placeholder={language === 'zh' ? '另一位主角' : 'Love Interest'}
+                  style={{ padding: '6px 8px', background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 12 }}
+                />
+                <input
+                  type="text"
+                  value={quickTone}
+                  onChange={(e) => setQuickTone(e.target.value)}
+                  placeholder={language === 'zh' ? '风格：甜/虐/爽/治愈' : 'Tone'}
+                  style={{ padding: '6px 8px', background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 12 }}
+                />
+                <input
+                  type="text"
+                  value={quickRelationship}
+                  onChange={(e) => setQuickRelationship(e.target.value)}
+                  placeholder={language === 'zh' ? '关系：暗恋/冤家/救赎' : 'Relationship'}
+                  style={{ padding: '6px 8px', background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 12 }}
+                />
+              </div>
+              <button
+                onClick={handleApplyQuickEdit}
+                disabled={fastLoading || (!quickHeroName && !quickLoveInterestName && !quickTone && !quickRelationship && !quickEnding)}
+                style={{
+                  width: '100%',
+                  padding: '8px 12px',
+                  background: 'var(--accent)',
+                  border: 'none',
+                  borderRadius: 6,
+                  color: 'white',
+                  fontSize: 12,
+                  opacity: (quickHeroName || quickLoveInterestName || quickTone || quickRelationship || quickEnding) ? 1 : 0.5,
+                }}
+              >
+                {language === 'zh' ? '应用修改并重写当前章' : 'Apply Changes'}
+              </button>
+            </div>
+
+            {/* 批量生成章节队列 */}
+            <div style={{ marginBottom: 12, padding: 12, background: 'var(--bg-tertiary)', borderRadius: 8 }}>
+              <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 8 }}>
+                📚 {language === 'zh' ? '批量生成后续章节' : 'Batch Generate'}
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8 }}>
+                {language === 'zh' ? 'AI 会按章节规划顺序生成，自动参考前文避免剧情断裂。' : 'AI generates in order, referencing previous chapters.'}
+              </div>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
+                <select
+                  value={batchChapterCount}
+                  onChange={(e) => setBatchChapterCount(Number(e.target.value))}
+                  style={{ padding: '6px 8px', background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 12 }}
+                >
+                  <option value={3}>{language === 'zh' ? '后续 3 章' : 'Next 3'}</option>
+                  <option value={5}>{language === 'zh' ? '后续 5 章' : 'Next 5'}</option>
+                  <option value={10}>{language === 'zh' ? '后续 10 章' : 'Next 10'}</option>
+                </select>
+                <input
+                  type="text"
+                  value={batchChapterIdea}
+                  onChange={(e) => setBatchChapterIdea(e.target.value)}
+                  placeholder={language === 'zh' ? '这一批想看什么？（可选）' : 'Batch idea (optional)'}
+                  style={{ flex: 1, padding: '6px 8px', background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 12 }}
+                />
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  onClick={handleCreateNovelChapterQueue}
+                  style={{
+                    padding: '8px 12px',
+                    background: 'var(--bg-primary)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 6,
+                    color: 'var(--text-secondary)',
+                    fontSize: 12,
+                  }}
+                >
+                  {language === 'zh' ? '生成队列' : 'Create Queue'}
+                </button>
+                {novelChapterQueue.length > 0 && (
+                  <button
+                    onClick={handleRunNovelChapterQueue}
+                    disabled={isNovelQueueRunning}
+                    className="btn-primary"
+                    style={{ padding: '8px 12px', fontSize: 12 }}
+                  >
+                    {isNovelQueueRunning ? <RefreshCw size={12} className="spin" /> : null}
+                    {language === 'zh' ? '开始批量生成' : 'Run Queue'}
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* 章节队列显示 */}
+            {novelChapterQueue.length > 0 && (
+              <div style={{ marginBottom: 12, padding: 12, background: 'var(--bg-tertiary)', borderRadius: 8 }}>
+                <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 8 }}>
+                  {language === 'zh' ? `章节队列 (${novelChapterQueue.length})` : `Queue (${novelChapterQueue.length})`}
+                </div>
+                {novelChapterQueue.map((item) => (
+                  <div key={item.id} style={{
+                    padding: 8,
+                    background: 'var(--bg-primary)',
+                    borderRadius: 6,
+                    marginBottom: 6,
+                    border: item.status === 'failed' ? '1px solid var(--danger)' : '1px solid var(--border)',
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                      <span style={{ fontSize: 11, fontWeight: 500 }}>
+                        {language === 'zh' ? `第 ${item.chapterNo} 章` : `Ch. ${item.chapterNo}`}：{item.title}
+                      </span>
+                      <span style={{
+                        fontSize: 10,
+                        color: item.status === 'done' ? 'var(--accent)' : item.status === 'failed' ? 'var(--danger)' : 'var(--text-muted)',
+                      }}>
+                        {item.status === 'pending' ? (language === 'zh' ? '待执行' : 'Pending') :
+                         item.status === 'running' ? (language === 'zh' ? '执行中' : 'Running') :
+                         item.status === 'done' ? (language === 'zh' ? '已完成' : 'Done') :
+                         (language === 'zh' ? '失败' : 'Failed')}
+                      </span>
+                    </div>
+                    {item.status === 'failed' && item.error && (
+                      <div style={{ fontSize: 10, color: 'var(--danger)', marginBottom: 4 }}>{item.error}</div>
+                    )}
+                    <div style={{ display: 'flex', gap: 4 }}>
+                      {item.status === 'failed' && (
+                        <button
+                          onClick={() => handleRetryNovelQueueItem(item.id)}
+                          style={{ padding: '2px 6px', background: 'var(--accent)', border: 'none', borderRadius: 4, color: 'white', fontSize: 10 }}
+                        >
+                          {language === 'zh' ? '重试' : 'Retry'}
+                        </button>
+                      )}
+                      <button
+                        onClick={() => handleRemoveNovelQueueItem(item.id)}
+                        style={{ padding: '2px 6px', background: 'transparent', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-muted)', fontSize: 10 }}
+                      >
+                        <X size={10} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* 正文优化按钮 */}
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Wand2 size={14} style={{ color: 'var(--accent)' }} />
+                {language === 'zh' ? '正文优化' : 'Optimize'}
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(80px, 1fr))', gap: 6 }}>
                 {(Object.keys(NOVEL_REWRITE_NAMES) as NovelRewriteType[]).slice(0, 6).map((rewriteType) => (
@@ -1733,7 +2243,7 @@ export default function SuperWritingTab() {
         )}
 
         {/* 小说企划解析失败时的原始文本显示 */}
-        {creationMode === 'novel' && novelPlanRawText && !novelProject && (
+        {creationMode === 'novel' && novelRawText && !novelProject && (
           <div style={{
             padding: 16,
             background: 'var(--bg-secondary)',
@@ -1745,7 +2255,7 @@ export default function SuperWritingTab() {
                 {language === 'zh' ? '生成结果（原始文本）' : 'Result (Raw Text)'}
               </span>
               <button
-                onClick={() => navigator.clipboard.writeText(novelPlanRawText)}
+                onClick={() => navigator.clipboard.writeText(novelRawText)}
                 style={{ background: 'transparent', border: 'none', color: 'var(--accent)', fontSize: 12 }}
               >
                 {language === 'zh' ? '复制' : 'Copy'}
@@ -1760,7 +2270,7 @@ export default function SuperWritingTab() {
               fontSize: 13,
               lineHeight: 1.8,
             }}>
-              <ReactMarkdown>{novelPlanRawText}</ReactMarkdown>
+              <ReactMarkdown>{novelRawText}</ReactMarkdown>
             </div>
           </div>
         )}
