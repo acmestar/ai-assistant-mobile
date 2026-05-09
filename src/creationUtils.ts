@@ -1,5 +1,5 @@
 // 创作中心工具函数
-import { CreationMode, NovelTaskType, NovelRewriteType } from './store';
+import { CreationMode, NovelTaskType, NovelRewriteType, NovelProject } from './store';
 
 // ============ Prompt 构建函数 ============
 
@@ -827,4 +827,378 @@ ${rewriteInstructions[rewriteType]}
 2. 不要改变主要剧情和人物关系
 3. 保持原文的风格和视角
 4. 不要输出 JSON`;
+}
+
+// ============ 小说企划生成 Prompt ============
+
+/**
+ * 构建小说企划生成 Prompt（返回 JSON）
+ */
+export function buildNovelPlanningPrompt(options: {
+  requirement: string;
+  genre?: string;
+  style?: string;
+  chapterInfo?: string;
+}): string {
+  const { requirement, genre, style, chapterInfo } = options;
+
+  const genreHint = genre ? `\n用户指定题材：${genre}` : '';
+  const styleHint = style ? `\n用户指定风格：${style}` : '';
+  const lengthHint = chapterInfo ? `\n用户指定篇幅：${chapterInfo}` : '';
+
+  return `你是一个专业的小说策划编辑。请根据用户的一句话想法，自动生成完整的小说企划。
+
+用户想法：
+${requirement}
+${genreHint}${styleHint}${lengthHint}
+
+请输出 JSON 格式（不要输出 Markdown，不要解释，只输出纯 JSON）：
+
+{
+  "title": "小说名（吸引人的标题）",
+  "genre": "题材类型",
+  "style": "风格关键词",
+  "logline": "一句话简介（有吸引力，概括核心卖点）",
+  "sellingPoints": "核心卖点（2-3个）",
+  "targetReaders": "目标读者",
+  "lengthSuggestion": "篇幅建议（短篇/中篇/长篇/网文连载）",
+
+  "characters": [
+    {
+      "id": "char_1",
+      "name": "角色名",
+      "role": "主角/配角/反派",
+      "identity": "身份/职业",
+      "personality": "性格特点",
+      "desire": "核心欲望",
+      "weakness": "性格弱点",
+      "relationship": "与主角关系",
+      "arc": "人物成长弧光",
+      "locked": false
+    }
+  ],
+
+  "world": {
+    "background": "故事背景（时代、地点、社会环境）",
+    "keyScenes": "关键场景（3-5个主要场景）",
+    "rules": "世界规则（如有特殊设定）",
+    "forbiddenRules": "不可违背的规则（保持逻辑一致）"
+  },
+
+  "conflict": {
+    "external": "外部冲突（人与环境、人与社会）",
+    "internal": "内心冲突（人物内心矛盾）",
+    "relationship": "关系冲突（人物之间）",
+    "stages": "阶段性阻碍（3-5个关键阻碍）"
+  },
+
+  "outline": {
+    "beginning": "开端（故事如何开始）",
+    "development": "发展（矛盾如何升级）",
+    "twist": "转折（关键转折点）",
+    "climax": "高潮（冲突爆发）",
+    "ending": "结局（如何收尾）"
+  },
+
+  "chapters": [
+    {
+      "id": "chap_1",
+      "chapterNo": 1,
+      "title": "章节标题",
+      "goal": "本章目标",
+      "mainEvent": "主要事件",
+      "conflict": "冲突点",
+      "hook": "结尾钩子",
+      "locked": false
+    }
+  ],
+
+  "firstChapterAdvice": {
+    "openingScene": "开场场景（具体画面）",
+    "characters": "出场人物",
+    "mood": "情绪基调",
+    "conflictIntro": "冲突引入方式",
+    "endingHook": "结尾钩子设计"
+  },
+
+  "notes": "其他创作建议"
+}
+
+要求：
+1. 至少生成3个角色（主角、重要配角、反派或阻力来源）
+2. 章节规划5-12个
+3. 角色名字要符合题材风格
+4. 世界观要合理，现实题材不要强行加超自然设定
+5. 冲突要有层次，不要单一
+6. 只输出 JSON，不要其他文字`;
+}
+
+/**
+ * 解析小说企划 JSON（带容错）
+ */
+export function parseNovelPlanJSON(text: string): NovelProject | null {
+  try {
+    // 尝试直接解析
+    let jsonStr = text.trim();
+
+    // 如果被 ```json 包裹，提取内容
+    if (jsonStr.startsWith('```')) {
+      const match = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
+      if (match) {
+        jsonStr = match[1].trim();
+      }
+    }
+
+    // 尝试找到 JSON 对象的起始和结束
+    const startIndex = jsonStr.indexOf('{');
+    const lastIndex = jsonStr.lastIndexOf('}');
+    if (startIndex !== -1 && lastIndex !== -1) {
+      jsonStr = jsonStr.slice(startIndex, lastIndex + 1);
+    }
+
+    const parsed = JSON.parse(jsonStr);
+
+    // 验证必要字段
+    if (!parsed.title || !parsed.characters || !Array.isArray(parsed.characters)) {
+      console.warn('小说企划 JSON 缺少必要字段');
+      return null;
+    }
+
+    // 确保所有字段存在，填充默认值
+    const project: NovelProject = {
+      title: parsed.title || '',
+      genre: parsed.genre || '',
+      style: parsed.style || '',
+      logline: parsed.logline || '',
+      sellingPoints: parsed.sellingPoints || '',
+      targetReaders: parsed.targetReaders || '',
+      lengthSuggestion: parsed.lengthSuggestion || '',
+      characters: (parsed.characters || []).map((c: any, index: number) => ({
+        id: c.id || `char_${index + 1}`,
+        name: c.name || '',
+        role: c.role || '',
+        identity: c.identity || '',
+        personality: c.personality || '',
+        desire: c.desire || '',
+        weakness: c.weakness || '',
+        relationship: c.relationship || '',
+        arc: c.arc || '',
+        locked: c.locked || false,
+      })),
+      world: {
+        background: parsed.world?.background || '',
+        keyScenes: parsed.world?.keyScenes || '',
+        rules: parsed.world?.rules || '',
+        forbiddenRules: parsed.world?.forbiddenRules || '',
+      },
+      conflict: {
+        external: parsed.conflict?.external || '',
+        internal: parsed.conflict?.internal || '',
+        relationship: parsed.conflict?.relationship || '',
+        stages: parsed.conflict?.stages || '',
+      },
+      outline: {
+        beginning: parsed.outline?.beginning || '',
+        development: parsed.outline?.development || '',
+        twist: parsed.outline?.twist || '',
+        climax: parsed.outline?.climax || '',
+        ending: parsed.outline?.ending || '',
+      },
+      chapters: (parsed.chapters || []).map((ch: any, index: number) => ({
+        id: ch.id || `chap_${index + 1}`,
+        chapterNo: ch.chapterNo || index + 1,
+        title: ch.title || '',
+        goal: ch.goal || '',
+        mainEvent: ch.mainEvent || '',
+        conflict: ch.conflict || '',
+        hook: ch.hook || '',
+        locked: ch.locked || false,
+      })),
+      firstChapterAdvice: {
+        openingScene: parsed.firstChapterAdvice?.openingScene || '',
+        characters: parsed.firstChapterAdvice?.characters || '',
+        mood: parsed.firstChapterAdvice?.mood || '',
+        conflictIntro: parsed.firstChapterAdvice?.conflictIntro || '',
+        endingHook: parsed.firstChapterAdvice?.endingHook || '',
+      },
+      notes: parsed.notes || '',
+    };
+
+    return project;
+  } catch (e) {
+    console.error('解析小说企划 JSON 失败:', e);
+    return null;
+  }
+}
+
+/**
+ * 构建生成第一章的 Prompt
+ */
+export function buildNovelFirstChapterPrompt(options: {
+  requirement: string;
+  novelProject: NovelProject;
+  chapterIndex?: number;
+}): string {
+  const { novelProject, chapterIndex = 0 } = options;
+
+  // 获取第一章的规划
+  const chapter = novelProject.chapters[chapterIndex] || novelProject.chapters[0];
+
+  // 构建角色信息
+  const charactersInfo = novelProject.characters
+    .map(c => `- ${c.name}（${c.role}）：${c.identity}，性格${c.personality}`)
+    .join('\n');
+
+  // 构建锁定角色信息
+  const lockedCharacters = novelProject.characters.filter(c => c.locked);
+  const lockedInfo = lockedCharacters.length > 0
+    ? `\n【用户已锁定的角色，必须严格遵守】：\n${lockedCharacters.map(c => `- ${c.name}：${c.identity}，性格${c.personality}，弱点${c.weakness}`).join('\n')}`
+    : '';
+
+  return `你是一个专业的小说作家。请根据以下小说企划，创作第一章正文。
+
+=== 小说企划 ===
+
+【基础信息】
+小说名：${novelProject.title}
+题材：${novelProject.genre}
+风格：${novelProject.style}
+一句话简介：${novelProject.logline}
+
+【角色设定】
+${charactersInfo}
+${lockedInfo}
+
+【世界观/背景】
+${novelProject.world.background}
+关键场景：${novelProject.world.keyScenes}
+${novelProject.world.rules ? `世界规则：${novelProject.world.rules}` : ''}
+
+【主线冲突】
+外部冲突：${novelProject.conflict.external}
+内心冲突：${novelProject.conflict.internal}
+
+【故事大纲】
+开端：${novelProject.outline.beginning}
+
+【第一章规划】
+章节标题：${chapter?.title || '第一章'}
+本章目标：${chapter?.goal || '建立主角处境和故事基调'}
+主要事件：${chapter?.mainEvent || ''}
+冲突点：${chapter?.conflict || ''}
+结尾钩子：${chapter?.hook || ''}
+
+【第一章写作建议】
+开场场景：${novelProject.firstChapterAdvice.openingScene}
+出场人物：${novelProject.firstChapterAdvice.characters}
+情绪基调：${novelProject.firstChapterAdvice.mood}
+冲突引入：${novelProject.firstChapterAdvice.conflictIntro}
+结尾钩子：${novelProject.firstChapterAdvice.endingHook}
+
+=== 写作要求 ===
+
+1. 正文要有小说感，不要像大纲或总结
+2. 多写具体场景、动作、对白、心理描写
+3. 避免空泛的概括，让读者"看到"而非"被告知"
+4. 对白要符合人物性格，口语化自然
+5. 适当使用环境描写烘托氛围
+6. 节奏张弛有度，有紧张也有舒缓
+7. 章末要有钩子，吸引读者继续阅读
+8. 人物名字、性格、世界观必须严格遵守企划设定
+9. ${lockedCharacters.length > 0 ? '锁定的角色信息绝对不能更改' : ''}
+
+请输出以下内容（用 Markdown 格式）：
+
+## 章节标题
+
+## 正文
+（直接写正文，不要解释，不要分段说明，字数 2000-4000 字）
+
+---
+
+## 本章摘要
+（100字以内概括本章内容）
+
+## 人物状态变化
+（本章结束后，主要人物的状态有什么变化）
+
+## 新增设定
+（本章新增的世界观或人物设定，如有）
+
+## 伏笔/线索
+（本章埋设的伏笔，如有）
+
+## 下一章建议
+（下一章可以写什么）`;
+}
+
+/**
+ * 构建续写 Prompt
+ */
+export function buildNovelContinuePrompt(options: {
+  novelProject: NovelProject;
+  previousChapter: string;
+  chapterIndex: number;
+}): string {
+  const { novelProject, previousChapter, chapterIndex } = options;
+
+  const chapter = novelProject.chapters[chapterIndex];
+  const chapterTitle = chapter?.title || `第${chapterIndex + 1}章`;
+
+  // 构建锁定角色信息
+  const lockedCharacters = novelProject.characters.filter(c => c.locked);
+  const lockedInfo = lockedCharacters.length > 0
+    ? `\n【用户已锁定的角色，必须严格遵守】：\n${lockedCharacters.map(c => `- ${c.name}：${c.identity}，性格${c.personality}`).join('\n')}`
+    : '';
+
+  return `你是一个专业的小说作家。请根据小说企划和上一章内容，续写下一章。
+
+=== 小说企划 ===
+
+小说名：${novelProject.title}
+题材：${novelProject.genre}
+风格：${novelProject.style}
+
+【角色设定】
+${novelProject.characters.map(c => `- ${c.name}（${c.role}）：${c.identity}，性格${c.personality}`).join('\n')}
+${lockedInfo}
+
+【世界观/背景】
+${novelProject.world.background}
+
+=== 上一章内容 ===
+
+${previousChapter.slice(-3000)} ${previousChapter.length > 3000 ? '...(前文已省略)' : ''}
+
+=== 本章规划 ===
+
+章节标题：${chapterTitle}
+本章目标：${chapter?.goal || ''}
+主要事件：${chapter?.mainEvent || ''}
+冲突点：${chapter?.conflict || ''}
+结尾钩子：${chapter?.hook || ''}
+
+=== 续写要求 ===
+
+1. 严格延续上一章的风格、视角、节奏
+2. 保持人物性格一致，不要突然改变
+3. 人物名字必须使用企划中的名字
+4. 不要突然跳剧情，要自然过渡
+5. 多写具体场景和对白，有画面感
+6. 章末留有悬念或钩子
+7. 字数 2000-4000 字
+
+请直接输出续写的正文内容（不要解释，用 Markdown 格式）：
+
+## ${chapterTitle}
+
+（正文内容）
+
+---
+
+## 本章摘要
+（100字以内概括本章内容）
+
+## 下一章建议
+（下一章可以写什么）`;
 }

@@ -61,6 +61,120 @@ export const NOVEL_REWRITE_NAMES: Record<NovelRewriteType, { zh: string; en: str
   reduce_ai_taste: { zh: '减少AI味', en: 'Reduce AI Taste' },
 };
 
+// ============ 小说企划数据结构 ============
+
+export interface NovelCharacter {
+  id: string;
+  name: string;
+  role: string;        // 主角/配角/反派
+  identity: string;    // 身份/职业
+  personality: string; // 性格
+  desire: string;     // 欲望
+  weakness: string;   // 弱点
+  relationship: string; // 与主角关系
+  arc: string;        // 人物成长弧光
+  locked?: boolean;    // 是否锁定
+}
+
+export interface NovelChapterPlan {
+  id: string;
+  chapterNo: number;
+  title: string;
+  goal: string;       // 本章目标
+  mainEvent: string;  // 主要事件
+  conflict: string;   // 冲突点
+  hook: string;       // 结尾钩子
+  locked?: boolean;
+}
+
+export interface NovelProject {
+  title: string;
+  genre: string;
+  style: string;
+  logline: string;          // 一句话简介
+  sellingPoints: string;    // 核心卖点
+  targetReaders?: string;   // 目标读者
+  lengthSuggestion?: string; // 篇幅建议
+
+  characters: NovelCharacter[];
+
+  world: {
+    background: string;     // 故事背景
+    keyScenes: string;      // 关键场景
+    rules: string;          // 世界规则
+    forbiddenRules: string; // 不可违背规则
+  };
+
+  conflict: {
+    external: string;       // 外部冲突
+    internal: string;       // 内心冲突
+    relationship: string;   // 关系冲突
+    stages: string;         // 阶段性阻碍
+  };
+
+  outline: {
+    beginning: string;      // 开端
+    development: string;    // 发展
+    twist: string;          // 转折
+    climax: string;         // 高潮
+    ending: string;         // 结局
+  };
+
+  chapters: NovelChapterPlan[];
+
+  firstChapterAdvice: {
+    openingScene: string;   // 开场场景
+    characters: string;     // 出场人物
+    mood: string;           // 情绪基调
+    conflictIntro: string;  // 冲突引入
+    endingHook: string;     // 结尾钩子
+  };
+
+  notes?: string;
+}
+
+// 创建空的小说企划
+export function createEmptyNovelProject(): NovelProject {
+  return {
+    title: '',
+    genre: '',
+    style: '',
+    logline: '',
+    sellingPoints: '',
+    targetReaders: '',
+    lengthSuggestion: '',
+    characters: [],
+    world: {
+      background: '',
+      keyScenes: '',
+      rules: '',
+      forbiddenRules: '',
+    },
+    conflict: {
+      external: '',
+      internal: '',
+      relationship: '',
+      stages: '',
+    },
+    outline: {
+      beginning: '',
+      development: '',
+      twist: '',
+      climax: '',
+      ending: '',
+    },
+    chapters: [],
+    firstChapterAdvice: {
+      openingScene: '',
+      characters: '',
+      mood: '',
+      conflictIntro: '',
+      endingHook: '',
+    },
+    notes: '',
+  };
+}
+
 // 创作类型显示名称
 export const CREATION_MODE_NAMES: Record<CreationMode, { zh: string; en: string }> = {
   novel: { zh: '小说', en: 'Novel' },

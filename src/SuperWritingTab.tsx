@@ -15,13 +15,21 @@ import {
   Download,
   BookOpen,
   Wand2,
+  Lock,
+  Unlock,
+  Plus,
+  X,
+  Edit3,
 } from 'lucide-react';
-import { useAppStore, CHAT_MODELS, NovelTaskType, NovelRewriteType, NOVEL_TASK_TYPE_NAMES, NOVEL_REWRITE_NAMES } from './store';
+import { useAppStore, CHAT_MODELS, NovelRewriteType, NOVEL_REWRITE_NAMES, NovelProject, NovelCharacter, NovelChapterPlan } from './store';
 import { executeModelQueue, regenerateQueueItem, callChatCompletionRaw } from './api';
 import {
   buildCreationPrompt,
-  buildNovelPrompt,
   buildNovelRewritePrompt,
+  buildNovelPlanningPrompt,
+  parseNovelPlanJSON,
+  buildNovelFirstChapterPrompt,
+  buildNovelContinuePrompt,
   convertParsedCreationToQueue,
   getExportTitle,
   getItemName,
@@ -98,8 +106,13 @@ export default function SuperWritingTab() {
   // 生成模式：快速生成（一次API）或分步创作（大纲+队列）
   const [generationMode, setGenerationMode] = useState<'fast' | 'structured'>('fast');
 
-  // 小说子模式状态
-  const [novelTaskType, setNovelTaskType] = useState<NovelTaskType>('chapter_draft');
+  // 小说企划状态
+  const [novelProject, setNovelProject] = useState<NovelProject | null>(null);
+  const [novelPlanRawText, setNovelPlanRawText] = useState('');
+  const [novelChapterResult, setNovelChapterResult] = useState('');
+  const [novelCurrentChapterIndex, setNovelCurrentChapterIndex] = useState(0);
+
+  // 小说额外设置
   const [novelGenre, setNovelGenre] = useState<string>('');
   const [novelStyle, setNovelStyle] = useState<string>('');
   const [novelChapterInfo, setNovelChapterInfo] = useState<string>('');
@@ -111,6 +124,9 @@ export default function SuperWritingTab() {
 
   // 小说改写状态
   const [rewriteLoading, setRewriteLoading] = useState(false);
+
+  // 可编辑区块展开状态
+  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['basic', 'characters']));
 
   // 获取实际使用的模型ID（优先使用创作台默认模型，否则使用全局模型）
   const effectiveModelId = selectedWritingModelId || chatModelId;
@@ -302,8 +318,9 @@ export default function SuperWritingTab() {
       // 根据创作类型构建 prompt
       let prompt: string;
       if (creationMode === 'novel') {
-        // 小说模式使用专用 prompt
-        prompt = buildNovelPrompt(novelTaskType, outlineText, {
+        // 小说模式：生成完整企划（返回 JSON）
+        prompt = buildNovelPlanningPrompt({
+          requirement: outlineText,
           genre: novelGenre,
           style: novelStyle,
           chapterInfo: novelChapterInfo,
@@ -320,7 +337,6 @@ export default function SuperWritingTab() {
       // 日志输出，便于调试
       console.log('[FastGenerate]', {
         creationMode,
-        novelTaskType,
         selectedWritingModelId,
         chatModelId,
         effectiveModelId,
@@ -336,7 +352,20 @@ export default function SuperWritingTab() {
         },
       });
 
-      setFastResult(result);
+      // 小说模式：尝试解析 JSON
+      if (creationMode === 'novel') {
+        const parsed = parseNovelPlanJSON(result);
+        if (parsed) {
+          setNovelProject(parsed);
+          setNovelPlanRawText(result);
+        } else {
+          // 解析失败，保留原始文本
+          setNovelProject(null);
+          setNovelPlanRawText(result);
+        }
+      } else {
+        setFastResult(result);
+      }
     } catch (error: any) {
       console.error('[FastGenerateError]', error);
       // 提取更详细的错误信息
@@ -351,6 +380,189 @@ export default function SuperWritingTab() {
     } finally {
       setFastLoading(false);
     }
+  };
+
+  // 生成第一章
+  const handleGenerateFirstChapter = async () => {
+    if (!novelProject || !apiKey) return;
+
+    setFastLoading(true);
+    setFastError(null);
+
+    try {
+      const prompt = buildNovelFirstChapterPrompt({
+        requirement: outlineText,
+        novelProject,
+        chapterIndex: 0,
+      });
+
+      const result = await callChatCompletionRaw(prompt, {
+        modelId: effectiveModelId,
+        onChunk: (chunk) => {
+          setNovelChapterResult(prev => prev + chunk);
+        },
+      });
+
+      setNovelChapterResult(result);
+      setNovelCurrentChapterIndex(1);
+    } catch (error: any) {
+      console.error('[GenerateFirstChapterError]', error);
+      setFastError(error.message || '生成失败');
+    } finally {
+      setFastLoading(false);
+    }
+  };
+
+  // 续写下一章
+  const handleContinueChapter = async () => {
+    if (!novelProject || !novelChapterResult || !apiKey) return;
+
+    setFastLoading(true);
+    setFastError(null);
+
+    try {
+      const prompt = buildNovelContinuePrompt({
+        novelProject,
+        previousChapter: novelChapterResult,
+        chapterIndex: novelCurrentChapterIndex,
+      });
+
+      const result = await callChatCompletionRaw(prompt, {
+        modelId: effectiveModelId,
+        onChunk: (chunk) => {
+          setNovelChapterResult(prev => prev + chunk);
+        },
+      });
+
+      setNovelChapterResult(result);
+      setNovelCurrentChapterIndex(prev => prev + 1);
+    } catch (error: any) {
+      console.error('[ContinueChapterError]', error);
+      setFastError(error.message || '续写失败');
+    } finally {
+      setFastLoading(false);
+    }
+  };
+
+  // 更新小说企划字段
+  const updateNovelProjectField = (path: string, value: string) => {
+    if (!novelProject) return;
+    const keys = path.split('.');
+    setNovelProject(prev => {
+      if (!prev) return prev;
+      const newObj = { ...prev };
+      let current: any = newObj;
+      for (let i = 0; i < keys.length - 1; i++) {
+        current[keys[i]] = { ...current[keys[i]] };
+        current = current[keys[i]];
+      }
+      current[keys[keys.length - 1]] = value;
+      return newObj;
+    });
+  };
+
+  // 更新角色
+  const updateNovelCharacter = (id: string, field: keyof NovelCharacter, value: string | boolean) => {
+    if (!novelProject) return;
+    setNovelProject(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        characters: prev.characters.map(c =>
+          c.id === id ? { ...c, [field]: value } : c
+        ),
+      };
+    });
+  };
+
+  // 添加角色
+  const addNovelCharacter = () => {
+    if (!novelProject) return;
+    const newChar: NovelCharacter = {
+      id: `char_${Date.now()}`,
+      name: '',
+      role: '配角',
+      identity: '',
+      personality: '',
+      desire: '',
+      weakness: '',
+      relationship: '',
+      arc: '',
+      locked: false,
+    };
+    setNovelProject(prev => {
+      if (!prev) return prev;
+      return { ...prev, characters: [...prev.characters, newChar] };
+    });
+  };
+
+  // 删除角色
+  const removeNovelCharacter = (id: string) => {
+    if (!novelProject) return;
+    setNovelProject(prev => {
+      if (!prev) return prev;
+      return { ...prev, characters: prev.characters.filter(c => c.id !== id) };
+    });
+  };
+
+  // 更新章节
+  const updateNovelChapter = (id: string, field: keyof NovelChapterPlan, value: string | boolean | number) => {
+    if (!novelProject) return;
+    setNovelProject(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        chapters: prev.chapters.map(c =>
+          c.id === id ? { ...c, [field]: value } : c
+        ),
+      };
+    });
+  };
+
+  // 添加章节
+  const addNovelChapter = () => {
+    if (!novelProject) return;
+    const newChapter: NovelChapterPlan = {
+      id: `chap_${Date.now()}`,
+      chapterNo: novelProject.chapters.length + 1,
+      title: '',
+      goal: '',
+      mainEvent: '',
+      conflict: '',
+      hook: '',
+      locked: false,
+    };
+    setNovelProject(prev => {
+      if (!prev) return prev;
+      return { ...prev, chapters: [...prev.chapters, newChapter] };
+    });
+  };
+
+  // 删除章节
+  const removeNovelChapter = (id: string) => {
+    if (!novelProject) return;
+    setNovelProject(prev => {
+      if (!prev) return prev;
+      const newChapters = prev.chapters.filter(c => c.id !== id);
+      // 重新编号
+      return {
+        ...prev,
+        chapters: newChapters.map((c, i) => ({ ...c, chapterNo: i + 1 })),
+      };
+    });
+  };
+
+  // 切换区块展开
+  const toggleSection = (section: string) => {
+    setExpandedSections(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(section)) {
+        newSet.delete(section);
+      } else {
+        newSet.add(section);
+      }
+      return newSet;
+    });
   };
 
   // 单项重生成
@@ -388,17 +600,23 @@ export default function SuperWritingTab() {
     }
   };
 
-  // 小说改写处理
+  // 小说改写处理 - 基于章节正文
   const handleNovelRewrite = async (rewriteType: NovelRewriteType) => {
-    if (!fastResult.trim() || !apiKey) return;
+    const textToRewrite = novelChapterResult || fastResult;
+    if (!textToRewrite.trim() || !apiKey) return;
 
     setRewriteLoading(true);
     try {
-      const prompt = buildNovelRewritePrompt(rewriteType, fastResult);
+      const prompt = buildNovelRewritePrompt(rewriteType, textToRewrite);
       const result = await callChatCompletionRaw(prompt, {
         modelId: effectiveModelId,
       });
-      setFastResult(result);
+      // 优先更新章节正文
+      if (novelChapterResult) {
+        setNovelChapterResult(result);
+      } else {
+        setFastResult(result);
+      }
     } catch (error: any) {
       console.error('改写失败:', error);
       setFastError(error.message || '改写失败');
@@ -768,57 +986,34 @@ export default function SuperWritingTab() {
               </span>
             </div>
 
-            {/* 小说子模式选择器 - 仅在小说模式下显示 */}
+            {/* 小说模式特殊说明 - 仅在小说模式下显示 */}
             {creationMode === 'novel' && (
               <div style={{ marginBottom: 12, padding: 12, background: 'var(--bg-tertiary)', borderRadius: 8 }}>
                 <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
                   <BookOpen size={14} style={{ color: 'var(--accent)' }} />
-                  {language === 'zh' ? '小说子模式' : 'Novel Task Type'}
+                  {language === 'zh' ? '小说创作' : 'Novel Writing'}
                 </div>
-                <div style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(80px, 1fr))',
-                  gap: 6,
-                }}>
-                  {(Object.keys(NOVEL_TASK_TYPE_NAMES) as NovelTaskType[]).map((taskType) => (
-                    <button
-                      key={taskType}
-                      onClick={() => setNovelTaskType(taskType)}
-                      style={{
-                        padding: '8px 6px',
-                        background: novelTaskType === taskType ? 'var(--accent)' : 'var(--bg-secondary)',
-                        border: novelTaskType === taskType ? '1px solid var(--accent)' : '1px solid var(--border)',
-                        borderRadius: 6,
-                        color: novelTaskType === taskType ? 'white' : 'var(--text-secondary)',
-                        fontSize: 11,
-                        textAlign: 'center',
-                        cursor: 'pointer',
-                        minWidth: 0,
-                        maxWidth: '100%',
-                        boxSizing: 'border-box',
-                        overflowWrap: 'anywhere',
-                        wordBreak: 'break-word',
-                      }}
-                      title={language === 'zh' ? NOVEL_TASK_TYPE_NAMES[taskType].descZh : NOVEL_TASK_TYPE_NAMES[taskType].descEn}
-                    >
-                      {language === 'zh' ? NOVEL_TASK_TYPE_NAMES[taskType].zh : NOVEL_TASK_TYPE_NAMES[taskType].en}
-                    </button>
-                  ))}
+                <div style={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+                  {language === 'zh'
+                    ? '输入一个小说想法，AI 会自动帮你分析题材、角色、世界观、大纲和章节规划。'
+                    : 'Enter a novel idea, AI will automatically analyze genre, characters, world, outline and chapter planning.'}
                 </div>
-                <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 6 }}>
-                  {language === 'zh' ? NOVEL_TASK_TYPE_NAMES[novelTaskType].descZh : NOVEL_TASK_TYPE_NAMES[novelTaskType].descEn}
+                <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 8 }}>
+                  {language === 'zh'
+                    ? '示例：地铁上相爱 / 失眠的心理医生接到来自自己的电话 / 末世里两个敌对阵营的人互相救赎'
+                    : 'Examples: Love on subway / Sleepless therapist receives call from self / Enemies redeem each other in apocalypse'}
                 </div>
               </div>
             )}
 
-            {/* 小说额外字段 - 仅在小说模式下显示 */}
+            {/* 小说可选设置 - 仅在小说模式下显示 */}
             {creationMode === 'novel' && (
               <div style={{ marginBottom: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                 <input
                   type="text"
                   value={novelGenre}
                   onChange={(e) => setNovelGenre(e.target.value)}
-                  placeholder={language === 'zh' ? '题材：玄幻、都市、悬疑...' : 'Genre: Fantasy, Urban, Mystery...'}
+                  placeholder={language === 'zh' ? '题材：都市 / 玄幻 / 悬疑 / 言情' : 'Genre: Urban / Fantasy / Mystery'}
                   style={{
                     flex: 1,
                     minWidth: 100,
@@ -834,7 +1029,7 @@ export default function SuperWritingTab() {
                   type="text"
                   value={novelStyle}
                   onChange={(e) => setNovelStyle(e.target.value)}
-                  placeholder={language === 'zh' ? '风格：爽文、热血、细腻...' : 'Style: Cool, Passionate, Delicate...'}
+                  placeholder={language === 'zh' ? '风格：治愈 / 爽文 / 细腻 / 暗黑' : 'Style: Healing / Cool / Delicate'}
                   style={{
                     flex: 1,
                     minWidth: 100,
@@ -850,7 +1045,7 @@ export default function SuperWritingTab() {
                   type="text"
                   value={novelChapterInfo}
                   onChange={(e) => setNovelChapterInfo(e.target.value)}
-                  placeholder={language === 'zh' ? '章节/字数：第3章，3000字' : 'Chapter: Ch.3, 3000 words'}
+                  placeholder={language === 'zh' ? '篇幅：短篇 / 中篇 / 长篇' : 'Length: Short / Medium / Long'}
                   style={{
                     flex: 1,
                     minWidth: 100,
@@ -865,50 +1060,52 @@ export default function SuperWritingTab() {
               </div>
             )}
 
-            {/* 生成模式选择 */}
-            <div style={{ marginBottom: 12, padding: 10, background: 'var(--bg-tertiary)', borderRadius: 8 }}>
-              <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 8 }}>
-                {language === 'zh' ? '生成模式' : 'Generation Mode'}
+            {/* 非小说模式的生成模式选择 */}
+            {creationMode !== 'novel' && (
+              <div style={{ marginBottom: 12, padding: 10, background: 'var(--bg-tertiary)', borderRadius: 8 }}>
+                <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 8 }}>
+                  {language === 'zh' ? '生成模式' : 'Generation Mode'}
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button
+                    onClick={() => setGenerationMode('fast')}
+                    style={{
+                      flex: 1,
+                      padding: '8px 12px',
+                      background: generationMode === 'fast' ? 'var(--accent)' : 'var(--bg-secondary)',
+                      border: generationMode === 'fast' ? '1px solid var(--accent)' : '1px solid var(--border)',
+                      borderRadius: 8,
+                      color: generationMode === 'fast' ? 'white' : 'var(--text-secondary)',
+                      fontSize: 12,
+                      textAlign: 'center',
+                    }}
+                  >
+                    <div style={{ fontWeight: 600 }}>⚡ {language === 'zh' ? '快速生成' : 'Fast'}</div>
+                    <div style={{ fontSize: 10, opacity: 0.8, marginTop: 2 }}>
+                      {language === 'zh' ? '1次请求完成' : '1 API call'}
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => setGenerationMode('structured')}
+                    style={{
+                      flex: 1,
+                      padding: '8px 12px',
+                      background: generationMode === 'structured' ? 'var(--accent)' : 'var(--bg-secondary)',
+                      border: generationMode === 'structured' ? '1px solid var(--accent)' : '1px solid var(--border)',
+                      borderRadius: 8,
+                      color: generationMode === 'structured' ? 'white' : 'var(--text-secondary)',
+                      fontSize: 12,
+                      textAlign: 'center',
+                    }}
+                  >
+                    <div style={{ fontWeight: 600 }}>📋 {language === 'zh' ? '分步创作' : 'Structured'}</div>
+                    <div style={{ fontSize: 10, opacity: 0.8, marginTop: 2 }}>
+                      {language === 'zh' ? '大纲+队列逐步生成' : 'Outline + Queue'}
+                    </div>
+                  </button>
+                </div>
               </div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button
-                  onClick={() => setGenerationMode('fast')}
-                  style={{
-                    flex: 1,
-                    padding: '8px 12px',
-                    background: generationMode === 'fast' ? 'var(--accent)' : 'var(--bg-secondary)',
-                    border: generationMode === 'fast' ? '1px solid var(--accent)' : '1px solid var(--border)',
-                    borderRadius: 8,
-                    color: generationMode === 'fast' ? 'white' : 'var(--text-secondary)',
-                    fontSize: 12,
-                    textAlign: 'center',
-                  }}
-                >
-                  <div style={{ fontWeight: 600 }}>⚡ {language === 'zh' ? '快速生成' : 'Fast'}</div>
-                  <div style={{ fontSize: 10, opacity: 0.8, marginTop: 2 }}>
-                    {language === 'zh' ? '1次请求完成' : '1 API call'}
-                  </div>
-                </button>
-                <button
-                  onClick={() => setGenerationMode('structured')}
-                  style={{
-                    flex: 1,
-                    padding: '8px 12px',
-                    background: generationMode === 'structured' ? 'var(--accent)' : 'var(--bg-secondary)',
-                    border: generationMode === 'structured' ? '1px solid var(--accent)' : '1px solid var(--border)',
-                    borderRadius: 8,
-                    color: generationMode === 'structured' ? 'white' : 'var(--text-secondary)',
-                    fontSize: 12,
-                    textAlign: 'center',
-                  }}
-                >
-                  <div style={{ fontWeight: 600 }}>📋 {language === 'zh' ? '分步创作' : 'Structured'}</div>
-                  <div style={{ fontSize: 10, opacity: 0.8, marginTop: 2 }}>
-                    {language === 'zh' ? '大纲+队列逐步生成' : 'Outline + Queue'}
-                  </div>
-                </button>
-              </div>
-            </div>
+            )}
 
             <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 8, color: 'var(--text-primary)' }}>
               {language === 'zh' ? '描述你的创作目标' : 'Describe your creation goal'}
@@ -933,7 +1130,7 @@ export default function SuperWritingTab() {
               }}
             />
             <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-              {generationMode === 'fast' ? (
+              {generationMode === 'fast' || creationMode === 'novel' ? (
                 <button
                   onClick={handleFastGenerate}
                   disabled={!outlineText.trim() || fastLoading}
@@ -948,7 +1145,9 @@ export default function SuperWritingTab() {
                   ) : (
                     <>
                       <Sparkles size={14} />
-                      {language === 'zh' ? '快速生成' : 'Fast Generate'}
+                      {creationMode === 'novel'
+                        ? (language === 'zh' ? 'AI 分析并生成小说方案' : 'Generate Novel Plan')
+                        : (language === 'zh' ? '快速生成' : 'Fast Generate')}
                     </>
                   )}
                 </button>
@@ -985,8 +1184,589 @@ export default function SuperWritingTab() {
           </div>
         )}
 
-        {/* 快速生成结果 */}
-        {(fastResult || fastError || fastLoading) && (
+        {/* 小说企划结果 - 可编辑模块 */}
+        {creationMode === 'novel' && novelProject && (
+          <div style={{
+            padding: 16,
+            background: 'var(--bg-secondary)',
+            borderRadius: 12,
+            border: '1px solid var(--accent)',
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <span style={{ fontWeight: 600, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <BookOpen size={16} style={{ color: 'var(--accent)' }} />
+                {language === 'zh' ? '小说企划' : 'Novel Plan'}
+              </span>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  onClick={() => {
+                    setNovelProject(null);
+                    setNovelPlanRawText('');
+                    setNovelChapterResult('');
+                  }}
+                  style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: 12 }}
+                >
+                  {language === 'zh' ? '重新生成' : 'Regenerate'}
+                </button>
+              </div>
+            </div>
+
+            {/* 基础设定区块 */}
+            <div style={{ marginBottom: 12 }}>
+              <button
+                onClick={() => toggleSection('basic')}
+                style={{
+                  width: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '8px 12px',
+                  background: 'var(--bg-tertiary)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 8,
+                  color: 'var(--text-primary)',
+                  fontSize: 13,
+                  fontWeight: 500,
+                }}
+              >
+                <span>📝 {language === 'zh' ? '基础设定' : 'Basic Settings'}</span>
+                {expandedSections.has('basic') ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+              </button>
+              {expandedSections.has('basic') && (
+                <div style={{ padding: 12, background: 'var(--bg-tertiary)', borderRadius: 8, marginTop: 4 }}>
+                  <div style={{ display: 'grid', gap: 8 }}>
+                    <div>
+                      <label style={{ fontSize: 11, color: 'var(--text-muted)' }}>{language === 'zh' ? '小说名' : 'Title'}</label>
+                      <input
+                        type="text"
+                        value={novelProject.title}
+                        onChange={(e) => updateNovelProjectField('title', e.target.value)}
+                        style={{
+                          width: '100%',
+                          padding: '8px 10px',
+                          background: 'var(--bg-primary)',
+                          border: '1px solid var(--border)',
+                          borderRadius: 6,
+                          color: 'var(--text-primary)',
+                          fontSize: 13,
+                          marginTop: 4,
+                        }}
+                      />
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                      <div>
+                        <label style={{ fontSize: 11, color: 'var(--text-muted)' }}>{language === 'zh' ? '题材' : 'Genre'}</label>
+                        <input
+                          type="text"
+                          value={novelProject.genre}
+                          onChange={(e) => updateNovelProjectField('genre', e.target.value)}
+                          style={{
+                            width: '100%',
+                            padding: '8px 10px',
+                            background: 'var(--bg-primary)',
+                            border: '1px solid var(--border)',
+                            borderRadius: 6,
+                            color: 'var(--text-primary)',
+                            fontSize: 13,
+                            marginTop: 4,
+                          }}
+                        />
+                      </div>
+                      <div>
+                        <label style={{ fontSize: 11, color: 'var(--text-muted)' }}>{language === 'zh' ? '风格' : 'Style'}</label>
+                        <input
+                          type="text"
+                          value={novelProject.style}
+                          onChange={(e) => updateNovelProjectField('style', e.target.value)}
+                          style={{
+                            width: '100%',
+                            padding: '8px 10px',
+                            background: 'var(--bg-primary)',
+                            border: '1px solid var(--border)',
+                            borderRadius: 6,
+                            color: 'var(--text-primary)',
+                            fontSize: 13,
+                            marginTop: 4,
+                          }}
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 11, color: 'var(--text-muted)' }}>{language === 'zh' ? '一句话简介' : 'Logline'}</label>
+                      <textarea
+                        value={novelProject.logline}
+                        onChange={(e) => updateNovelProjectField('logline', e.target.value)}
+                        rows={2}
+                        style={{
+                          width: '100%',
+                          padding: '8px 10px',
+                          background: 'var(--bg-primary)',
+                          border: '1px solid var(--border)',
+                          borderRadius: 6,
+                          color: 'var(--text-primary)',
+                          fontSize: 13,
+                          marginTop: 4,
+                          resize: 'vertical',
+                        }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 11, color: 'var(--text-muted)' }}>{language === 'zh' ? '核心卖点' : 'Selling Points'}</label>
+                      <textarea
+                        value={novelProject.sellingPoints}
+                        onChange={(e) => updateNovelProjectField('sellingPoints', e.target.value)}
+                        rows={2}
+                        style={{
+                          width: '100%',
+                          padding: '8px 10px',
+                          background: 'var(--bg-primary)',
+                          border: '1px solid var(--border)',
+                          borderRadius: 6,
+                          color: 'var(--text-primary)',
+                          fontSize: 13,
+                          marginTop: 4,
+                          resize: 'vertical',
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* 角色设定区块 */}
+            <div style={{ marginBottom: 12 }}>
+              <button
+                onClick={() => toggleSection('characters')}
+                style={{
+                  width: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '8px 12px',
+                  background: 'var(--bg-tertiary)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 8,
+                  color: 'var(--text-primary)',
+                  fontSize: 13,
+                  fontWeight: 500,
+                }}
+              >
+                <span>👥 {language === 'zh' ? '角色设定' : 'Characters'} ({novelProject.characters.length})</span>
+                {expandedSections.has('characters') ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+              </button>
+              {expandedSections.has('characters') && (
+                <div style={{ padding: 12, background: 'var(--bg-tertiary)', borderRadius: 8, marginTop: 4 }}>
+                  {novelProject.characters.map((char, index) => (
+                    <div key={char.id} style={{ marginBottom: 12, padding: 12, background: 'var(--bg-primary)', borderRadius: 8, border: char.locked ? '1px solid var(--accent)' : '1px solid var(--border)' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                        <span style={{ fontWeight: 500, fontSize: 12 }}>{language === 'zh' ? `角色 ${index + 1}` : `Character ${index + 1}`}</span>
+                        <div style={{ display: 'flex', gap: 4 }}>
+                          <button
+                            onClick={() => updateNovelCharacter(char.id, 'locked', !char.locked)}
+                            style={{ padding: 4, background: 'transparent', border: 'none', color: char.locked ? 'var(--accent)' : 'var(--text-muted)' }}
+                            title={char.locked ? (language === 'zh' ? '已锁定' : 'Locked') : (language === 'zh' ? '锁定' : 'Lock')}
+                          >
+                            {char.locked ? <Lock size={14} /> : <Unlock size={14} />}
+                          </button>
+                          <button
+                            onClick={() => removeNovelCharacter(char.id)}
+                            style={{ padding: 4, background: 'transparent', border: 'none', color: 'var(--danger)' }}
+                          >
+                            <X size={14} />
+                          </button>
+                        </div>
+                      </div>
+                      <div style={{ display: 'grid', gap: 6 }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                          <input
+                            type="text"
+                            value={char.name}
+                            onChange={(e) => updateNovelCharacter(char.id, 'name', e.target.value)}
+                            placeholder={language === 'zh' ? '姓名' : 'Name'}
+                            style={{ padding: '6px 8px', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-primary)', fontSize: 12 }}
+                          />
+                          <select
+                            value={char.role}
+                            onChange={(e) => updateNovelCharacter(char.id, 'role', e.target.value)}
+                            style={{ padding: '6px 8px', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-primary)', fontSize: 12 }}
+                          >
+                            <option value="主角">{language === 'zh' ? '主角' : 'Protagonist'}</option>
+                            <option value="配角">{language === 'zh' ? '配角' : 'Supporting'}</option>
+                            <option value="反派">{language === 'zh' ? '反派' : 'Antagonist'}</option>
+                          </select>
+                        </div>
+                        <input
+                          type="text"
+                          value={char.identity}
+                          onChange={(e) => updateNovelCharacter(char.id, 'identity', e.target.value)}
+                          placeholder={language === 'zh' ? '身份/职业' : 'Identity'}
+                          style={{ padding: '6px 8px', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-primary)', fontSize: 12 }}
+                        />
+                        <input
+                          type="text"
+                          value={char.personality}
+                          onChange={(e) => updateNovelCharacter(char.id, 'personality', e.target.value)}
+                          placeholder={language === 'zh' ? '性格' : 'Personality'}
+                          style={{ padding: '6px 8px', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-primary)', fontSize: 12 }}
+                        />
+                        <input
+                          type="text"
+                          value={char.desire}
+                          onChange={(e) => updateNovelCharacter(char.id, 'desire', e.target.value)}
+                          placeholder={language === 'zh' ? '核心欲望' : 'Desire'}
+                          style={{ padding: '6px 8px', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-primary)', fontSize: 12 }}
+                        />
+                        <input
+                          type="text"
+                          value={char.weakness}
+                          onChange={(e) => updateNovelCharacter(char.id, 'weakness', e.target.value)}
+                          placeholder={language === 'zh' ? '性格弱点' : 'Weakness'}
+                          style={{ padding: '6px 8px', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-primary)', fontSize: 12 }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                  <button
+                    onClick={addNovelCharacter}
+                    style={{
+                      width: '100%',
+                      padding: '8px 12px',
+                      background: 'var(--bg-primary)',
+                      border: '1px dashed var(--border)',
+                      borderRadius: 6,
+                      color: 'var(--text-muted)',
+                      fontSize: 12,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 4,
+                    }}
+                  >
+                    <Plus size={14} /> {language === 'zh' ? '添加角色' : 'Add Character'}
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* 世界观区块 */}
+            <div style={{ marginBottom: 12 }}>
+              <button
+                onClick={() => toggleSection('world')}
+                style={{
+                  width: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '8px 12px',
+                  background: 'var(--bg-tertiary)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 8,
+                  color: 'var(--text-primary)',
+                  fontSize: 13,
+                  fontWeight: 500,
+                }}
+              >
+                <span>🌍 {language === 'zh' ? '世界观/背景' : 'World'}</span>
+                {expandedSections.has('world') ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+              </button>
+              {expandedSections.has('world') && (
+                <div style={{ padding: 12, background: 'var(--bg-tertiary)', borderRadius: 8, marginTop: 4 }}>
+                  <div style={{ display: 'grid', gap: 8 }}>
+                    <div>
+                      <label style={{ fontSize: 11, color: 'var(--text-muted)' }}>{language === 'zh' ? '故事背景' : 'Background'}</label>
+                      <textarea
+                        value={novelProject.world.background}
+                        onChange={(e) => updateNovelProjectField('world.background', e.target.value)}
+                        rows={2}
+                        style={{ width: '100%', padding: '8px 10px', background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 12, marginTop: 4, resize: 'vertical' }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 11, color: 'var(--text-muted)' }}>{language === 'zh' ? '关键场景' : 'Key Scenes'}</label>
+                      <textarea
+                        value={novelProject.world.keyScenes}
+                        onChange={(e) => updateNovelProjectField('world.keyScenes', e.target.value)}
+                        rows={2}
+                        style={{ width: '100%', padding: '8px 10px', background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 12, marginTop: 4, resize: 'vertical' }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* 故事大纲区块 */}
+            <div style={{ marginBottom: 12 }}>
+              <button
+                onClick={() => toggleSection('outline')}
+                style={{
+                  width: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '8px 12px',
+                  background: 'var(--bg-tertiary)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 8,
+                  color: 'var(--text-primary)',
+                  fontSize: 13,
+                  fontWeight: 500,
+                }}
+              >
+                <span>📖 {language === 'zh' ? '故事大纲' : 'Outline'}</span>
+                {expandedSections.has('outline') ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+              </button>
+              {expandedSections.has('outline') && (
+                <div style={{ padding: 12, background: 'var(--bg-tertiary)', borderRadius: 8, marginTop: 4 }}>
+                  <div style={{ display: 'grid', gap: 8 }}>
+                    {['beginning', 'development', 'twist', 'climax', 'ending'].map((stage) => (
+                      <div key={stage}>
+                        <label style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                          {stage === 'beginning' ? (language === 'zh' ? '开端' : 'Beginning') :
+                           stage === 'development' ? (language === 'zh' ? '发展' : 'Development') :
+                           stage === 'twist' ? (language === 'zh' ? '转折' : 'Twist') :
+                           stage === 'climax' ? (language === 'zh' ? '高潮' : 'Climax') :
+                           (language === 'zh' ? '结局' : 'Ending')}
+                        </label>
+                        <textarea
+                          value={novelProject.outline[stage as keyof typeof novelProject.outline]}
+                          onChange={(e) => updateNovelProjectField(`outline.${stage}`, e.target.value)}
+                          rows={2}
+                          style={{ width: '100%', padding: '8px 10px', background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 12, marginTop: 4, resize: 'vertical' }}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* 章节规划区块 */}
+            <div style={{ marginBottom: 12 }}>
+              <button
+                onClick={() => toggleSection('chapters')}
+                style={{
+                  width: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '8px 12px',
+                  background: 'var(--bg-tertiary)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 8,
+                  color: 'var(--text-primary)',
+                  fontSize: 13,
+                  fontWeight: 500,
+                }}
+              >
+                <span>📚 {language === 'zh' ? '章节规划' : 'Chapters'} ({novelProject.chapters.length})</span>
+                {expandedSections.has('chapters') ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+              </button>
+              {expandedSections.has('chapters') && (
+                <div style={{ padding: 12, background: 'var(--bg-tertiary)', borderRadius: 8, marginTop: 4, maxHeight: 300, overflow: 'auto' }}>
+                  {novelProject.chapters.map((chapter) => (
+                    <div key={chapter.id} style={{ marginBottom: 8, padding: 8, background: 'var(--bg-primary)', borderRadius: 6, border: chapter.locked ? '1px solid var(--accent)' : '1px solid var(--border)' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                        <span style={{ fontWeight: 500, fontSize: 11 }}>{language === 'zh' ? `第 ${chapter.chapterNo} 章` : `Chapter ${chapter.chapterNo}`}</span>
+                        <div style={{ display: 'flex', gap: 4 }}>
+                          <button
+                            onClick={() => updateNovelChapter(chapter.id, 'locked', !chapter.locked)}
+                            style={{ padding: 2, background: 'transparent', border: 'none', color: chapter.locked ? 'var(--accent)' : 'var(--text-muted)' }}
+                          >
+                            {chapter.locked ? <Lock size={12} /> : <Unlock size={12} />}
+                          </button>
+                          <button
+                            onClick={() => removeNovelChapter(chapter.id)}
+                            style={{ padding: 2, background: 'transparent', border: 'none', color: 'var(--danger)' }}
+                          >
+                            <X size={12} />
+                          </button>
+                        </div>
+                      </div>
+                      <input
+                        type="text"
+                        value={chapter.title}
+                        onChange={(e) => updateNovelChapter(chapter.id, 'title', e.target.value)}
+                        placeholder={language === 'zh' ? '章节标题' : 'Title'}
+                        style={{ width: '100%', padding: '4px 6px', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-primary)', fontSize: 11, marginBottom: 4 }}
+                      />
+                      <input
+                        type="text"
+                        value={chapter.goal}
+                        onChange={(e) => updateNovelChapter(chapter.id, 'goal', e.target.value)}
+                        placeholder={language === 'zh' ? '本章目标' : 'Goal'}
+                        style={{ width: '100%', padding: '4px 6px', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-primary)', fontSize: 11 }}
+                      />
+                    </div>
+                  ))}
+                  <button
+                    onClick={addNovelChapter}
+                    style={{
+                      width: '100%',
+                      padding: '6px 10px',
+                      background: 'var(--bg-primary)',
+                      border: '1px dashed var(--border)',
+                      borderRadius: 6,
+                      color: 'var(--text-muted)',
+                      fontSize: 11,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 4,
+                    }}
+                  >
+                    <Plus size={12} /> {language === 'zh' ? '添加章节' : 'Add Chapter'}
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* 下一步操作按钮 */}
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button
+                onClick={handleGenerateFirstChapter}
+                disabled={fastLoading}
+                className="btn-primary"
+                style={{ flex: 1, padding: 10, minWidth: 120 }}
+              >
+                <Sparkles size={14} style={{ marginRight: 4 }} />
+                {language === 'zh' ? '生成第一章' : 'Generate Chapter 1'}
+              </button>
+              <button
+                onClick={() => {
+                  setNovelProject(null);
+                  setNovelPlanRawText('');
+                }}
+                style={{
+                  padding: '10px 16px',
+                  background: 'var(--bg-tertiary)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 8,
+                  color: 'var(--text-secondary)',
+                }}
+              >
+                {language === 'zh' ? '重新生成方案' : 'Regenerate'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* 小说章节正文结果 */}
+        {creationMode === 'novel' && novelChapterResult && (
+          <div style={{
+            padding: 16,
+            background: 'var(--bg-secondary)',
+            borderRadius: 12,
+            border: '1px solid var(--accent)',
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <span style={{ fontWeight: 600, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Edit3 size={16} style={{ color: 'var(--accent)' }} />
+                {language === 'zh' ? `第 ${novelCurrentChapterIndex} 章` : `Chapter ${novelCurrentChapterIndex}`}
+              </span>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  onClick={() => navigator.clipboard.writeText(novelChapterResult)}
+                  style={{ background: 'transparent', border: 'none', color: 'var(--accent)', fontSize: 12 }}
+                >
+                  {language === 'zh' ? '复制' : 'Copy'}
+                </button>
+              </div>
+            </div>
+            <div style={{
+              background: 'var(--bg-tertiary)',
+              borderRadius: 8,
+              padding: 12,
+              maxHeight: 500,
+              overflow: 'auto',
+              fontSize: 13,
+              lineHeight: 1.8,
+            }}>
+              <ReactMarkdown>{novelChapterResult}</ReactMarkdown>
+            </div>
+
+            {/* 续写和润色按钮 */}
+            <div style={{ marginTop: 12 }}>
+              <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Wand2 size={14} style={{ color: 'var(--accent)' }} />
+                {language === 'zh' ? '继续创作' : 'Continue Writing'}
+              </div>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
+                <button
+                  onClick={handleContinueChapter}
+                  disabled={fastLoading}
+                  style={{
+                    padding: '6px 12px',
+                    background: 'var(--accent)',
+                    border: 'none',
+                    borderRadius: 6,
+                    color: 'white',
+                    fontSize: 12,
+                  }}
+                >
+                  {language === 'zh' ? '续写下一章' : 'Continue'}
+                </button>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(80px, 1fr))', gap: 6 }}>
+                {(Object.keys(NOVEL_REWRITE_NAMES) as NovelRewriteType[]).slice(0, 6).map((rewriteType) => (
+                  <button
+                    key={rewriteType}
+                    onClick={() => handleNovelRewrite(rewriteType)}
+                    disabled={rewriteLoading}
+                    style={{
+                      padding: '6px 8px',
+                      background: 'var(--bg-tertiary)',
+                      border: '1px solid var(--border)',
+                      borderRadius: 6,
+                      color: 'var(--text-secondary)',
+                      fontSize: 11,
+                      opacity: rewriteLoading ? 0.6 : 1,
+                    }}
+                  >
+                    {language === 'zh' ? NOVEL_REWRITE_NAMES[rewriteType].zh : NOVEL_REWRITE_NAMES[rewriteType].en}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 小说企划解析失败时的原始文本显示 */}
+        {creationMode === 'novel' && novelPlanRawText && !novelProject && (
+          <div style={{
+            padding: 16,
+            background: 'var(--bg-secondary)',
+            borderRadius: 12,
+            border: '1px solid var(--border)',
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
+                {language === 'zh' ? '生成结果（原始文本）' : 'Result (Raw Text)'}
+              </span>
+              <button
+                onClick={() => navigator.clipboard.writeText(novelPlanRawText)}
+                style={{ background: 'transparent', border: 'none', color: 'var(--accent)', fontSize: 12 }}
+              >
+                {language === 'zh' ? '复制' : 'Copy'}
+              </button>
+            </div>
+            <div style={{
+              background: 'var(--bg-tertiary)',
+              borderRadius: 8,
+              padding: 12,
+              maxHeight: 400,
+              overflow: 'auto',
+              fontSize: 13,
+              lineHeight: 1.8,
+            }}>
+              <ReactMarkdown>{novelPlanRawText}</ReactMarkdown>
+            </div>
+          </div>
+        )}
+
+        {/* 非小说模式的快速生成结果 */}
+        {creationMode !== 'novel' && (fastResult || fastError || fastLoading) && (
           <div style={{
             padding: 16,
             background: 'var(--bg-secondary)',
@@ -1026,51 +1806,6 @@ export default function SuperWritingTab() {
                 lineHeight: 1.8,
               }}>
                 <ReactMarkdown>{fastResult}</ReactMarkdown>
-              </div>
-            )}
-
-            {/* 小说改写按钮 - 仅在小说模式且有结果时显示 */}
-            {creationMode === 'novel' && fastResult && !fastLoading && (
-              <div style={{ marginTop: 12 }}>
-                <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <Wand2 size={14} style={{ color: 'var(--accent)' }} />
-                  {language === 'zh' ? '继续优化' : 'Continue Optimization'}
-                </div>
-                <div style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(90px, 1fr))',
-                  gap: 6,
-                }}>
-                  {(Object.keys(NOVEL_REWRITE_NAMES) as NovelRewriteType[]).map((rewriteType) => (
-                    <button
-                      key={rewriteType}
-                      onClick={() => handleNovelRewrite(rewriteType)}
-                      disabled={rewriteLoading}
-                      style={{
-                        padding: '6px 8px',
-                        background: 'var(--bg-tertiary)',
-                        border: '1px solid var(--border)',
-                        borderRadius: 6,
-                        color: 'var(--text-secondary)',
-                        fontSize: 11,
-                        cursor: rewriteLoading ? 'wait' : 'pointer',
-                        opacity: rewriteLoading ? 0.6 : 1,
-                        minWidth: 0,
-                        maxWidth: '100%',
-                        boxSizing: 'border-box',
-                        overflowWrap: 'anywhere',
-                        wordBreak: 'break-word',
-                        transition: 'all 0.15s ease',
-                      }}
-                    >
-                      {rewriteLoading ? (
-                        <RefreshCw size={10} className="spin" />
-                      ) : (
-                        language === 'zh' ? NOVEL_REWRITE_NAMES[rewriteType].zh : NOVEL_REWRITE_NAMES[rewriteType].en
-                      )}
-                    </button>
-                  ))}
-                </div>
               </div>
             )}
           </div>
