@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { MessageSquare, Send, Trash2, Plus, ChevronLeft, Image as ImageIcon, X, Copy, Edit2, Check, Pencil, Search, StopCircle, Pin, PinOff, Download, Mic, Share2, Zap, CheckCircle, Circle } from 'lucide-react';
-import { useAppStore, CHAT_MODELS, checkStorageSize } from './store';
+import { useAppStore, CHAT_MODELS, checkStorageSize, getMessageImage } from './store';
 import { sendChatMessageStream, cancelChatRequest } from './api';
 import { t, Language } from './i18n';
 import { hapticFeedback, shareConversation } from './utils';
@@ -850,9 +850,15 @@ export default function ChatTab() {
                   )}
                 </div>
               )}
-              {msg.imageUrl && (
-                <img src={msg.imageUrl} alt="" style={{ maxWidth: '100%', borderRadius: 8, marginBottom: 8 }} />
-              )}
+              {msg.imageUrl && (() => {
+                // 从缓存获取实际的图片数据
+                const actualImageUrl = msg.imageUrl.startsWith('cached:')
+                  ? getMessageImage(msg.imageUrl.slice(7))
+                  : msg.imageUrl;
+                return actualImageUrl ? (
+                  <img src={actualImageUrl} alt="" style={{ maxWidth: '100%', borderRadius: 8, marginBottom: 8 }} />
+                ) : null;
+              })()}
               {editingMessageId === msg.id ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%' }}>
                   <AutoResizeTextarea

@@ -84,6 +84,24 @@ export function cleanStorage(): void {
   }
 }
 
+// 内存缓存，用于存储聊天消息中的图片（不持久化）
+const messageImageCache = new Map<string, string>();
+
+// 设置消息图片到缓存
+export function setMessageImage(messageId: string, imageUrl: string): void {
+  messageImageCache.set(messageId, imageUrl);
+}
+
+// 从缓存获取消息图片
+export function getMessageImage(messageId: string): string | undefined {
+  return messageImageCache.get(messageId);
+}
+
+// 清理消息图片缓存
+export function clearMessageImageCache(): void {
+  messageImageCache.clear();
+}
+
 // 自定义存储，优先使用 localStorage，失败则用内存
 const customStorage = createJSONStorage(() => {
   try {
@@ -926,11 +944,20 @@ export const useAppStore = create<AppState>()(
         const { currentConversationId, conversations } = get();
         if (!currentConversationId) return;
 
+        const messageId = Date.now().toString();
+
+        // 如果有图片，存入内存缓存而不是直接存入 state
+        // 这样可以避免 base64 图片撑爆 localStorage
+        if (imageUrl) {
+          setMessageImage(messageId, imageUrl);
+        }
+
         const message: Message = {
-          id: Date.now().toString(),
+          id: messageId,
           role,
           content,
-          imageUrl,
+          // 只存储一个标记，实际的图片数据在内存缓存中
+          imageUrl: imageUrl ? `cached:${messageId}` : undefined,
           timestamp: Date.now(),
         };
 

@@ -574,10 +574,10 @@ ${minutes.todayActions?.map((a, i) => `${i + 1}. ${a}`).join('\n') || '无'}
         </button>
       </div>
 
-      {/* 会议类型卡片 */}
+      {/* 会议类型卡片 - 响应式布局 */}
       <div style={{
         display: 'grid',
-        gridTemplateColumns: 'repeat(3, 1fr)',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(96px, 1fr))',
         gap: 8,
       }}>
         {MEETING_TYPES.map((mt) => (
@@ -595,6 +595,8 @@ ${minutes.todayActions?.map((a, i) => `${i + 1}. ${a}`).join('\n') || '无'}
               gap: 4,
               cursor: 'pointer',
               minWidth: 0,
+              maxWidth: '100%',
+              boxSizing: 'border-box',
             }}
           >
             <span style={{ fontSize: 18 }}>{mt.icon}</span>
@@ -603,9 +605,8 @@ ${minutes.todayActions?.map((a, i) => `${i + 1}. ${a}`).join('\n') || '无'}
               fontWeight: 500,
               color: selectedMeetingType === mt.id ? 'var(--accent)' : 'var(--text-primary)',
               textAlign: 'center',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
+              overflowWrap: 'anywhere',
+              wordBreak: 'break-word',
               maxWidth: '100%',
             }}>
               {language === 'zh' ? mt.nameZh : mt.nameEn}
@@ -999,6 +1000,87 @@ ${minutes.todayActions?.map((a, i) => `${i + 1}. ${a}`).join('\n') || '无'}
           </>
         )}
       </button>
+
+      {/* 历史会议记录 */}
+      {company.meetings && company.meetings.length > 0 && (
+        <div style={{
+          background: 'var(--bg-secondary)',
+          borderRadius: 12,
+          padding: 12,
+          border: '1px solid var(--border)',
+        }}>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            marginBottom: 12,
+          }}>
+            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+              {language === 'zh' ? '历史会议记录' : 'Meeting History'}
+            </span>
+            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+              {company.meetings.length} {language === 'zh' ? '场' : 'meetings'}
+            </span>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {company.meetings.slice(-5).reverse().map((meeting) => {
+              const meetingConfig = getMeetingTypeConfig(meeting.type as MeetingTypeId);
+              return (
+                <div
+                  key={meeting.id}
+                  style={{
+                    padding: 10,
+                    background: 'var(--bg-tertiary)',
+                    borderRadius: 8,
+                    border: '1px solid var(--border)',
+                  }}
+                >
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    marginBottom: 4,
+                  }}>
+                    <span style={{ fontSize: 14 }}>{meetingConfig?.icon || '📅'}</span>
+                    <span style={{
+                      fontSize: 12,
+                      fontWeight: 500,
+                      color: 'var(--text-primary)',
+                      flex: 1,
+                      minWidth: 0,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}>
+                      {meeting.extractedContent || (language === 'zh' ? '无主题' : 'No topic')}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                    {new Date(meeting.createdAt).toLocaleDateString()} {new Date(meeting.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    {' · '}
+                    {meetingConfig ? (language === 'zh' ? meetingConfig.nameZh : meetingConfig.nameEn) : meeting.type}
+                  </div>
+                  {meeting.result?.informationSummary && (
+                    <div style={{
+                      fontSize: 11,
+                      color: 'var(--text-secondary)',
+                      marginTop: 6,
+                      lineHeight: 1.4,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      display: '-webkit-box',
+                      WebkitLineClamp: 2,
+                      WebkitBoxOrient: 'vertical' as const,
+                    }}>
+                      {meeting.result.informationSummary}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 

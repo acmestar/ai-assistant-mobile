@@ -1,4 +1,4 @@
-import { useAppStore, CHAT_MODELS, OPENAI_SIZE_MAP, GPT2_SIZE_MAP, OPENAI_QUALITY_MAP, getImageModelDef } from './store';
+import { useAppStore, CHAT_MODELS, OPENAI_SIZE_MAP, GPT2_SIZE_MAP, OPENAI_QUALITY_MAP, getImageModelDef, getMessageImage } from './store';
 
 const API_BASE = 'https://ai.acmestar.top/api';
 
@@ -193,7 +193,15 @@ export async function sendChatMessageStream(
 
     for (const msg of recentMessages) {
       if (msg.role === 'user' && msg.imageUrl) {
-        messages.push({ role: 'user', content: [{ type: 'text', text: msg.content }, { type: 'image_url', image_url: { url: msg.imageUrl } }] });
+        // 从缓存获取实际的图片数据
+        const actualImageUrl = msg.imageUrl.startsWith('cached:')
+          ? getMessageImage(msg.imageUrl.slice(7))
+          : msg.imageUrl;
+        if (actualImageUrl) {
+          messages.push({ role: 'user', content: [{ type: 'text', text: msg.content }, { type: 'image_url', image_url: { url: actualImageUrl } }] });
+        } else {
+          messages.push({ role: msg.role, content: msg.content });
+        }
       } else {
         messages.push({ role: msg.role, content: msg.content });
       }
@@ -334,7 +342,15 @@ export async function sendChatMessage(userMessage: string, imageBase64?: string)
 
     for (const msg of conversation.messages) {
       if (msg.role === 'user' && msg.imageUrl) {
-        messages.push({ role: 'user', content: [{ type: 'text', text: msg.content }, { type: 'image_url', image_url: { url: msg.imageUrl } }] });
+        // 从缓存获取实际的图片数据
+        const actualImageUrl = msg.imageUrl.startsWith('cached:')
+          ? getMessageImage(msg.imageUrl.slice(7))
+          : msg.imageUrl;
+        if (actualImageUrl) {
+          messages.push({ role: 'user', content: [{ type: 'text', text: msg.content }, { type: 'image_url', image_url: { url: actualImageUrl } }] });
+        } else {
+          messages.push({ role: msg.role, content: msg.content });
+        }
       } else {
         messages.push({ role: msg.role, content: msg.content });
       }

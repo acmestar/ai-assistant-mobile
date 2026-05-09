@@ -294,21 +294,45 @@ ${recentTasks.slice(0, 10).map(t => `- ${t.title}（${t.status}）`).join('\n') 
 只输出 JSON 数组，不要其他内容。`;
 }
 
-// 解析推荐结果
+// 解析推荐结果（增强版）
 export function parseRecommendationResult(result: string): MeetingRecommendation[] {
   try {
-    // 尝试提取 JSON 数组
-    const jsonMatch = result.match(/\[[\s\S]*\]/);
-    if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0]);
+    let jsonStr = '';
+
+    // 1. 尝试提取 ```json 代码块
+    const codeBlockMatch = result.match(/```json\s*([\s\S]*?)```/);
+    if (codeBlockMatch) {
+      jsonStr = codeBlockMatch[1].trim();
+    }
+    // 2. 尝试提取纯 JSON 数组
+    else {
+      const jsonMatch = result.match(/\[[\s\S]*\]/);
+      if (jsonMatch) {
+        jsonStr = jsonMatch[0];
+      }
+    }
+
+    if (jsonStr) {
+      const parsed = JSON.parse(jsonStr);
       if (Array.isArray(parsed)) {
-        return parsed.map(item => ({
-          meetingType: item.meetingType as MeetingTypeId,
-          title: item.title || '',
-          reason: item.reason || '',
-          expectedOutput: item.expectedOutput || '',
-          priority: item.priority as 'high' | 'medium' | 'low' | undefined,
-        }));
+        // 最多保留5条，并进行字段校验
+        return parsed.slice(0, 5).map(item => {
+          // meetingType 校验：必须是合法值，否则 fallback 到 strategy
+          const validTypes: MeetingTypeId[] = ['morning', 'strategy', 'project_review', 'risk', 'review', 'brainstorm'];
+          const meetingType: MeetingTypeId = validTypes.includes(item.meetingType) ? item.meetingType : 'strategy';
+
+          // priority 校验：必须是合法值，否则 fallback 到 medium
+          const validPriorities = ['high', 'medium', 'low'];
+          const priority = validPriorities.includes(item.priority) ? item.priority : 'medium';
+
+          return {
+            meetingType,
+            title: item.title || '',
+            reason: item.reason || '',
+            expectedOutput: item.expectedOutput || '',
+            priority,
+          };
+        });
       }
     }
   } catch (error) {
