@@ -1210,33 +1210,25 @@ ${previousChapter.slice(-3000)} ${previousChapter.length > 3000 ? '...(前文已
  */
 export function buildNovelAutoStartPrompt(options: {
   requirement: string;
-  genre?: string;
-  style?: string;
-  chapterInfo?: string;
 }): string {
-  const { requirement, genre, style, chapterInfo } = options;
-
-  const genreHint = genre ? `\n用户指定题材：${genre}` : '';
-  const styleHint = style ? `\n用户指定风格：${style}` : '';
-  const lengthHint = chapterInfo ? `\n用户指定篇幅：${chapterInfo}` : '';
+  const { requirement } = options;
 
   return `你是一个专业的小说策划和作家。请根据用户的一句话想法，自动生成完整的小说企划和第一章正文。
 
 用户想法：
 ${requirement}
-${genreHint}${styleHint}${lengthHint}
 
 请输出 JSON 格式（不要输出 Markdown，不要解释，只输出纯 JSON）：
 
 {
   "project": {
     "title": "小说名（吸引人的标题）",
-    "genre": "题材类型",
-    "style": "风格关键词",
+    "genre": "题材类型（自动判断：都市/玄幻/悬疑/言情/科幻/历史等）",
+    "style": "风格关键词（自动判断：治愈/爽文/细腻/暗黑/幽默/热血等）",
     "logline": "一句话简介（有吸引力，概括核心卖点）",
     "sellingPoints": "核心卖点（2-3个）",
     "targetReaders": "目标读者",
-    "lengthSuggestion": "篇幅建议",
+    "lengthSuggestion": "篇幅建议（自动判断：短篇10万字以内/中篇10-30万字/长篇30万字以上）",
 
     "characters": [
       {
@@ -1311,14 +1303,15 @@ ${genreHint}${styleHint}${lengthHint}
 }
 
 要求：
-1. 用户只给一句话时，必须自动补全所有空白，不要反问
+1. 用户只给一句话时，必须自动补全所有空白，包括题材、风格、篇幅，不要反问
 2. 优先生成"好看、上头、有代入感"的小说
 3. 至少生成3个角色（主角、重要配角、反派或阻力来源）
 4. 章节规划5-12个
 5. 第一章必须是真正小说正文，不是大纲
 6. 正文要有场景、动作、对白、心理、节奏和结尾钩子
 7. 第一章字数2000-4000字，移动端可读
-8. 只输出 JSON，不要其他文字`;
+8. 只输出 JSON，不要其他文字
+9. 题材、风格、篇幅由你根据用户想法自动判断，不要留空`;
 }
 
 /**

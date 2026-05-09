@@ -114,11 +114,6 @@ export default function SuperWritingTab() {
   const [novelRawText, setNovelRawText] = useState('');
   const [showAdvancedNovelSettings, setShowAdvancedNovelSettings] = useState(false);
 
-  // 小说额外设置
-  const [novelGenre, setNovelGenre] = useState<string>('');
-  const [novelStyle, setNovelStyle] = useState<string>('');
-  const [novelChapterInfo, setNovelChapterInfo] = useState<string>('');
-
   // 快速修改状态
   const [quickHeroName, setQuickHeroName] = useState('');
   const [quickLoveInterestName, setQuickLoveInterestName] = useState('');
@@ -337,12 +332,9 @@ export default function SuperWritingTab() {
       // 根据创作类型构建 prompt
       let prompt: string;
       if (creationMode === 'novel') {
-        // 小说模式：一键生成设定+第一章
+        // 小说模式：一键生成设定+第一章（AI自动决定题材、风格、篇幅）
         prompt = buildNovelAutoStartPrompt({
           requirement: outlineText,
-          genre: novelGenre,
-          style: novelStyle,
-          chapterInfo: novelChapterInfo,
         });
       } else {
         prompt = buildCreationPrompt(creationMode, outlineText);
@@ -1292,60 +1284,6 @@ export default function SuperWritingTab() {
               </div>
             )}
 
-            {/* 小说可选设置 - 仅在小说模式下显示 */}
-            {creationMode === 'novel' && (
-              <div style={{ marginBottom: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <input
-                  type="text"
-                  value={novelGenre}
-                  onChange={(e) => setNovelGenre(e.target.value)}
-                  placeholder={language === 'zh' ? '题材：都市 / 玄幻 / 悬疑 / 言情' : 'Genre: Urban / Fantasy / Mystery'}
-                  style={{
-                    flex: 1,
-                    minWidth: 100,
-                    padding: '8px 10px',
-                    background: 'var(--bg-tertiary)',
-                    border: '1px solid var(--border)',
-                    borderRadius: 6,
-                    color: 'var(--text-primary)',
-                    fontSize: 12,
-                  }}
-                />
-                <input
-                  type="text"
-                  value={novelStyle}
-                  onChange={(e) => setNovelStyle(e.target.value)}
-                  placeholder={language === 'zh' ? '风格：治愈 / 爽文 / 细腻 / 暗黑' : 'Style: Healing / Cool / Delicate'}
-                  style={{
-                    flex: 1,
-                    minWidth: 100,
-                    padding: '8px 10px',
-                    background: 'var(--bg-tertiary)',
-                    border: '1px solid var(--border)',
-                    borderRadius: 6,
-                    color: 'var(--text-primary)',
-                    fontSize: 12,
-                  }}
-                />
-                <input
-                  type="text"
-                  value={novelChapterInfo}
-                  onChange={(e) => setNovelChapterInfo(e.target.value)}
-                  placeholder={language === 'zh' ? '篇幅：短篇 / 中篇 / 长篇' : 'Length: Short / Medium / Long'}
-                  style={{
-                    flex: 1,
-                    minWidth: 100,
-                    padding: '8px 10px',
-                    background: 'var(--bg-tertiary)',
-                    border: '1px solid var(--border)',
-                    borderRadius: 6,
-                    color: 'var(--text-primary)',
-                    fontSize: 12,
-                  }}
-                />
-              </div>
-            )}
-
             {/* 非小说模式的生成模式选择 */}
             {creationMode !== 'novel' && (
               <div style={{ marginBottom: 12, padding: 10, background: 'var(--bg-tertiary)', borderRadius: 8 }}>
@@ -1466,6 +1404,25 @@ export default function SuperWritingTab() {
               >
                 {language === 'zh' ? '取消' : 'Cancel'}
               </button>
+            </div>
+          </div>
+        )}
+
+        {/* 小说模式加载状态 */}
+        {creationMode === 'novel' && fastLoading && !novelProject && (
+          <div style={{
+            padding: 24,
+            background: 'var(--bg-secondary)',
+            borderRadius: 12,
+            border: '1px solid var(--accent)',
+            textAlign: 'center',
+          }}>
+            <RefreshCw size={32} className="spin" style={{ color: 'var(--accent)', marginBottom: 12 }} />
+            <div style={{ color: 'var(--text-primary)', fontWeight: 500, marginBottom: 8 }}>
+              {language === 'zh' ? '正在生成小说设定和第一章...' : 'Generating novel setup and first chapter...'}
+            </div>
+            <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>
+              {language === 'zh' ? '预计需要30-60秒，请耐心等待' : 'Expected 30-60 seconds, please wait...'}
             </div>
           </div>
         )}
@@ -2297,7 +2254,15 @@ export default function SuperWritingTab() {
               )}
             </div>
             {fastLoading && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-muted)' }}>
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                color: 'var(--text-muted)',
+                padding: 12,
+                background: 'var(--bg-tertiary)',
+                borderRadius: 8,
+              }}>
                 <RefreshCw size={16} className="spin" />
                 {language === 'zh' ? '生成中...' : 'Generating...'}
               </div>
