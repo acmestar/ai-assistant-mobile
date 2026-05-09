@@ -81,8 +81,6 @@ export default function ChatTab() {
     // 角色/设定记忆库
     characterMemory,
     addCharacter,
-    updateCharacter,
-    deleteCharacter,
     worldSetting,
     setWorldSetting,
     // 进度保存
@@ -118,7 +116,6 @@ export default function ChatTab() {
   const [isMessageSelectMode, setIsMessageSelectMode] = useState(false); // 消息多选模式
   const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(new Set()); // 选中的消息ID
   const [showQueuePanel, setShowQueuePanel] = useState(false); // 模型队列面板
-  const [showModelSelector, setShowModelSelector] = useState(false); // 模型选择器
   const [expandedResults, setExpandedResults] = useState<Set<string>>(new Set()); // 展开的结果
   const [showOutlineParser, setShowOutlineParser] = useState(false); // 大纲解析器
   const [outlineText, setOutlineText] = useState(''); // 大纲文本
@@ -129,12 +126,9 @@ export default function ChatTab() {
     worldSetting: string;
   } | null>(null); // 解析结果
   const [selectedChapters, setSelectedChapters] = useState<Set<number>>(new Set()); // 选中的章节
-  const [showCharacterPanel, setShowCharacterPanel] = useState(false); // 角色面板
+  const [isAnalyzing, setIsAnalyzing] = useState(false); // AI解析中
   const [showExportPanel, setShowExportPanel] = useState(false); // 导出面板
   const [showTaskPanel, setShowTaskPanel] = useState(false); // 任务面板
-  const [styleCheckResult, setStyleCheckResult] = useState<string | null>(null); // 风格检查结果
-  const [continuationSuggestion, setContinuationSuggestion] = useState<string | null>(null); // 续写建议
-  const [isAnalyzing, setIsAnalyzing] = useState(false); // 分析中
   const [compareItemId, setCompareItemId] = useState<string | null>(null); // 正在对比的项
   const [compareResults, setCompareResults] = useState<Record<string, string>>({}); // 对比结果
   const [showSharePanel, setShowSharePanel] = useState(false); // 分享面板
@@ -771,132 +765,6 @@ ${outlineText}`;
     }
   };
 
-  // 风格一致性检查
-  const checkStyleConsistency = async () => {
-    const completedChapters = modelQueue.filter(item => item.result);
-    if (completedChapters.length < 2) {
-      setError(language === 'zh' ? '至少需要2个已完成的章节才能检查风格一致性' : 'Need at least 2 completed chapters to check style consistency');
-      return;
-    }
-
-    setIsAnalyzing(true);
-    setStyleCheckResult(null);
-
-    try {
-      const { apiKey } = useAppStore.getState();
-      if (!apiKey) throw new Error('请先设置 API Key');
-
-      const chaptersText = completedChapters.map((item, index) =>
-        `【${item.title || `第${index + 1}章`}】\n${item.result}`
-      ).join('\n\n---\n\n');
-
-      const prompt = language === 'zh'
-        ? `请分析以下章节的写作风格一致性，检查：
-1. 叙事风格是否统一（第一人称/第三人称等）
-2. 语言风格是否一致（正式/口语化等）
-3. 角色性格是否前后一致
-4. 用词习惯是否有明显变化
-5. 节奏把控是否协调
-
-请给出简洁的分析报告，指出问题和建议：
-
-${chaptersText}`
-        : `Please analyze the writing style consistency of the following chapters:
-1. Narrative style consistency (first-person/third-person, etc.)
-2. Language style consistency (formal/casual, etc.)
-3. Character personality consistency
-4. Vocabulary usage patterns
-5. Pacing coordination
-
-Please provide a concise analysis report with issues and suggestions:
-
-${chaptersText}`;
-
-      const resp = await fetch('https://ai.acmestar.top/api/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-        body: JSON.stringify({
-          model: chatModelId,
-          messages: [{ role: 'user', content: prompt }],
-          max_tokens: 2000,
-        }),
-      });
-
-      if (!resp.ok) throw new Error(`API 错误: ${resp.status}`);
-      const data = await resp.json();
-      setStyleCheckResult(data.choices?.[0]?.message?.content || '分析失败');
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setIsAnalyzing(false);
-    }
-  };
-
-  // 智能续写建议
-  const getContinuationSuggestion = async () => {
-    const completedChapters = modelQueue.filter(item => item.result);
-    if (completedChapters.length === 0) {
-      setError(language === 'zh' ? '没有已完成的章节，无法生成续写建议' : 'No completed chapters to generate suggestions');
-      return;
-    }
-
-    setIsAnalyzing(true);
-    setContinuationSuggestion(null);
-
-    try {
-      const { apiKey } = useAppStore.getState();
-      if (!apiKey) throw new Error('请先设置 API Key');
-
-      const previousChapters = completedChapters.slice(-3); // 最近3章作为上下文
-
-      const contextText = previousChapters.map((item, index) =>
-        `【${item.title || `第${completedChapters.length - previousChapters.length + index + 1}章`}】\n${item.result?.slice(0, 1000)}...`
-      ).join('\n\n');
-
-      const prompt = language === 'zh'
-        ? `基于以下已完成的章节内容，请分析剧情走向并提供续写建议：
-
-${contextText}
-
-请提供：
-1. 当前剧情发展分析
-2. 可能的剧情走向（2-3个方向）
-3. 建议的下一章内容大纲
-4. 需要注意的伏笔或悬念
-
-请给出简洁有创意的建议：`
-        : `Based on the following completed chapters, please analyze the plot direction and provide continuation suggestions:
-
-${contextText}
-
-Please provide:
-1. Current plot development analysis
-2. Possible plot directions (2-3 options)
-3. Suggested outline for the next chapter
-4. Foreshadowing or suspense to note
-
-Please give concise and creative suggestions:`;
-
-      const resp = await fetch('https://ai.acmestar.top/api/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-        body: JSON.stringify({
-          model: chatModelId,
-          messages: [{ role: 'user', content: prompt }],
-          max_tokens: 2000,
-        }),
-      });
-
-      if (!resp.ok) throw new Error(`API 错误: ${resp.status}`);
-      const data = await resp.json();
-      setContinuationSuggestion(data.choices?.[0]?.message?.content || '分析失败');
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setIsAnalyzing(false);
-    }
-  };
-
   // 多版本对比 - 用不同模型生成同一章节的多个版本
   const generateCompareVersions = async (itemId: string) => {
     const item = modelQueue.find(q => q.id === itemId);
@@ -1290,60 +1158,40 @@ Please give concise and creative suggestions:`;
         }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
             <span style={{ fontWeight: 600, fontSize: 14, color: 'var(--text-primary)' }}>
-              {language === 'zh' ? '批量创作队列' : 'Batch Creation Queue'}
+              📝 {language === 'zh' ? '批量创作' : 'Batch Creation'}
             </span>
             <button onClick={() => setShowQueuePanel(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', padding: 4 }}>
               <X size={16} />
             </button>
           </div>
 
-          {/* 功能按钮行 */}
-          <div style={{ display: 'flex', gap: 4, marginBottom: 8, flexWrap: 'wrap' }}>
-            <button
-              onClick={() => setShowModelSelector(!showModelSelector)}
-              style={{ padding: '4px 8px', background: 'var(--accent)', border: 'none', borderRadius: 6, color: 'white', fontSize: 11, display: 'flex', alignItems: 'center', gap: 4 }}
-            >
-              <Plus size={12} />
-              {language === 'zh' ? '添加模型' : 'Add Model'}
-            </button>
+          {/* 主操作按钮 */}
+          <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
             <button
               onClick={() => setShowOutlineParser(!showOutlineParser)}
-              style={{ padding: '4px 8px', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-secondary)', fontSize: 11, display: 'flex', alignItems: 'center', gap: 4 }}
+              className="btn-primary"
+              style={{ flex: 1, padding: '8px 12px', fontSize: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}
             >
-              📋 {language === 'zh' ? '大纲解析' : 'Outline'}
-            </button>
-            <button
-              onClick={() => setShowCharacterPanel(!showCharacterPanel)}
-              style={{ padding: '4px 8px', background: characterMemory.length > 0 ? 'var(--accent-dim)' : 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 6, color: characterMemory.length > 0 ? 'var(--accent)' : 'var(--text-secondary)', fontSize: 11, display: 'flex', alignItems: 'center', gap: 4 }}
-            >
-              👤 {language === 'zh' ? '角色' : 'Characters'}
-            </button>
-            <button
-              onClick={() => setShowExportPanel(!showExportPanel)}
-              disabled={modelQueue.filter(i => i.result).length === 0}
-              style={{ padding: '4px 8px', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 6, color: modelQueue.filter(i => i.result).length > 0 ? 'var(--text-secondary)' : 'var(--text-muted)', fontSize: 11, display: 'flex', alignItems: 'center', gap: 4, opacity: modelQueue.filter(i => i.result).length > 0 ? 1 : 0.5 }}
-            >
-              📥 {language === 'zh' ? '导出' : 'Export'}
-            </button>
-            <button
-              onClick={() => setShowTaskPanel(!showTaskPanel)}
-              style={{ padding: '4px 8px', background: savedTasks.length > 0 ? 'var(--accent-dim)' : 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 6, color: savedTasks.length > 0 ? 'var(--accent)' : 'var(--text-secondary)', fontSize: 11, display: 'flex', alignItems: 'center', gap: 4 }}
-            >
-              💾 {language === 'zh' ? '任务' : 'Tasks'}
+              📋 {language === 'zh' ? '大纲解析' : 'Parse Outline'}
             </button>
             <button
               onClick={() => setParallelMode(!parallelMode)}
-              style={{ padding: '4px 8px', background: parallelMode ? 'var(--accent)' : 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 6, color: parallelMode ? 'white' : 'var(--text-secondary)', fontSize: 11, display: 'flex', alignItems: 'center', gap: 4 }}
-              title={language === 'zh' ? '并行模式：所有任务同时执行（无上下文关联）' : 'Parallel mode: All tasks run simultaneously (no context sharing)'}
+              style={{
+                padding: '8px 12px',
+                background: parallelMode ? 'var(--accent)' : 'var(--bg-tertiary)',
+                border: '1px solid var(--border)',
+                borderRadius: 8,
+                color: parallelMode ? 'white' : 'var(--text-secondary)',
+                fontSize: 12,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+              }}
+              title={parallelMode
+                ? (language === 'zh' ? '并行模式：所有任务同时执行，互不影响' : 'Parallel: All tasks run simultaneously')
+                : (language === 'zh' ? '顺序模式：逐章执行，后续章节可看到前面内容' : 'Sequential: Chapters run in order with context sharing')}
             >
-              ⚡ {language === 'zh' ? '并行' : 'Parallel'}
-            </button>
-            <button
-              onClick={generateShareLink}
-              disabled={modelQueue.length === 0}
-              style={{ padding: '4px 8px', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 6, color: modelQueue.length > 0 ? 'var(--text-secondary)' : 'var(--text-muted)', fontSize: 11, display: 'flex', alignItems: 'center', gap: 4, opacity: modelQueue.length > 0 ? 1 : 0.5 }}
-            >
-              🔗 {language === 'zh' ? '分享' : 'Share'}
+              {parallelMode ? '⚡ 并行' : '📖 顺序'}
             </button>
           </div>
 
@@ -1498,248 +1346,6 @@ Please give concise and creative suggestions:`;
             </div>
           )}
 
-          {/* 角色设定面板 */}
-          {showCharacterPanel && (
-            <div style={{ marginBottom: 8, padding: 8, background: 'var(--bg-tertiary)', borderRadius: 8 }}>
-              <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 6 }}>
-                {language === 'zh' ? '角色/设定记忆库' : 'Character/Setting Memory'}
-              </div>
-              {/* 世界观设定 */}
-              <div style={{ marginBottom: 8 }}>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>
-                  {language === 'zh' ? '世界观设定' : 'World Setting'}
-                </div>
-                <textarea
-                  value={worldSetting}
-                  onChange={(e) => setWorldSetting(e.target.value)}
-                  placeholder={language === 'zh' ? '描述故事的世界观、时代背景等' : 'Describe the world, era, etc.'}
-                  style={{
-                    width: '100%',
-                    minHeight: 40,
-                    maxHeight: 80,
-                    padding: 6,
-                    fontSize: 11,
-                    borderRadius: 6,
-                    border: '1px solid var(--border)',
-                    background: 'var(--bg-secondary)',
-                    color: 'var(--text-primary)',
-                    resize: 'vertical',
-                  }}
-                />
-              </div>
-              {/* 角色列表 */}
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>
-                {language === 'zh' ? '角色映射 (原人名 → 替换为)' : 'Character Mapping (Original → Replace with)'}
-              </div>
-              {characterMemory.map((char) => (
-                <div key={char.id} style={{ display: 'flex', gap: 4, marginBottom: 4, alignItems: 'center' }}>
-                  <input
-                    value={char.originalName}
-                    onChange={(e) => updateCharacter(char.id, e.target.value, char.replaceWith, char.description)}
-                    placeholder={language === 'zh' ? '原人名' : 'Original'}
-                    style={{ flex: 1, padding: 4, fontSize: 10, borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg-secondary)', color: 'var(--text-primary)' }}
-                  />
-                  <span style={{ color: 'var(--text-muted)' }}>→</span>
-                  <input
-                    value={char.replaceWith}
-                    onChange={(e) => updateCharacter(char.id, char.originalName, e.target.value, char.description)}
-                    placeholder={language === 'zh' ? '替换名' : 'Replace'}
-                    style={{ flex: 1, padding: 4, fontSize: 10, borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg-secondary)', color: 'var(--text-primary)' }}
-                  />
-                  <input
-                    value={char.description}
-                    onChange={(e) => updateCharacter(char.id, char.originalName, char.replaceWith, e.target.value)}
-                    placeholder={language === 'zh' ? '描述' : 'Desc'}
-                    style={{ flex: 1.5, padding: 4, fontSize: 10, borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg-secondary)', color: 'var(--text-primary)' }}
-                  />
-                  <button onClick={() => deleteCharacter(char.id)} style={{ padding: 4, background: 'transparent', border: 'none', color: 'var(--danger)' }}>
-                    <X size={12} />
-                  </button>
-                </div>
-              ))}
-              <button
-                onClick={() => addCharacter('', '', '')}
-                style={{ width: '100%', padding: 6, background: 'var(--bg-secondary)', border: '1px dashed var(--border)', borderRadius: 6, color: 'var(--text-muted)', fontSize: 11 }}
-              >
-                + {language === 'zh' ? '添加角色映射' : 'Add Character Mapping'}
-              </button>
-            </div>
-          )}
-
-          {/* 导出面板 */}
-          {showExportPanel && (
-            <div style={{ marginBottom: 8, padding: 8, background: 'var(--bg-tertiary)', borderRadius: 8 }}>
-              <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 6 }}>
-                {language === 'zh' ? '导出小说' : 'Export Novel'}
-              </div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button onClick={() => exportNovel('txt')} style={{ flex: 1, padding: 8, background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-secondary)', fontSize: 11 }}>
-                  📄 TXT
-                </button>
-                <button onClick={() => exportNovel('md')} style={{ flex: 1, padding: 8, background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-secondary)', fontSize: 11 }}>
-                  📝 Markdown
-                </button>
-                <button onClick={() => exportNovel('html')} style={{ flex: 1, padding: 8, background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-secondary)', fontSize: 11 }}>
-                  🌐 HTML
-                </button>
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6, textAlign: 'center' }}>
-                {language === 'zh' ? `已完成 ${modelQueue.filter(i => i.result).length}/${modelQueue.length} 章` : `${modelQueue.filter(i => i.result).length}/${modelQueue.length} chapters completed`}
-              </div>
-            </div>
-          )}
-
-          {/* 任务面板 */}
-          {showTaskPanel && (
-            <div style={{ marginBottom: 8, padding: 8, background: 'var(--bg-tertiary)', borderRadius: 8 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)' }}>
-                  {language === 'zh' ? '保存的任务' : 'Saved Tasks'}
-                </span>
-                <button
-                  onClick={() => { saveTask(conversation?.title || (language === 'zh' ? '未命名任务' : 'Untitled Task')); hapticFeedback('light'); }}
-                  disabled={modelQueue.length === 0}
-                  style={{ padding: '4px 8px', background: modelQueue.length > 0 ? 'var(--accent)' : 'var(--bg-secondary)', border: 'none', borderRadius: 4, color: modelQueue.length > 0 ? 'white' : 'var(--text-muted)', fontSize: 10 }}
-                >
-                  {language === 'zh' ? '保存当前' : 'Save Current'}
-                </button>
-              </div>
-              {savedTasks.length === 0 ? (
-                <div style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center', padding: 10 }}>
-                  {language === 'zh' ? '暂无保存的任务' : 'No saved tasks'}
-                </div>
-              ) : (
-                savedTasks.map((task) => (
-                  <div key={task.id} style={{ display: 'flex', gap: 4, marginBottom: 4, alignItems: 'center', padding: 6, background: 'var(--bg-secondary)', borderRadius: 6 }}>
-                    <span style={{ flex: 1, fontSize: 11, color: 'var(--text-primary)' }}>{task.name} ({task.queue.length}项)</span>
-                    <button onClick={() => { loadTask(task.id); setShowTaskPanel(false); hapticFeedback('light'); }} style={{ padding: 4, background: 'var(--accent)', border: 'none', borderRadius: 4, color: 'white', fontSize: 10 }}>
-                      {language === 'zh' ? '加载' : 'Load'}
-                    </button>
-                    <button onClick={() => deleteTask(task.id)} style={{ padding: 4, background: 'transparent', border: 'none', color: 'var(--danger)' }}>
-                      <X size={12} />
-                    </button>
-                  </div>
-                ))
-              )}
-            </div>
-          )}
-
-          {/* 分享面板 */}
-          {showSharePanel && (
-            <div style={{ marginBottom: 8, padding: 8, background: 'var(--bg-tertiary)', borderRadius: 8 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)' }}>
-                  🔗 {language === 'zh' ? '分享任务' : 'Share Task'}
-                </span>
-                <button onClick={() => setShowSharePanel(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', padding: 2 }}>
-                  <X size={14} />
-                </button>
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6 }}>
-                {language === 'zh' ? '复制链接分享给他人，对方打开即可导入任务' : 'Copy the link to share. Others can import by opening the link.'}
-              </div>
-              <div style={{ display: 'flex', gap: 4 }}>
-                <input
-                  value={shareLink}
-                  readOnly
-                  style={{ flex: 1, padding: 6, fontSize: 10, borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg-secondary)', color: 'var(--text-primary)' }}
-                />
-                <button
-                  onClick={() => {
-                    navigator.clipboard.writeText(shareLink);
-                    hapticFeedback('light');
-                  }}
-                  style={{ padding: '6px 10px', background: 'var(--accent)', border: 'none', borderRadius: 4, color: 'white', fontSize: 10 }}
-                >
-                  {language === 'zh' ? '复制' : 'Copy'}
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* AI 分析工具 */}
-          {modelQueue.filter(i => i.result).length >= 1 && (
-            <div style={{ marginBottom: 8, padding: 8, background: 'var(--bg-tertiary)', borderRadius: 8 }}>
-              <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 6 }}>
-                🤖 {language === 'zh' ? 'AI 分析工具' : 'AI Analysis Tools'}
-              </div>
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                <button
-                  onClick={checkStyleConsistency}
-                  disabled={isAnalyzing || modelQueue.filter(i => i.result).length < 2}
-                  style={{ padding: '6px 10px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-secondary)', fontSize: 11, opacity: modelQueue.filter(i => i.result).length >= 2 ? 1 : 0.5 }}
-                >
-                  📊 {language === 'zh' ? '风格检查' : 'Style Check'}
-                </button>
-                <button
-                  onClick={getContinuationSuggestion}
-                  disabled={isAnalyzing}
-                  style={{ padding: '6px 10px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-secondary)', fontSize: 11 }}
-                >
-                  💡 {language === 'zh' ? '续写建议' : 'Suggestion'}
-                </button>
-              </div>
-              {/* 分析结果 */}
-              {isAnalyzing && (
-                <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-muted)', fontSize: 12 }}>
-                  <div style={{ width: 14, height: 14, border: '2px solid var(--accent)', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
-                  {language === 'zh' ? 'AI 分析中...' : 'AI analyzing...'}
-                </div>
-              )}
-              {styleCheckResult && (
-                <div style={{ marginTop: 8, padding: 8, background: 'var(--bg-secondary)', borderRadius: 6, maxHeight: 200, overflow: 'auto' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                    <span style={{ fontSize: 11, fontWeight: 500, color: 'var(--accent)' }}>📊 {language === 'zh' ? '风格一致性分析' : 'Style Consistency Analysis'}</span>
-                    <button onClick={() => setStyleCheckResult(null)} style={{ padding: 2, background: 'transparent', border: 'none', color: 'var(--text-muted)' }}><X size={12} /></button>
-                  </div>
-                  <div style={{ fontSize: 11, color: 'var(--text-primary)', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{styleCheckResult}</div>
-                </div>
-              )}
-              {continuationSuggestion && (
-                <div style={{ marginTop: 8, padding: 8, background: 'var(--bg-secondary)', borderRadius: 6, maxHeight: 200, overflow: 'auto' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                    <span style={{ fontSize: 11, fontWeight: 500, color: 'var(--accent)' }}>💡 {language === 'zh' ? '续写建议' : 'Continuation Suggestion'}</span>
-                    <button onClick={() => setContinuationSuggestion(null)} style={{ padding: 2, background: 'transparent', border: 'none', color: 'var(--text-muted)' }}><X size={12} /></button>
-                  </div>
-                  <div style={{ fontSize: 11, color: 'var(--text-primary)', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{continuationSuggestion}</div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* 模型选择器 */}
-          {showModelSelector && (
-            <div style={{ marginBottom: 8, padding: 8, background: 'var(--bg-tertiary)', borderRadius: 8 }}>
-              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>
-                {language === 'zh' ? '点击添加模型到队列（可重复添加）' : 'Click to add models (can add duplicates)'}
-              </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                {CHAT_MODELS.map((m) => (
-                  <button
-                    key={m.id}
-                    onClick={() => {
-                      hapticFeedback('light');
-                      addModelToQueue(m.id);
-                    }}
-                    style={{
-                      padding: '6px 10px',
-                      background: 'var(--bg-secondary)',
-                      border: '1px solid var(--border)',
-                      borderRadius: 8,
-                      color: 'var(--text-secondary)',
-                      fontSize: 12,
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 4,
-                    }}
-                  >
-                    <Plus size={12} />
-                    {m.name}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
 
           {/* 队列列表 */}
           <div style={{ flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -1928,6 +1534,33 @@ Please give concise and creative suggestions:`;
           {/* 底部操作栏 */}
           {modelQueue.length > 0 && (
             <div style={{ display: 'flex', gap: 8, marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--border)' }}>
+              {/* 功能按钮组 */}
+              <div style={{ display: 'flex', gap: 4 }}>
+                <button
+                  onClick={() => setShowExportPanel(!showExportPanel)}
+                  style={{ padding: '6px 8px', background: showExportPanel ? 'var(--accent)' : 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 6, color: showExportPanel ? 'white' : 'var(--text-secondary)', fontSize: 11 }}
+                  title={language === 'zh' ? '导出' : 'Export'}
+                >
+                  <Download size={12} />
+                </button>
+                <button
+                  onClick={() => setShowTaskPanel(!showTaskPanel)}
+                  style={{ padding: '6px 8px', background: showTaskPanel ? 'var(--accent)' : 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 6, color: showTaskPanel ? 'white' : 'var(--text-secondary)', fontSize: 11 }}
+                  title={language === 'zh' ? '任务' : 'Tasks'}
+                >
+                  <Zap size={12} />
+                </button>
+                <button
+                  onClick={() => {
+                    generateShareLink();
+                  }}
+                  style={{ padding: '6px 8px', background: showSharePanel ? 'var(--accent)' : 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 6, color: showSharePanel ? 'white' : 'var(--text-secondary)', fontSize: 11 }}
+                  title={language === 'zh' ? '分享' : 'Share'}
+                >
+                  <Share2 size={12} />
+                </button>
+              </div>
+              {/* 主操作按钮 */}
               <button
                 onClick={clearModelQueue}
                 className="btn-secondary"
@@ -1954,6 +1587,97 @@ Please give concise and creative suggestions:`;
                   </>
                 )}
               </button>
+            </div>
+          )}
+
+          {/* 导出面板 */}
+          {showExportPanel && modelQueue.length > 0 && (
+            <div style={{ marginBottom: 8, padding: 8, background: 'var(--bg-tertiary)', borderRadius: 8 }}>
+              <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 6 }}>
+                {language === 'zh' ? '导出小说' : 'Export Novel'}
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={() => exportNovel('txt')} style={{ flex: 1, padding: 8, background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-secondary)', fontSize: 11 }}>
+                  📄 TXT
+                </button>
+                <button onClick={() => exportNovel('md')} style={{ flex: 1, padding: 8, background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-secondary)', fontSize: 11 }}>
+                  📝 Markdown
+                </button>
+                <button onClick={() => exportNovel('html')} style={{ flex: 1, padding: 8, background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-secondary)', fontSize: 11 }}>
+                  🌐 HTML
+                </button>
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6, textAlign: 'center' }}>
+                {language === 'zh' ? `已完成 ${modelQueue.filter(i => i.result).length}/${modelQueue.length} 章` : `${modelQueue.filter(i => i.result).length}/${modelQueue.length} chapters completed`}
+              </div>
+            </div>
+          )}
+
+          {/* 任务面板 */}
+          {showTaskPanel && modelQueue.length > 0 && (
+            <div style={{ marginBottom: 8, padding: 8, background: 'var(--bg-tertiary)', borderRadius: 8 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)' }}>
+                  {language === 'zh' ? '保存的任务' : 'Saved Tasks'}
+                </span>
+                <button
+                  onClick={() => { saveTask(conversation?.title || (language === 'zh' ? '未命名任务' : 'Untitled Task')); hapticFeedback('light'); }}
+                  disabled={modelQueue.length === 0}
+                  style={{ padding: '4px 8px', background: modelQueue.length > 0 ? 'var(--accent)' : 'var(--bg-secondary)', border: 'none', borderRadius: 4, color: modelQueue.length > 0 ? 'white' : 'var(--text-muted)', fontSize: 10 }}
+                >
+                  {language === 'zh' ? '保存当前' : 'Save Current'}
+                </button>
+              </div>
+              {savedTasks.length === 0 ? (
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center', padding: 10 }}>
+                  {language === 'zh' ? '暂无保存的任务' : 'No saved tasks'}
+                </div>
+              ) : (
+                savedTasks.map((task) => (
+                  <div key={task.id} style={{ display: 'flex', gap: 4, marginBottom: 4, alignItems: 'center', padding: 6, background: 'var(--bg-secondary)', borderRadius: 6 }}>
+                    <span style={{ flex: 1, fontSize: 11, color: 'var(--text-primary)' }}>{task.name} ({task.queue.length}项)</span>
+                    <button onClick={() => { loadTask(task.id); setShowTaskPanel(false); hapticFeedback('light'); }} style={{ padding: 4, background: 'var(--accent)', border: 'none', borderRadius: 4, color: 'white', fontSize: 10 }}>
+                      {language === 'zh' ? '加载' : 'Load'}
+                    </button>
+                    <button onClick={() => deleteTask(task.id)} style={{ padding: 4, background: 'transparent', border: 'none', color: 'var(--danger)' }}>
+                      <X size={12} />
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+
+          {/* 分享面板 */}
+          {showSharePanel && modelQueue.length > 0 && (
+            <div style={{ marginBottom: 8, padding: 8, background: 'var(--bg-tertiary)', borderRadius: 8 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)' }}>
+                  🔗 {language === 'zh' ? '分享任务' : 'Share Task'}
+                </span>
+                <button onClick={() => setShowSharePanel(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', padding: 2 }}>
+                  <X size={14} />
+                </button>
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6 }}>
+                {language === 'zh' ? '复制链接分享给他人，对方打开即可导入任务' : 'Copy the link to share. Others can import by opening the link.'}
+              </div>
+              <div style={{ display: 'flex', gap: 4 }}>
+                <input
+                  value={shareLink}
+                  readOnly
+                  style={{ flex: 1, padding: 6, fontSize: 10, borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg-secondary)', color: 'var(--text-primary)' }}
+                />
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(shareLink);
+                    hapticFeedback('light');
+                  }}
+                  style={{ padding: '6px 10px', background: 'var(--accent)', border: 'none', borderRadius: 4, color: 'white', fontSize: 10 }}
+                >
+                  {language === 'zh' ? '复制' : 'Copy'}
+                </button>
+              </div>
             </div>
           )}
         </div>
