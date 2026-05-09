@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { MessageSquare, Send, Trash2, Plus, ChevronLeft, Image as ImageIcon, X, Copy, Edit2, Check, Pencil, Search, StopCircle, Pin, PinOff, Download, Mic, Share2, Zap, CheckCircle, Circle, GitCompare } from 'lucide-react';
+import { MessageSquare, Send, Trash2, Plus, ChevronLeft, Image as ImageIcon, X, Copy, Edit2, Check, Pencil, Search, StopCircle, Pin, PinOff, Download, Mic, Share2, Zap, CheckCircle, Circle, GitCompare, Play, RefreshCw, ChevronDown, ChevronUp } from 'lucide-react';
 import { useAppStore, CHAT_MODELS } from './store';
-import { sendChatMessageStream, cancelChatRequest, compareChatModels } from './api';
+import { sendChatMessageStream, cancelChatRequest, executeModelQueue, regenerateQueueItem } from './api';
 import { t, Language } from './i18n';
 import { hapticFeedback, shareConversation } from './utils';
 import ReactMarkdown from 'react-markdown';
@@ -69,13 +69,15 @@ export default function ChatTab() {
     exportData,
     language,
     elderMode,
-    compareMode,
-    setCompareMode,
-    compareModelIds,
-    setCompareModelIds,
-    compareResults,
-    setCompareResults,
-    isCompareLoading,
+    // 模型队列
+    modelQueue,
+    addModelToQueue,
+    removeModelFromQueue,
+    updateQueueInstruction,
+    updateQueueResult,
+    clearModelQueue,
+    isQueueRunning,
+    currentQueueIndex,
   } = useAppStore();
 
   const T = (key: string) => t(key, language as Language);
@@ -100,7 +102,9 @@ export default function ChatTab() {
   const [selectedConvIds, setSelectedConvIds] = useState<Set<string>>(new Set()); // 选中的对话ID
   const [isMessageSelectMode, setIsMessageSelectMode] = useState(false); // 消息多选模式
   const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(new Set()); // 选中的消息ID
-  const [showComparePicker, setShowComparePicker] = useState(false); // 模型对比选择器
+  const [showQueuePanel, setShowQueuePanel] = useState(false); // 模型队列面板
+  const [showModelSelector, setShowModelSelector] = useState(false); // 模型选择器
+  const [expandedResults, setExpandedResults] = useState<Set<string>>(new Set()); // 展开的结果
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -513,7 +517,7 @@ export default function ChatTab() {
 
   const handleSend = async () => {
     if (!input.trim() && !attachedImage) return;
-    if (isChatLoading || isCompareLoading) return;
+    if (isChatLoading || isQueueRunning) return;
 
     setError(null);
     const messageText = input.trim();
@@ -523,42 +527,6 @@ export default function ChatTab() {
 
     // 标记需要滚动到底部
     shouldScrollToBottomRef.current = true;
-
-    // 对比模式
-    if (compareMode && compareModelIds.length >= 2) {
-      const { apiKey, addMessage } = useAppStore.getState();
-      if (!apiKey) {
-        setError(language === 'zh' ? '请先设置 API 密钥' : 'Please set API key first');
-        return;
-      }
-
-      const finalMessage = messageText || (language === 'zh' ? '请描述这张图片' : 'Describe this image');
-
-      // 添加用户消息
-      addMessage(finalMessage, 'user', imageToSend || undefined);
-
-      // 如果有图片，需要将图片包含在消息中
-      let messageContent: string | Array<{ type: string; text?: string; image_url?: { url: string } }> = finalMessage;
-      if (imageToSend) {
-        messageContent = [{ type: 'text', text: finalMessage }, { type: 'image_url', image_url: { url: imageToSend } }];
-      }
-
-      try {
-        const results = await compareChatModels(
-          messageContent,
-          compareModelIds,
-          (modelId, content) => {
-            // 实时更新进度
-            const { compareResults: currentResults } = useAppStore.getState();
-            useAppStore.getState().setCompareResults({ ...currentResults, [modelId]: content });
-          }
-        );
-        setCompareResults(results);
-      } catch (e) {
-        setError(String(e));
-      }
-      return;
-    }
 
     // 普通模式
     try {
@@ -570,6 +538,32 @@ export default function ChatTab() {
     } catch (e) {
       setStreamingContent('');
       setError(String(e));
+    }
+  };
+
+  // 执行模型队列
+  const handleExecuteQueue = async () => {
+    if (isQueueRunning || modelQueue.length === 0) return;
+
+    try {
+      await executeModelQueue((queueId, content) => {
+        // 实时更新结果
+        updateQueueResult(queueId, content);
+      });
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  // 重新生成单个项
+  const handleRegenerateItem = async (queueId: string) => {
+    try {
+      const result = await regenerateQueueItem(queueId, (content) => {
+        updateQueueResult(queueId, content);
+      });
+      updateQueueResult(queueId, result);
+    } catch (e) {
+      updateQueueResult(queueId, `错误: ${e instanceof Error ? e.message : '请求失败'}`);
     }
   };
 
@@ -683,19 +677,38 @@ export default function ChatTab() {
             {currentModel?.name || T('selectModel')}
           </button>
           <button
-            onClick={() => setShowComparePicker(true)}
+            onClick={() => setShowQueuePanel(!showQueuePanel)}
             style={{
               padding: 6,
-              background: compareMode ? 'var(--accent-dim)' : 'transparent',
-              border: compareMode ? '1px solid var(--accent)' : '1px solid var(--border)',
+              background: modelQueue.length > 0 ? 'var(--accent-dim)' : 'transparent',
+              border: modelQueue.length > 0 ? '1px solid var(--accent)' : '1px solid var(--border)',
               borderRadius: 8,
-              color: compareMode ? 'var(--accent)' : 'var(--text-muted)',
+              color: modelQueue.length > 0 ? 'var(--accent)' : 'var(--text-muted)',
               display: 'flex',
               alignItems: 'center',
+              position: 'relative',
             }}
             title={T('modelCompare')}
           >
             <GitCompare size={16} />
+            {modelQueue.length > 0 && (
+              <span style={{
+                position: 'absolute',
+                top: -6,
+                right: -6,
+                background: 'var(--accent)',
+                color: 'white',
+                fontSize: 10,
+                minWidth: 16,
+                height: 16,
+                borderRadius: 8,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}>
+                {modelQueue.length}
+              </span>
+            )}
           </button>
         </div>
 
@@ -768,90 +781,225 @@ export default function ChatTab() {
         )}
       </div>
 
-      {/* Model Compare Picker */}
-      {showComparePicker && (
+      {/* Model Queue Panel */}
+      {showQueuePanel && (
         <div style={{
           position: 'absolute',
           top: 60,
-          left: 16,
-          right: 16,
-          background: 'var(--bg-tertiary)',
+          left: 8,
+          right: 8,
+          background: 'var(--bg-secondary)',
           borderRadius: 16,
-          padding: 16,
+          padding: 12,
           zIndex: 100,
           border: '1px solid var(--border)',
-          maxHeight: '70vh',
-          overflow: 'auto',
+          maxHeight: '80vh',
+          overflow: 'hidden',
+          display: 'flex',
+          flexDirection: 'column',
         }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-            <span style={{ fontWeight: 600, fontSize: 15, color: 'var(--text-primary)' }}>
-              {T('selectModelsToCompare')}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <span style={{ fontWeight: 600, fontSize: 14, color: 'var(--text-primary)' }}>
+              {language === 'zh' ? '批量创作队列' : 'Batch Creation Queue'}
             </span>
-            <button onClick={() => setShowComparePicker(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', padding: 4 }}>
-              <X size={18} />
-            </button>
-          </div>
-          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
-            {language === 'zh' ? '选择 2-3 个模型进行对比' : 'Select 2-3 models to compare'}
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {CHAT_MODELS.map((m) => (
+            <div style={{ display: 'flex', gap: 4 }}>
               <button
-                key={m.id}
-                onClick={() => {
-                  const newIds = [...compareModelIds];
-                  const idx = newIds.indexOf(m.id);
-                  if (idx >= 0) {
-                    newIds.splice(idx, 1);
-                  } else if (newIds.length < 3) {
-                    newIds.push(m.id);
-                  }
-                  setCompareModelIds(newIds);
-                }}
-                style={{
-                  padding: '10px 12px',
-                  background: compareModelIds.includes(m.id) ? 'var(--accent-dim)' : 'var(--bg-secondary)',
-                  border: '1px solid ' + (compareModelIds.includes(m.id) ? 'var(--accent)' : 'var(--border)'),
-                  borderRadius: 10,
-                  color: compareModelIds.includes(m.id) ? 'var(--accent)' : 'var(--text-secondary)',
-                  textAlign: 'left',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                }}
+                onClick={() => setShowModelSelector(!showModelSelector)}
+                style={{ padding: 6, background: 'var(--accent)', border: 'none', borderRadius: 6, color: 'white' }}
               >
-                <span>{m.name}</span>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                    {m.maxTokens >= 100000 ? T('longContext') : `${Math.round(m.maxTokens / 1000)}K`}
-                  </span>
-                  {compareModelIds.includes(m.id) && <Check size={14} color="var(--accent)" />}
-                </div>
+                <Plus size={14} />
               </button>
-            ))}
+              <button onClick={() => setShowQueuePanel(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', padding: 4 }}>
+                <X size={16} />
+              </button>
+            </div>
           </div>
-          <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
-            <button
-              onClick={() => setCompareModelIds([])}
-              className="btn-secondary"
-              style={{ flex: 1, padding: '10px' }}
-            >
-              {T('cancel')}
-            </button>
-            <button
-              onClick={() => {
-                if (compareModelIds.length >= 2) {
-                  setCompareMode(true);
-                  setShowComparePicker(false);
-                }
-              }}
-              disabled={compareModelIds.length < 2}
-              className="btn-primary"
-              style={{ flex: 1, padding: '10px', opacity: compareModelIds.length < 2 ? 0.5 : 1 }}
-            >
-              {language === 'zh' ? '开始对比' : 'Start Compare'}
-            </button>
+
+          {/* 模型选择器 */}
+          {showModelSelector && (
+            <div style={{ marginBottom: 8, padding: 8, background: 'var(--bg-tertiary)', borderRadius: 8 }}>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>
+                {language === 'zh' ? '点击添加模型到队列（可重复添加）' : 'Click to add models (can add duplicates)'}
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {CHAT_MODELS.map((m) => (
+                  <button
+                    key={m.id}
+                    onClick={() => {
+                      hapticFeedback('light');
+                      addModelToQueue(m.id);
+                    }}
+                    style={{
+                      padding: '6px 10px',
+                      background: 'var(--bg-secondary)',
+                      border: '1px solid var(--border)',
+                      borderRadius: 8,
+                      color: 'var(--text-secondary)',
+                      fontSize: 12,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 4,
+                    }}
+                  >
+                    <Plus size={12} />
+                    {m.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* 队列列表 */}
+          <div style={{ flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {modelQueue.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: 20, color: 'var(--text-muted)', fontSize: 13 }}>
+                {language === 'zh' ? '点击 + 添加模型到队列' : 'Click + to add models to queue'}
+              </div>
+            ) : (
+              modelQueue.map((item, index) => {
+                const model = CHAT_MODELS.find(m => m.id === item.modelId);
+                const isExpanded = expandedResults.has(item.id);
+                const isRunning = isQueueRunning && currentQueueIndex === index;
+                const isCompleted = item.result !== undefined;
+
+                return (
+                  <div key={item.id} style={{
+                    background: isRunning ? 'var(--accent-dim)' : 'var(--bg-tertiary)',
+                    borderRadius: 10,
+                    border: isRunning ? '1px solid var(--accent)' : '1px solid var(--border)',
+                    overflow: 'hidden',
+                  }}>
+                    {/* 标题栏 */}
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      padding: '8px 10px',
+                      background: 'var(--bg-secondary)',
+                    }}>
+                      <span style={{
+                        background: 'var(--accent)',
+                        color: 'white',
+                        fontSize: 10,
+                        fontWeight: 600,
+                        padding: '2px 6px',
+                        borderRadius: 4,
+                        minWidth: 20,
+                        textAlign: 'center',
+                      }}>
+                        {index + 1}
+                      </span>
+                      <span style={{ flex: 1, fontSize: 12, fontWeight: 500, color: 'var(--text-primary)' }}>
+                        {model?.name}
+                      </span>
+                      {isRunning && (
+                        <div style={{ width: 14, height: 14, border: '2px solid var(--accent)', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+                      )}
+                      {isCompleted && !isRunning && (
+                        <button
+                          onClick={() => handleRegenerateItem(item.id)}
+                          style={{ padding: 4, background: 'transparent', border: 'none', color: 'var(--text-muted)' }}
+                        >
+                          <RefreshCw size={12} />
+                        </button>
+                      )}
+                      <button
+                        onClick={() => {
+                          const newSet = new Set(expandedResults);
+                          if (newSet.has(item.id)) newSet.delete(item.id);
+                          else newSet.add(item.id);
+                          setExpandedResults(newSet);
+                        }}
+                        style={{ padding: 4, background: 'transparent', border: 'none', color: 'var(--text-muted)' }}
+                      >
+                        {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                      </button>
+                      <button
+                        onClick={() => removeModelFromQueue(item.id)}
+                        style={{ padding: 4, background: 'transparent', border: 'none', color: 'var(--danger)' }}
+                      >
+                        <X size={12} />
+                      </button>
+                    </div>
+
+                    {/* 指令输入 */}
+                    <div style={{ padding: '6px 10px' }}>
+                      <textarea
+                        value={item.instruction}
+                        onChange={(e) => updateQueueInstruction(item.id, e.target.value)}
+                        placeholder={language === 'zh' ? '输入指令，如：写第一章' : 'Enter instruction, e.g.: Write chapter 1'}
+                        style={{
+                          width: '100%',
+                          minHeight: 36,
+                          maxHeight: 80,
+                          padding: '6px 8px',
+                          fontSize: 12,
+                          borderRadius: 6,
+                          border: '1px solid var(--border)',
+                          background: 'var(--bg-secondary)',
+                          color: 'var(--text-primary)',
+                          resize: 'vertical',
+                        }}
+                      />
+                    </div>
+
+                    {/* 结果显示 */}
+                    {isExpanded && (
+                      <div style={{ padding: '6px 10px', borderTop: '1px solid var(--border)' }}>
+                        {item.result ? (
+                          <div style={{
+                            fontSize: 12,
+                            color: 'var(--text-primary)',
+                            maxHeight: 200,
+                            overflow: 'auto',
+                            lineHeight: 1.5,
+                          }}>
+                            <ReactMarkdown>{item.result}</ReactMarkdown>
+                          </div>
+                        ) : (
+                          <div style={{ fontSize: 12, color: 'var(--text-muted)', textAlign: 'center', padding: 10 }}>
+                            {language === 'zh' ? '等待执行...' : 'Waiting to execute...'}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+            )}
           </div>
+
+          {/* 底部操作栏 */}
+          {modelQueue.length > 0 && (
+            <div style={{ display: 'flex', gap: 8, marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--border)' }}>
+              <button
+                onClick={clearModelQueue}
+                className="btn-secondary"
+                style={{ flex: 1, padding: '8px', fontSize: 12 }}
+              >
+                <Trash2 size={14} style={{ marginRight: 4 }} />
+                {language === 'zh' ? '清空' : 'Clear'}
+              </button>
+              <button
+                onClick={handleExecuteQueue}
+                disabled={isQueueRunning || modelQueue.every(item => !item.instruction.trim())}
+                className="btn-primary"
+                style={{ flex: 2, padding: '8px', fontSize: 12 }}
+              >
+                {isQueueRunning ? (
+                  <>
+                    <div style={{ width: 14, height: 14, border: '2px solid white', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 1s linear infinite', marginRight: 6 }} />
+                    {language === 'zh' ? `执行中 (${currentQueueIndex + 1}/${modelQueue.length})` : `Running (${currentQueueIndex + 1}/${modelQueue.length})`}
+                  </>
+                ) : (
+                  <>
+                    <Play size={14} style={{ marginRight: 4 }} />
+                    {language === 'zh' ? '开始执行' : 'Start Execution'}
+                  </>
+                )}
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -1028,88 +1176,6 @@ export default function ChatTab() {
         {error && (
           <div style={{ padding: 12, background: 'rgba(239, 68, 68, 0.1)', borderRadius: 12, color: 'var(--danger)', fontSize: 14 }}>
             {error}
-          </div>
-        )}
-
-        {/* 模型对比结果 */}
-        {compareMode && Object.keys(compareResults).length > 0 && (
-          <div style={{ marginTop: 16 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <span style={{ fontWeight: 600, fontSize: 15, color: 'var(--text-primary)' }}>
-                {T('compareResults')}
-              </span>
-              <button
-                onClick={() => {
-                  setCompareMode(false);
-                  setCompareResults({});
-                  setCompareModelIds([]);
-                }}
-                style={{ padding: '4px 12px', background: 'var(--bg-tertiary)', border: 'none', borderRadius: 8, color: 'var(--text-muted)', fontSize: 12 }}
-              >
-                {T('cancel')}
-              </button>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              {compareModelIds.map((modelId) => {
-                const model = CHAT_MODELS.find(m => m.id === modelId);
-                const result = compareResults[modelId];
-                return (
-                  <div key={modelId} style={{ background: 'var(--bg-secondary)', borderRadius: 12, overflow: 'hidden', border: '1px solid var(--border)' }}>
-                    <div style={{ padding: '8px 12px', background: 'var(--bg-tertiary)', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span style={{ fontWeight: 500, fontSize: 13, color: 'var(--accent)' }}>{model?.name}</span>
-                      <button
-                        onClick={() => {
-                          navigator.clipboard.writeText(result || '');
-                        }}
-                        style={{ padding: 4, background: 'transparent', border: 'none', color: 'var(--text-muted)' }}
-                      >
-                        <Copy size={14} />
-                      </button>
-                    </div>
-                    <div style={{ padding: 12, fontSize: 14, color: 'var(--text-primary)', lineHeight: 1.6 }}>
-                      {result ? (
-                        <ReactMarkdown>{result}</ReactMarkdown>
-                      ) : (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                          <div className="skeleton" style={{ height: 14, width: '100%', borderRadius: 4 }} />
-                          <div className="skeleton" style={{ height: 14, width: '80%', borderRadius: 4 }} />
-                          <div className="skeleton" style={{ height: 14, width: '60%', borderRadius: 4 }} />
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* 对比模式加载中 */}
-        {isCompareLoading && (
-          <div style={{ marginTop: 16 }}>
-            <div style={{ fontWeight: 600, fontSize: 15, color: 'var(--text-primary)', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span className="loading-spinner" style={{ width: 16, height: 16, border: '2px solid var(--accent)', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
-              {T('comparing')}
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              {compareModelIds.map((modelId) => {
-                const model = CHAT_MODELS.find(m => m.id === modelId);
-                return (
-                  <div key={modelId} style={{ background: 'var(--bg-secondary)', borderRadius: 12, overflow: 'hidden', border: '1px solid var(--border)' }}>
-                    <div style={{ padding: '8px 12px', background: 'var(--bg-tertiary)', borderBottom: '1px solid var(--border)' }}>
-                      <span style={{ fontWeight: 500, fontSize: 13, color: 'var(--accent)' }}>{model?.name}</span>
-                    </div>
-                    <div style={{ padding: 12 }}>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                        <div className="skeleton" style={{ height: 14, width: '100%', borderRadius: 4 }} />
-                        <div className="skeleton" style={{ height: 14, width: '80%', borderRadius: 4 }} />
-                        <div className="skeleton" style={{ height: 14, width: '60%', borderRadius: 4 }} />
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
           </div>
         )}
 

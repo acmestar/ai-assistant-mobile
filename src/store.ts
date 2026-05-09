@@ -315,15 +315,18 @@ interface AppState {
   elderMode: boolean; // 长辈模式
   setElderMode: (enabled: boolean) => void;
 
-  // 模型对比
-  compareMode: boolean;
-  setCompareMode: (enabled: boolean) => void;
-  compareModelIds: string[];
-  setCompareModelIds: (ids: string[]) => void;
-  compareResults: Record<string, string>; // modelId -> response
-  setCompareResults: (results: Record<string, string>) => void;
-  isCompareLoading: boolean;
-  setIsCompareLoading: (loading: boolean) => void;
+  // 模型队列（支持重复模型、顺序执行）
+  modelQueue: Array<{ id: string; modelId: string; instruction: string; result?: string }>;
+  setModelQueue: (queue: Array<{ id: string; modelId: string; instruction: string; result?: string }>) => void;
+  addModelToQueue: (modelId: string) => void;
+  removeModelFromQueue: (id: string) => void;
+  updateQueueInstruction: (id: string, instruction: string) => void;
+  updateQueueResult: (id: string, result: string) => void;
+  clearModelQueue: () => void;
+  isQueueRunning: boolean;
+  setIsQueueRunning: (running: boolean) => void;
+  currentQueueIndex: number;
+  setCurrentQueueIndex: (index: number) => void;
 
   // Actions
   createConversation: () => string;
@@ -403,15 +406,35 @@ export const useAppStore = create<AppState>()(
       elderMode: false,
       setElderMode: (elderMode) => set({ elderMode }),
 
-      // 模型对比
-      compareMode: false,
-      setCompareMode: (compareMode) => set({ compareMode, compareResults: {} }),
-      compareModelIds: [],
-      setCompareModelIds: (compareModelIds) => set({ compareModelIds }),
-      compareResults: {},
-      setCompareResults: (compareResults) => set({ compareResults }),
-      isCompareLoading: false,
-      setIsCompareLoading: (isCompareLoading) => set({ isCompareLoading }),
+      // 模型队列
+      modelQueue: [],
+      setModelQueue: (modelQueue) => set({ modelQueue }),
+      addModelToQueue: (modelId) => set((state) => ({
+        modelQueue: [...state.modelQueue, {
+          id: Date.now().toString() + Math.random().toString(36).slice(2, 7),
+          modelId,
+          instruction: '',
+          result: undefined,
+        }],
+      })),
+      removeModelFromQueue: (id) => set((state) => ({
+        modelQueue: state.modelQueue.filter((item) => item.id !== id),
+      })),
+      updateQueueInstruction: (id, instruction) => set((state) => ({
+        modelQueue: state.modelQueue.map((item) =>
+          item.id === id ? { ...item, instruction } : item
+        ),
+      })),
+      updateQueueResult: (id, result) => set((state) => ({
+        modelQueue: state.modelQueue.map((item) =>
+          item.id === id ? { ...item, result } : item
+        ),
+      })),
+      clearModelQueue: () => set({ modelQueue: [], currentQueueIndex: 0 }),
+      isQueueRunning: false,
+      setIsQueueRunning: (isQueueRunning) => set({ isQueueRunning }),
+      currentQueueIndex: 0,
+      setCurrentQueueIndex: (currentQueueIndex) => set({ currentQueueIndex }),
 
       // Actions
       createConversation: () => {

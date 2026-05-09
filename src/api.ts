@@ -509,28 +509,46 @@ async function generateGeminiImage(apiKey: string, modelId: string, prompt: stri
   }
 }
 
-// 模型对比 - 同时向多个模型发送相同消息
-export async function compareChatModels(
-  userMessage: string | Array<{ type: string; text?: string; image_url?: { url: string } }>,
-  modelIds: string[],
-  onProgress?: (modelId: string, content: string) => void
-): Promise<Record<string, string>> {
-  const { apiKey, setIsCompareLoading, setCompareResults } = useAppStore.getState();
+// 执行模型队列 - 顺序执行，每个模型可以有不同的指令
+export async function executeModelQueue(
+  onProgress?: (queueId: string, content: string, isComplete: boolean) => void
+): Promise<void> {
+  const { apiKey, modelQueue, setIsQueueRunning, updateQueueResult, setCurrentQueueIndex, getCurrentConversation } = useAppStore.getState();
   if (!apiKey) throw new Error('请先设置 API Key');
+  if (modelQueue.length === 0) return;
 
-  setIsCompareLoading(true);
-  const results: Record<string, string> = {};
+  setIsQueueRunning(true);
+
+  // 获取当前对话的历史消息作为上下文
+  const conversation = getCurrentConversation();
+  const contextMessages: Array<{ role: string; content: string }> = [];
+  if (conversation) {
+    for (const msg of conversation.messages) {
+      contextMessages.push({ role: msg.role, content: msg.content });
+    }
+  }
 
   try {
-    const promises = modelIds.map(async (modelId) => {
+    for (let i = 0; i < modelQueue.length; i++) {
+      const item = modelQueue[i];
+      if (!item.instruction.trim()) continue;
+
+      setCurrentQueueIndex(i);
+
       try {
+        // 构建消息：上下文 + 当前指令
+        const messages = [
+          ...contextMessages,
+          { role: 'user' as const, content: item.instruction },
+        ];
+
         const resp = await fetch(`${API_BASE}/chat/completions`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
           body: JSON.stringify({
-            model: modelId,
-            messages: [{ role: 'user', content: userMessage }],
-            max_tokens: 4096,
+            model: item.modelId,
+            messages,
+            max_tokens: 8192,
             stream: true,
           }),
         });
@@ -561,27 +579,182 @@ export async function compareChatModels(
                 const chunk = parsed.choices?.[0]?.delta?.content || '';
                 if (chunk) {
                   content += chunk;
-                  onProgress?.(modelId, content);
+                  onProgress?.(item.id, content, false);
                 }
               } catch {}
             }
           }
         }
 
-        results[modelId] = content;
-        return { modelId, content };
-      } catch (e) {
-        results[modelId] = `错误: ${e instanceof Error ? e.message : '请求失败'}`;
-        return { modelId, content: results[modelId] };
-      }
-    });
+        // 完成后更新结果
+        updateQueueResult(item.id, content);
+        onProgress?.(item.id, content, true);
 
-    await Promise.all(promises);
-    setCompareResults(results);
-    return results;
+        // 将结果添加到对话历史（作为上下文供后续模型使用）
+        contextMessages.push({ role: 'user', content: item.instruction });
+        contextMessages.push({ role: 'assistant', content });
+
+      } catch (e) {
+        const errorMsg = `错误: ${e instanceof Error ? e.message : '请求失败'}`;
+        updateQueueResult(item.id, errorMsg);
+        onProgress?.(item.id, errorMsg, true);
+      }
+    }
   } finally {
-    setIsCompareLoading(false);
+    setIsQueueRunning(false);
+    setCurrentQueueIndex(0);
   }
+}
+
+// 重新生成单个队列项
+export async function regenerateQueueItem(
+  queueId: string,
+  onProgress?: (content: string) => void
+): Promise<string> {
+  const { apiKey, modelQueue, getCurrentConversation } = useAppStore.getState();
+  if (!apiKey) throw new Error('请先设置 API Key');
+
+  const item = modelQueue.find(q => q.id === queueId);
+  if (!item || !item.instruction.trim()) return '';
+
+  // 获取当前对话的历史消息
+  const conversation = getCurrentConversation();
+  const contextMessages: Array<{ role: string; content: string }> = [];
+  if (conversation) {
+    for (const msg of conversation.messages) {
+      contextMessages.push({ role: msg.role, content: msg.content });
+    }
+  }
+
+  // 找到当前项之前的所有队列结果作为上下文
+  const currentIndex = modelQueue.findIndex(q => q.id === queueId);
+  for (let i = 0; i < currentIndex; i++) {
+    const prevItem = modelQueue[i];
+    if (prevItem.instruction && prevItem.result) {
+      contextMessages.push({ role: 'user', content: prevItem.instruction });
+      contextMessages.push({ role: 'assistant', content: prevItem.result });
+    }
+  }
+
+  const messages = [
+    ...contextMessages,
+    { role: 'user' as const, content: item.instruction },
+  ];
+
+  const resp = await fetch(`${API_BASE}/chat/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({
+      model: item.modelId,
+      messages,
+      max_tokens: 8192,
+      stream: true,
+    }),
+  });
+
+  if (!resp.ok) throw new Error(`API 错误: ${resp.status}`);
+
+  const reader = resp.body?.getReader();
+  if (!reader) throw new Error('无法读取响应');
+
+  const decoder = new TextDecoder();
+  let content = '';
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+
+    for (const line of lines) {
+      if (line.startsWith('data: ')) {
+        const data = line.slice(6);
+        if (data === '[DONE]') continue;
+        try {
+          const parsed = JSON.parse(data);
+          const chunk = parsed.choices?.[0]?.delta?.content || '';
+          if (chunk) {
+            content += chunk;
+            onProgress?.(content);
+          }
+        } catch {}
+      }
+    }
+  }
+
+  return content;
+}
+
+// 模型对比 - 同时向多个模型发送相同消息
+export async function compareChatModels(
+  userMessage: string | Array<{ type: string; text?: string; image_url?: { url: string } }>,
+  modelIds: string[],
+  onProgress?: (modelId: string, content: string) => void
+): Promise<Record<string, string>> {
+  const { apiKey } = useAppStore.getState();
+  if (!apiKey) throw new Error('请先设置 API Key');
+
+  const results: Record<string, string> = {};
+
+  const promises = modelIds.map(async (modelId) => {
+    try {
+      const resp = await fetch(`${API_BASE}/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({
+          model: modelId,
+          messages: [{ role: 'user', content: userMessage }],
+          max_tokens: 4096,
+          stream: true,
+        }),
+      });
+
+      if (!resp.ok) throw new Error(`API 错误: ${resp.status}`);
+
+      const reader = resp.body?.getReader();
+      if (!reader) throw new Error('无法读取响应');
+
+      const decoder = new TextDecoder();
+      let content = '';
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6);
+            if (data === '[DONE]') continue;
+            try {
+              const parsed = JSON.parse(data);
+              const chunk = parsed.choices?.[0]?.delta?.content || '';
+              if (chunk) {
+                content += chunk;
+                onProgress?.(modelId, content);
+              }
+            } catch {}
+          }
+        }
+      }
+
+      results[modelId] = content;
+      return { modelId, content };
+    } catch (e) {
+      results[modelId] = `错误: ${e instanceof Error ? e.message : '请求失败'}`;
+      return { modelId, content: results[modelId] };
+    }
+  });
+
+  await Promise.all(promises);
+  return results;
 }
 
 // 图片模型对比

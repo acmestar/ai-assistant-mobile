@@ -1,12 +1,12 @@
 import { useState, useRef, useEffect } from 'react';
-import { Image as ImageIcon, Sparkles, Trash2, Download, Upload, X, Maximize2, Clock, Sliders, AlertCircle, ZoomIn, ZoomOut, RotateCw, StopCircle, Wand2, Mic, Share2, GitCompare, Check } from 'lucide-react';
+import { Image as ImageIcon, Sparkles, Trash2, Download, Upload, X, Maximize2, Clock, Sliders, AlertCircle, ZoomIn, ZoomOut, RotateCw, StopCircle, Wand2, Mic, Share2 } from 'lucide-react';
 import { useAppStore, IMAGE_MODELS, GPT2_RATIO_LABELS, GPT2_QUALITY_LABELS, getImageModelDef, PROMPT_TEMPLATES } from './store';
-import { generateImage, cancelImageRequest, compareImageModels } from './api';
+import { generateImage, cancelImageRequest } from './api';
 import { t, Language } from './i18n';
 import { hapticFeedback, shareImage } from './utils';
 
 export default function ImageTab() {
-  const { imageModelId, setImageModelId, imageRatio, setImageRatio, imageQuality, setImageQuality, imageRecords, isImageLoading, deleteImageRecord, clearImageRecords, pendingImageRequest, setPendingImageRequest, language, compareMode, setCompareMode, compareModelIds, setCompareModelIds, isCompareLoading, setIsCompareLoading } = useAppStore();
+  const { imageModelId, setImageModelId, imageRatio, setImageRatio, imageQuality, setImageQuality, imageRecords, isImageLoading, deleteImageRecord, clearImageRecords, pendingImageRequest, setPendingImageRequest, language } = useAppStore();
 
   const T = (key: string) => t(key, language as Language);
   const [prompt, setPrompt] = useState('');
@@ -20,8 +20,6 @@ export default function ImageTab() {
   const [imageScale, setImageScale] = useState(1);
   const [imageRotation, setImageRotation] = useState(0);
   const [searchQuery, setSearchQuery] = useState('');
-  const [showComparePicker, setShowComparePicker] = useState(false); // 模型对比选择器
-  const [compareResults, setCompareResults] = useState<Record<string, string>>({}); // 对比结果
   const [swipeId, setSwipeId] = useState<string | null>(null); // 正在滑动的图片ID
   const [swipeX, setSwipeX] = useState(0); // 滑动偏移量
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -243,40 +241,11 @@ export default function ImageTab() {
     : currentModel.ratios;
 
   const handleGenerate = async () => {
-    if (!prompt.trim() || isImageLoading || isCompareLoading) return;
+    if (!prompt.trim() || isImageLoading) return;
     setError(null);
     const promptText = prompt.trim();
     setPrompt('');
 
-    // 对比模式
-    if (compareMode && compareModelIds.length >= 2) {
-      const { apiKey } = useAppStore.getState();
-      if (!apiKey) {
-        setError(language === 'zh' ? '请先设置 API 密钥' : 'Please set API key first');
-        return;
-      }
-
-      setIsCompareLoading(true);
-      setCompareResults({});
-
-      try {
-        const results = await compareImageModels(
-          promptText,
-          compareModelIds,
-          (modelId, status) => {
-            setCompareResults(prev => ({ ...prev, [modelId]: status }));
-          }
-        );
-        setCompareResults(results);
-      } catch (e) {
-        setError(String(e));
-      } finally {
-        setIsCompareLoading(false);
-      }
-      return;
-    }
-
-    // 普通模式
     try {
       await generateImage(promptText, referenceImage || undefined);
       setReferenceImage(null);
@@ -370,21 +339,6 @@ export default function ImageTab() {
           <button onClick={() => setShowModelPicker(!showModelPicker)} className="model-chip" style={{ border: '1px solid var(--accent)', color: 'var(--accent)' }}>
             {currentModel.name}
           </button>
-          <button
-            onClick={() => setShowComparePicker(true)}
-            style={{
-              padding: 6,
-              background: compareMode ? 'var(--accent-dim)' : 'transparent',
-              border: compareMode ? '1px solid var(--accent)' : '1px solid var(--border)',
-              borderRadius: 8,
-              color: compareMode ? 'var(--accent)' : 'var(--text-muted)',
-              display: 'flex',
-              alignItems: 'center',
-            }}
-            title={T('modelCompare')}
-          >
-            <GitCompare size={16} />
-          </button>
         </div>
         <button onClick={handleDownloadAll} className="btn-secondary" style={{ padding: 8 }} title={T('downloadAll')}><Download size={18} /></button>
       </div>
@@ -431,79 +385,6 @@ export default function ImageTab() {
         </div>
       )}
 
-      {/* Model Compare Picker */}
-      {showComparePicker && (
-        <div style={{ position: 'absolute', top: 60, left: 16, right: 16, background: 'var(--bg-tertiary)', borderRadius: 16, padding: 16, zIndex: 100, border: '1px solid var(--border)', maxHeight: '70vh', overflow: 'auto' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-            <span style={{ fontWeight: 600, fontSize: 15, color: 'var(--text-primary)' }}>
-              {T('selectModelsToCompare')}
-            </span>
-            <button onClick={() => setShowComparePicker(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', padding: 4 }}>
-              <X size={18} />
-            </button>
-          </div>
-          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
-            {language === 'zh' ? '选择 2-3 个模型进行对比生成' : 'Select 2-3 models to compare'}
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {IMAGE_MODELS.map((m) => (
-              <button
-                key={m.id}
-                onClick={() => {
-                  const newIds = [...compareModelIds];
-                  const idx = newIds.indexOf(m.id);
-                  if (idx >= 0) {
-                    newIds.splice(idx, 1);
-                  } else if (newIds.length < 3) {
-                    newIds.push(m.id);
-                  }
-                  setCompareModelIds(newIds);
-                }}
-                style={{
-                  padding: '10px 12px',
-                  background: compareModelIds.includes(m.id) ? 'var(--accent-dim)' : 'var(--bg-secondary)',
-                  border: '1px solid ' + (compareModelIds.includes(m.id) ? 'var(--accent)' : 'var(--border)'),
-                  borderRadius: 10,
-                  color: compareModelIds.includes(m.id) ? 'var(--accent)' : 'var(--text-secondary)',
-                  textAlign: 'left',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ padding: '2px 8px', background: 'var(--bg-tertiary)', borderRadius: 6, fontSize: 12 }}>{m.tag}</span>
-                  <span>{m.name}</span>
-                </div>
-                {compareModelIds.includes(m.id) && <Check size={14} color="var(--accent)" />}
-              </button>
-            ))}
-          </div>
-          <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
-            <button
-              onClick={() => { setCompareModelIds([]); setCompareMode(false); setCompareResults({}); }}
-              className="btn-secondary"
-              style={{ flex: 1, padding: '10px' }}
-            >
-              {T('cancel')}
-            </button>
-            <button
-              onClick={() => {
-                if (compareModelIds.length >= 2) {
-                  setCompareMode(true);
-                  setShowComparePicker(false);
-                }
-              }}
-              disabled={compareModelIds.length < 2}
-              className="btn-primary"
-              style={{ flex: 1, padding: '10px', opacity: compareModelIds.length < 2 ? 0.5 : 1 }}
-            >
-              {language === 'zh' ? '开始对比' : 'Start Compare'}
-            </button>
-          </div>
-        </div>
-      )}
-
       {/* Images Grid */}
       <div style={{ flex: 1, overflow: 'auto', padding: 16, background: 'var(--bg-primary)' }}>
         {/* 搜索框 */}
@@ -534,81 +415,6 @@ export default function ImageTab() {
             <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>{language === 'zh' ? 'AI 正在创作中，请稍候...' : 'AI is creating, please wait...'}</p>
             <div style={{ marginTop: 16, height: 4, background: 'var(--bg-secondary)', borderRadius: 2, overflow: 'hidden' }}>
               <div style={{ height: '100%', background: 'var(--accent)', borderRadius: 2, animation: 'progress 2s ease-in-out infinite' }} />
-            </div>
-          </div>
-        )}
-
-        {/* 模型对比结果 */}
-        {compareMode && Object.keys(compareResults).length > 0 && (
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <span style={{ fontWeight: 600, fontSize: 15, color: 'var(--text-primary)' }}>
-                {T('compareResults')}
-              </span>
-              <button
-                onClick={() => {
-                  setCompareMode(false);
-                  setCompareResults({});
-                  setCompareModelIds([]);
-                }}
-                style={{ padding: '4px 12px', background: 'var(--bg-tertiary)', border: 'none', borderRadius: 8, color: 'var(--text-muted)', fontSize: 12 }}
-              >
-                {T('cancel')}
-              </button>
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: compareModelIds.length === 2 ? 'repeat(2, 1fr)' : 'repeat(3, 1fr)', gap: 8 }}>
-              {compareModelIds.map((modelId) => {
-                const model = IMAGE_MODELS.find(m => m.id === modelId);
-                const result = compareResults[modelId];
-                const isImage = result && (result.startsWith('http') || result.startsWith('data:image'));
-                const isError = result && result.startsWith('错误');
-                const isLoading = !result || result === '生成中...' || result === '完成' || result === '失败';
-
-                return (
-                  <div key={modelId} style={{ background: 'var(--bg-secondary)', borderRadius: 12, overflow: 'hidden', border: '1px solid var(--border)' }}>
-                    <div style={{ padding: '6px 10px', background: 'var(--bg-tertiary)', borderBottom: '1px solid var(--border)', textAlign: 'center' }}>
-                      <span style={{ fontWeight: 500, fontSize: 11, color: 'var(--accent)' }}>{model?.name}</span>
-                    </div>
-                    <div style={{ aspectRatio: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-tertiary)' }}>
-                      {isLoading && !isImage ? (
-                        <div style={{ textAlign: 'center' }}>
-                          <div style={{ width: 24, height: 24, border: '2px solid var(--accent)', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 8px' }} />
-                          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{result || '生成中...'}</span>
-                        </div>
-                      ) : isError ? (
-                        <span style={{ fontSize: 11, color: 'var(--danger)', padding: 8, textAlign: 'center' }}>{result}</span>
-                      ) : isImage ? (
-                        <img src={result} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onClick={() => setSelectedImage(result)} />
-                      ) : null}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* 对比模式加载中 */}
-        {isCompareLoading && Object.keys(compareResults).length === 0 && (
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ fontWeight: 600, fontSize: 15, color: 'var(--text-primary)', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <div style={{ width: 16, height: 16, border: '2px solid var(--accent)', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
-              {T('comparing')}
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: compareModelIds.length === 2 ? 'repeat(2, 1fr)' : 'repeat(3, 1fr)', gap: 8 }}>
-              {compareModelIds.map((modelId) => {
-                const model = IMAGE_MODELS.find(m => m.id === modelId);
-                return (
-                  <div key={modelId} style={{ background: 'var(--bg-secondary)', borderRadius: 12, overflow: 'hidden', border: '1px solid var(--border)' }}>
-                    <div style={{ padding: '6px 10px', background: 'var(--bg-tertiary)', borderBottom: '1px solid var(--border)', textAlign: 'center' }}>
-                      <span style={{ fontWeight: 500, fontSize: 11, color: 'var(--accent)' }}>{model?.name}</span>
-                    </div>
-                    <div style={{ aspectRatio: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-tertiary)' }}>
-                      <div style={{ width: 24, height: 24, border: '2px solid var(--accent)', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
-                    </div>
-                  </div>
-                );
-              })}
             </div>
           </div>
         )}
