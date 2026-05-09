@@ -73,6 +73,7 @@ export default function ChatTab() {
     modelQueue,
     addModelToQueue,
     removeModelFromQueue,
+    toggleQueueItem,
     updateQueueInstruction,
     updateQueueResult,
     clearModelQueue,
@@ -691,6 +692,109 @@ ${outlineText}`;
     setParsedOutline(null);
     setOutlineText('');
     hapticFeedback('medium');
+  };
+
+  // 续写大纲 - 根据已完成内容生成后续章节
+  const continueOutline = async () => {
+    const completedChapters = modelQueue.filter(item => item.result);
+    if (completedChapters.length === 0) {
+      setError(language === 'zh' ? '请先完成一些章节' : 'Please complete some chapters first');
+      return;
+    }
+
+    setIsAnalyzing(true);
+    setError(null);
+
+    try {
+      const { apiKey } = useAppStore.getState();
+      if (!apiKey) throw new Error('请先设置 API Key');
+
+      // 构建已完成章节的摘要
+      const chapterSummaries = completedChapters.map((item, index) => {
+        const content = item.result || '';
+        const summary = content.length > 300
+          ? content.slice(0, 150) + '...' + content.slice(-150)
+          : content;
+        return `${item.title || `第${index + 1}章`}：${summary}`;
+      }).join('\n\n');
+
+      const prompt = `你是一位专业的小说策划编辑。请根据已完成的章节内容，续写后续5章的大纲。
+
+【世界观设定】
+${worldSetting || '未设定'}
+
+【已完成章节摘要】
+${chapterSummaries}
+
+【角色设定】
+${characterMemory.map(c => `- ${c.replaceWith || c.originalName}：${c.description}`).join('\n') || '未设定'}
+
+请续写后续5章的大纲，要求：
+1. 承接已完成章节的剧情走向，保持连贯性
+2. 合理发展剧情，制造冲突和高潮
+3. 保持人物性格一致
+4. 为结局做铺垫
+
+返回JSON格式：
+{
+  "chapters": [
+    {
+      "title": "第X章：xxx",
+      "content": "详细剧情概要，包括场景、对话要点、情感变化、关键转折等..."
+    }
+  ]
+}
+
+注意：章节编号要接续已完成的章节。`;
+
+      const resp = await fetch('https://ai.acmestar.top/api/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({
+          model: 'grok-4.2',
+          messages: [{ role: 'user', content: prompt }],
+          max_tokens: 8000,
+        }),
+      });
+
+      if (!resp.ok) throw new Error(`API 错误: ${resp.status}`);
+      const data = await resp.json();
+      const content = data.choices?.[0]?.message?.content || '';
+
+      // 提取 JSON
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) throw new Error('AI 返回格式错误');
+
+      const result = JSON.parse(jsonMatch[0]);
+
+      // 限制章节数量
+      const MAX_CHAPTERS = 30;
+      const currentCount = modelQueue.length;
+      const availableSlots = MAX_CHAPTERS - currentCount;
+
+      if (availableSlots <= 0) {
+        setError(language === 'zh' ? '队列已满，请先清理一些章节' : 'Queue is full, please clear some chapters first');
+        return;
+      }
+
+      const chaptersToAdd = result.chapters.slice(0, availableSlots);
+
+      // 添加新章节到队列
+      chaptersToAdd.forEach((chapter: { title: string; content?: string }) => {
+        const instruction = chapter.content
+          ? `【${chapter.title}】\n\n章节剧情要求：\n${chapter.content}`
+          : `请写${chapter.title}`;
+        addModelToQueue(chatModelId, instruction, chapter.title);
+      });
+
+      hapticFeedback('medium');
+      setError(language === 'zh' ? `已添加 ${chaptersToAdd.length} 个新章节` : `Added ${chaptersToAdd.length} new chapters`);
+
+    } catch (e) {
+      setError(language === 'zh' ? `续写失败: ${e instanceof Error ? e.message : '未知错误'}` : `Continue failed: ${e instanceof Error ? e.message : 'Unknown error'}`);
+    } finally {
+      setIsAnalyzing(false);
+    }
   };
 
   // 合并章节并导出
@@ -1431,15 +1535,17 @@ ${outlineText}`;
                   const isExpanded = expandedResults.has(item.id);
                   const isRunning = isQueueRunning && currentQueueIndex === index;
                   const isCompleted = item.result !== undefined;
+                  const isEnabled = item.enabled !== false;  // 默认启用
 
                   return (
                     <div
                       key={item.id}
                       style={{
-                        background: isRunning ? 'var(--accent-dim)' : 'var(--bg-tertiary)',
+                        background: isRunning ? 'var(--accent-dim)' : (isEnabled ? 'var(--bg-tertiary)' : 'var(--bg-secondary)'),
                         borderRadius: 8,
-                        border: isRunning ? '1px solid var(--accent)' : '1px solid var(--border)',
+                        border: isRunning ? '1px solid var(--accent)' : (isEnabled ? '1px solid var(--border)' : '1px dashed var(--border)'),
                         overflow: 'hidden',
+                        opacity: isEnabled ? 1 : 0.6,
                       }}
                     >
                     {/* 标题栏 - 点击展开/收起 */}
@@ -1460,7 +1566,7 @@ ${outlineText}`;
                       }}
                     >
                       <span style={{
-                        background: isCompleted ? 'var(--accent)' : 'var(--bg-tertiary)',
+                        background: isCompleted ? 'var(--accent)' : (isEnabled ? 'var(--bg-tertiary)' : 'var(--text-muted)'),
                         color: isCompleted ? 'white' : 'var(--text-muted)',
                         fontSize: 10,
                         fontWeight: 600,
@@ -1471,8 +1577,9 @@ ${outlineText}`;
                       }}>
                         {index + 1}
                       </span>
-                      <span style={{ flex: 1, fontSize: 12, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <span style={{ flex: 1, fontSize: 12, color: isEnabled ? 'var(--text-primary)' : 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {item.title || model?.name}
+                        {!isEnabled && <span style={{ marginLeft: 4, fontSize: 10 }}>({language === 'zh' ? '已禁用' : 'Disabled'})</span>}
                       </span>
                       {isRunning && (
                         <div style={{ width: 12, height: 12, border: '2px solid var(--accent)', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
@@ -1492,6 +1599,21 @@ ${outlineText}`;
                         <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 4 }}>
                           <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{model?.name}</span>
                           <div style={{ flex: 1 }} />
+                          {/* 启用/禁用开关 */}
+                          <button
+                            onClick={(e) => { e.stopPropagation(); toggleQueueItem(item.id); hapticFeedback('light'); }}
+                            style={{
+                              padding: '2px 6px',
+                              background: isEnabled ? 'var(--accent)' : 'var(--bg-tertiary)',
+                              border: '1px solid var(--border)',
+                              borderRadius: 4,
+                              color: isEnabled ? 'white' : 'var(--text-muted)',
+                              fontSize: 10,
+                            }}
+                            title={isEnabled ? (language === 'zh' ? '点击禁用' : 'Click to disable') : (language === 'zh' ? '点击启用' : 'Click to enable')}
+                          >
+                            {isEnabled ? '✓' : '○'}
+                          </button>
                           {isCompleted && !isRunning && (
                             <button
                               onClick={(e) => { e.stopPropagation(); handleRegenerateItem(item.id); }}
@@ -1514,6 +1636,7 @@ ${outlineText}`;
                           <button
                             onClick={(e) => { e.stopPropagation(); removeModelFromQueue(item.id); }}
                             style={{ padding: 2, background: 'transparent', border: 'none', color: 'var(--danger)' }}
+                            title={language === 'zh' ? '删除' : 'Delete'}
                           >
                             <X size={12} />
                           </button>
@@ -1611,14 +1734,23 @@ ${outlineText}`;
                   <Zap size={12} />
                 </button>
                 <button
-                  onClick={() => {
-                    generateShareLink();
-                  }}
+                  onClick={() => generateShareLink()}
                   style={{ padding: '6px 8px', background: showSharePanel ? 'var(--accent)' : 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 6, color: showSharePanel ? 'white' : 'var(--text-secondary)', fontSize: 11 }}
                   title={language === 'zh' ? '分享' : 'Share'}
                 >
                   <Share2 size={12} />
                 </button>
+                {/* 续写大纲按钮 */}
+                {modelQueue.filter(item => item.result).length > 0 && (
+                  <button
+                    onClick={continueOutline}
+                    disabled={isAnalyzing || modelQueue.length >= 30}
+                    style={{ padding: '6px 8px', background: 'var(--accent-dim)', border: '1px solid var(--accent)', borderRadius: 6, color: 'var(--accent)', fontSize: 11 }}
+                    title={language === 'zh' ? '续写后续章节大纲' : 'Continue outline'}
+                  >
+                    📝+
+                  </button>
+                )}
               </div>
               {/* 主操作按钮 */}
               <button
@@ -1631,14 +1763,14 @@ ${outlineText}`;
               </button>
               <button
                 onClick={handleExecuteQueue}
-                disabled={isQueueRunning || modelQueue.every(item => !item.instruction.trim())}
+                disabled={isQueueRunning || modelQueue.filter(item => item.enabled !== false).every(item => !item.instruction.trim())}
                 className="btn-primary"
                 style={{ flex: 2, padding: '8px', fontSize: 12 }}
               >
                 {isQueueRunning ? (
                   <>
                     <div style={{ width: 14, height: 14, border: '2px solid white', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 1s linear infinite', marginRight: 6 }} />
-                    {language === 'zh' ? `执行中 (${currentQueueIndex + 1}/${modelQueue.length})` : `Running (${currentQueueIndex + 1}/${modelQueue.length})`}
+                    {language === 'zh' ? `执行中` : `Running`}
                   </>
                 ) : (
                   <>

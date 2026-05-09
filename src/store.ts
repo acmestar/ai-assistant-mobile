@@ -315,12 +315,13 @@ interface AppState {
   elderMode: boolean; // 长辈模式
   setElderMode: (enabled: boolean) => void;
 
-  // 模型队列（支持重复模型、顺序执行）
-  modelQueue: Array<{ id: string; modelId: string; instruction: string; result?: string; title?: string }>;
-  _lastClearedQueue: Array<{ id: string; modelId: string; instruction: string; result?: string; title?: string }> | null;
-  setModelQueue: (queue: Array<{ id: string; modelId: string; instruction: string; result?: string; title?: string }>) => void;
+  // 模型队列（支持重复模型、顺序执行、启用/禁用）
+  modelQueue: Array<{ id: string; modelId: string; instruction: string; result?: string; title?: string; enabled: boolean }>;
+  _lastClearedQueue: Array<{ id: string; modelId: string; instruction: string; result?: string; title?: string; enabled: boolean }> | null;
+  setModelQueue: (queue: Array<{ id: string; modelId: string; instruction: string; result?: string; title?: string; enabled: boolean }>) => void;
   addModelToQueue: (modelId: string, instruction?: string, title?: string) => void;
   removeModelFromQueue: (id: string) => void;
+  toggleQueueItem: (id: string) => void;  // 切换启用/禁用
   updateQueueInstruction: (id: string, instruction: string) => void;
   updateQueueResult: (id: string, result: string) => void;
   updateQueueTitle: (id: string, title: string) => void;
@@ -342,7 +343,7 @@ interface AppState {
   setWorldSetting: (setting: string) => void;
 
   // 进度保存
-  savedTasks: Array<{ id: string; name: string; queue: Array<{ id: string; modelId: string; instruction: string; result?: string; title?: string }>; createdAt: number }>;
+  savedTasks: Array<{ id: string; name: string; queue: Array<{ id: string; modelId: string; instruction: string; result?: string; title?: string; enabled?: boolean }>; createdAt: number }>;
   saveTask: (name: string) => void;
   loadTask: (id: string) => void;
   deleteTask: (id: string) => void;
@@ -436,10 +437,16 @@ export const useAppStore = create<AppState>()(
           instruction,
           result: undefined,
           title,
+          enabled: true,  // 默认启用
         }],
       })),
       removeModelFromQueue: (id) => set((state) => ({
         modelQueue: state.modelQueue.filter((item) => item.id !== id),
+      })),
+      toggleQueueItem: (id) => set((state) => ({
+        modelQueue: state.modelQueue.map((item) =>
+          item.id === id ? { ...item, enabled: !item.enabled } : item
+        ),
       })),
       updateQueueInstruction: (id, instruction) => set((state) => ({
         modelQueue: state.modelQueue.map((item) =>
@@ -516,7 +523,12 @@ export const useAppStore = create<AppState>()(
       loadTask: (id) => set((state) => {
         const task = state.savedTasks.find((t) => t.id === id);
         if (task) {
-          return { modelQueue: [...task.queue], currentQueueIndex: 0 };
+          // 确保加载的队列项有 enabled 字段
+          const queue = task.queue.map(item => ({
+            ...item,
+            enabled: item.enabled !== false  // 默认启用
+          }));
+          return { modelQueue: queue, currentQueueIndex: 0 };
         }
         return {};
       }),

@@ -116,7 +116,11 @@ export async function sendChatMessageStream(
 
     const messages: Array<{ role: string; content: string | Array<{ type: string; text?: string; image_url?: { url: string } }> }> = [];
 
-    for (const msg of conversation.messages) {
+    // 限制历史消息数量，避免 token 爆炸
+    const MAX_HISTORY = 20;  // 保留最近20条消息
+    const recentMessages = conversation.messages.slice(-MAX_HISTORY);
+
+    for (const msg of recentMessages) {
       if (msg.role === 'user' && msg.imageUrl) {
         messages.push({ role: 'user', content: [{ type: 'text', text: msg.content }, { type: 'image_url', image_url: { url: msg.imageUrl } }] });
       } else {
@@ -581,13 +585,16 @@ export async function executeModelQueue(
   // 用于顺序模式下存储前面章节的摘要
   const chapterSummaries: Array<{ title: string; summary: string }> = [];
 
+  // 过滤出启用的队列项
+  const enabledQueue = modelQueue.filter(item => item.enabled !== false);
+
   try {
     if (parallelMode) {
-      // 并行模式：所有项同时执行（每章独立，不看前面内容）
-      const promises = modelQueue.map(async (item, index) => {
+      // 并行模式：所有启用的项同时执行
+      const promises = enabledQueue.map(async (item, index) => {
         if (!item.instruction.trim()) return;
 
-        setCurrentQueueIndex(index);
+        setCurrentQueueIndex(modelQueue.findIndex(q => q.id === item.id));
 
         try {
           // 构建指令：明确告诉模型这是写章节
@@ -663,12 +670,12 @@ ${item.instruction}
 
       await Promise.all(promises);
     } else {
-      // 顺序模式：逐个执行，后续章节可看到前面章节的摘要（而非完整内容）
-      for (let i = 0; i < modelQueue.length; i++) {
-        const item = modelQueue[i];
+      // 顺序模式：逐个执行启用的项，后续章节可看到前面章节的摘要
+      for (let i = 0; i < enabledQueue.length; i++) {
+        const item = enabledQueue[i];
         if (!item.instruction.trim()) continue;
 
-        setCurrentQueueIndex(i);
+        setCurrentQueueIndex(modelQueue.findIndex(q => q.id === item.id));
 
         try {
           // 构建前面章节的摘要上下文（避免 token 爆炸）
