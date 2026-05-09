@@ -312,6 +312,22 @@ export default function SuperWritingTab() {
         prompt = buildCreationPrompt(creationMode, outlineText);
       }
 
+      // 校验 prompt 不为空
+      if (!prompt || !prompt.trim()) {
+        throw new Error(language === 'zh' ? '生成失败：Prompt 为空' : 'Generation failed: Prompt is empty');
+      }
+
+      // 日志输出，便于调试
+      console.log('[FastGenerate]', {
+        creationMode,
+        novelTaskType,
+        selectedWritingModelId,
+        chatModelId,
+        effectiveModelId,
+        promptLength: prompt.length,
+        promptPreview: prompt.slice(0, 200),
+      });
+
       // 使用流式输出，传入创作台默认模型
       const result = await callChatCompletionRaw(prompt, {
         modelId: effectiveModelId,
@@ -322,8 +338,16 @@ export default function SuperWritingTab() {
 
       setFastResult(result);
     } catch (error: any) {
-      console.error('快速生成失败:', error);
-      setFastError(error.message || '生成失败');
+      console.error('[FastGenerateError]', error);
+      // 提取更详细的错误信息
+      let errorMessage = error.message || '生成失败';
+      if (error.message?.includes('API 错误:')) {
+        // 已经是格式化的 API 错误
+        errorMessage = error.message;
+      } else if (error.response) {
+        errorMessage = `API 错误: ${error.response.status || '未知'} ${error.response.statusText || ''}`;
+      }
+      setFastError(errorMessage);
     } finally {
       setFastLoading(false);
     }

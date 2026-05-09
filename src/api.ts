@@ -42,6 +42,15 @@ export async function callChatCompletionRaw(
   const modelId = options?.modelId || chatModelId;
   const model = CHAT_MODELS.find((m) => m.id === modelId) || CHAT_MODELS[0];
 
+  // 日志输出，便于调试
+  console.log('[callChatCompletionRaw]', {
+    requestedModelId: options?.modelId,
+    fallbackModelId: chatModelId,
+    finalModelId: model.id,
+    promptLength: prompt.length,
+    hasImage: !!options?.imageBase64,
+  });
+
   const messages: Array<{ role: string; content: string | Array<{ type: string; text?: string; image_url?: { url: string } }> }> = [];
   messages.push({ role: 'user', content: prompt });
 
@@ -56,8 +65,14 @@ export async function callChatCompletionRaw(
   });
 
   if (!resp.ok) {
-    const err = await resp.text();
-    throw new Error(`API 错误: ${resp.status} ${err.slice(0, 200)}`);
+    const errText = await resp.text();
+    console.error('[callChatCompletionRaw API Error]', {
+      status: resp.status,
+      statusText: resp.statusText,
+      errorBody: errText.slice(0, 500),
+      requestModel: model.id,
+    });
+    throw new Error(`API 错误: ${resp.status} ${errText.slice(0, 200)}`);
   }
 
   const reader = resp.body?.getReader();
