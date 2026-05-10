@@ -416,7 +416,15 @@ export default function SuperWritingTab() {
 
   // 小说生成：只生成设定，不自动生成第一章
   const handleGenerateNovelProject = async () => {
-    if (!outlineText.trim() || !apiKey) return;
+    // 校验前置条件，不要 silent return
+    if (!outlineText.trim()) {
+      setNovelError(language === 'zh' ? '请输入小说需求' : 'Please enter novel requirement');
+      return;
+    }
+    if (!apiKey) {
+      setNovelError(language === 'zh' ? '请先配置 API Key' : 'Please configure API Key first');
+      return;
+    }
 
     // 校验 effectiveModelId 存在
     if (!effectiveModelId) {
@@ -495,7 +503,15 @@ export default function SuperWritingTab() {
 
   // 确认设定并生成第一章
   const handleGenerateFirstChapterFromProject = async () => {
-    if (!novelProject || !apiKey) return;
+    // 校验前置条件，不要 silent return
+    if (!novelProject) {
+      setNovelError(language === 'zh' ? '请先生成小说设定' : 'Please generate novel setup first');
+      return;
+    }
+    if (!apiKey) {
+      setNovelError(language === 'zh' ? '请先配置 API Key' : 'Please configure API Key first');
+      return;
+    }
 
     if (!effectiveModelId) {
       setNovelError(language === 'zh' ? '请先选择生成模型' : 'Please select a model first');
@@ -1748,49 +1764,6 @@ export default function SuperWritingTab() {
           </div>
         )}
 
-        {/* 设定已生成但第一章未生成或内容为空 */}
-        {creationMode === 'novel' && novelProject && (!novelChapterResult || !novelChapterResult.content?.trim()) && !fastLoading && (
-          <div style={{
-            padding: 16,
-            background: 'var(--bg-secondary)',
-            borderRadius: 12,
-            border: '1px solid var(--accent)',
-          }}>
-            <div style={{ fontSize: 18, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8 }}>
-              《{novelProject.title}》
-            </div>
-            <div style={{ color: 'var(--text-muted)', fontSize: 13, marginBottom: 16 }}>
-              {novelChapterResult
-                ? (language === 'zh' ? '第一章生成失败，请修改设定后重试，或直接重新生成第一章。' : 'First chapter generation failed. Please modify the setup and retry, or regenerate the first chapter.')
-                : (language === 'zh' ? '小说设定已生成，请检查或修改设定，然后生成第一章。' : 'Novel setup generated. Please review or modify the setup, then generate the first chapter.')}
-            </div>
-            <button
-              onClick={handleGenerateFirstChapterFromProject}
-              disabled={fastLoading}
-              style={{
-                padding: '10px 20px',
-                background: 'var(--accent)',
-                border: 'none',
-                borderRadius: 8,
-                color: 'white',
-                fontSize: 14,
-                fontWeight: 500,
-              }}
-            >
-              {fastLoading ? (
-                <>
-                  <RefreshCw size={14} className="spin" style={{ marginRight: 6 }} />
-                  {language === 'zh' ? '正在根据当前设定生成第一章...' : 'Generating first chapter from current setup...'}
-                </>
-              ) : (
-                novelChapterResult
-                  ? (language === 'zh' ? '重新生成第一章' : 'Regenerate First Chapter')
-                  : (language === 'zh' ? '确认设定并生成第一章' : 'Confirm Setup & Generate First Chapter')
-              )}
-            </button>
-          </div>
-        )}
-
         {/* 小说企划结果 - 可编辑模块 */}
         {creationMode === 'novel' && novelProject && (
           <div style={{
@@ -2244,6 +2217,35 @@ export default function SuperWritingTab() {
                   : (language === 'zh' ? '编辑完整设定' : 'Edit Full Settings')}
               </button>
             </div>
+
+            {/* 确认设定并生成第一章按钮 - 仅在第一章未生成或失败时显示 */}
+            {(!novelChapterResult || !novelChapterResult.content?.trim()) && !fastLoading && (
+              <div style={{ marginTop: 12 }}>
+                {novelChapterResult && (
+                  <div style={{ color: 'var(--danger)', fontSize: 12, marginBottom: 8 }}>
+                    {language === 'zh' ? '第一章生成失败，请修改设定后重试。' : 'First chapter generation failed. Please modify the setup and retry.'}
+                  </div>
+                )}
+                <button
+                  onClick={handleGenerateFirstChapterFromProject}
+                  disabled={fastLoading}
+                  style={{
+                    width: '100%',
+                    padding: '12px 20px',
+                    background: 'var(--accent)',
+                    border: 'none',
+                    borderRadius: 8,
+                    color: 'white',
+                    fontSize: 14,
+                    fontWeight: 500,
+                  }}
+                >
+                  {novelChapterResult
+                    ? (language === 'zh' ? '重新生成第一章' : 'Regenerate First Chapter')
+                    : (language === 'zh' ? '确认设定并生成第一章' : 'Confirm Setup & Generate First Chapter')}
+                </button>
+              </div>
+            )}
           </div>
         )}
 
@@ -2565,8 +2567,8 @@ export default function SuperWritingTab() {
           </div>
         )}
 
-        {/* 完整小说稿阅读区 */}
-        {creationMode === 'novel' && novelChapters.length > 0 && (
+        {/* 完整小说稿阅读区 - 仅在有正文内容时显示 */}
+        {creationMode === 'novel' && novelChapters.some(c => c.content?.trim()) && (
           <div style={{
             padding: 16,
             background: 'var(--bg-secondary)',
