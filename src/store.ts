@@ -157,6 +157,7 @@ export interface NovelChapterQueueItem {
   title: string;
   outline: string;           // 章节大纲
   userIdea?: string;         // 用户想法
+  userDirection?: string;    // 用户后续剧情要求（包含角色添加、新剧情加入等）
   status: 'pending' | 'running' | 'done' | 'failed';
   result?: NovelChapterDraft;
   error?: string;

@@ -1672,8 +1672,9 @@ export function buildNovelNextOutlinePrompt(options: {
   novelProject: NovelProject;
   chapters: NovelChapterDraft[];
   nextChapterIdea?: string;
+  userDirection?: string;
 }): string {
-  const { novelProject, chapters, nextChapterIdea } = options;
+  const { novelProject, chapters, nextChapterIdea, userDirection } = options;
 
   const nextChapterNo = chapters.length + 1;
   const chapterPlan = novelProject.chapters.find(c => c.chapterNo === nextChapterNo);
@@ -1684,6 +1685,19 @@ export function buildNovelNextOutlinePrompt(options: {
   // 获取最后一章内容（截取后部分）
   const lastChapter = chapters[chapters.length - 1];
   const lastChapterContent = lastChapter?.content?.slice(-2000) || '';
+
+  // 用户补充要求的强制约束
+  const userDirectionSection = userDirection?.trim() ? `
+${userDirection}
+
+【执行规则】
+- 以上用户补充要求优先级高于普通续写惯性。
+- 如果用户填写了"角色添加"，必须让该角色真实进入剧情，而不是只被提到。
+- 新角色应至少包含：出场场景、身份/气质印象、与主角或关键人物的直接互动、对当前矛盾的影响。
+- 如果用户填写了"新剧情加入"，必须让这些事件在正文中实际发生。
+- 不要擅自改名、删掉或弱化用户指定的人物、关系、事件和线索。
+- 如果用户没有填写某一项，则不要强行编造对应内容，按小说当前走向自然续写。
+` : '';
 
   return `你是一个专业的小说策划。请根据已有内容，生成下一章的大纲。
 
@@ -1713,8 +1727,8 @@ ${chapterPlan ? `【原章节规划】
 主要事件：${chapterPlan.mainEvent}
 冲突点：${chapterPlan.conflict}
 结尾钩子：${chapterPlan.hook}` : ''}
-
-${nextChapterIdea ? `【用户希望下一章】\n${nextChapterIdea}` : ''}
+${userDirectionSection}
+${nextChapterIdea && !userDirection?.trim() ? `【用户希望下一章】\n${nextChapterIdea}` : ''}
 
 请输出下一章的大纲，包括：
 1. 章节标题
@@ -1743,8 +1757,9 @@ export function buildNovelContinueChapterPrompt(options: {
   chapters: NovelChapterDraft[];
   nextChapterIdea?: string;
   nextChapterOutline?: string;
+  userDirection?: string;
 }): string {
-  const { novelProject, chapters, nextChapterIdea, nextChapterOutline } = options;
+  const { novelProject, chapters, nextChapterIdea, nextChapterOutline, userDirection } = options;
 
   const nextChapterNo = chapters.length + 1;
   const chapterPlan = novelProject.chapters.find(c => c.chapterNo === nextChapterNo);
@@ -1761,6 +1776,19 @@ export function buildNovelContinueChapterPrompt(options: {
   const lockedInfo = lockedCharacters.length > 0
     ? `\n【用户已锁定的角色，必须严格遵守】：\n${lockedCharacters.map(c => `- ${c.name}：${c.identity}，性格${c.personality}`).join('\n')}`
     : '';
+
+  // 用户补充要求的强制约束
+  const userDirectionSection = userDirection?.trim() ? `
+${userDirection}
+
+【执行规则】
+- 以上用户补充要求优先级高于普通续写惯性。
+- 如果用户填写了"角色添加"，必须让该角色真实进入剧情，而不是只被提到。
+- 新角色应至少包含：出场场景、身份/气质印象、与主角或关键人物的直接互动、对当前矛盾的影响。
+- 如果用户填写了"新剧情加入"，必须让这些事件在正文中实际发生。
+- 不要擅自改名、删掉或弱化用户指定的人物、关系、事件和线索。
+- 如果用户没有填写某一项，则不要强行编造对应内容，按小说当前走向自然续写。
+` : '';
 
   return `你是一个专业的小说作家。请根据小说企划和已有内容，续写下一章正文。
 
@@ -1787,8 +1815,8 @@ ${chapterPlan ? `【章节规划】
 主要事件：${chapterPlan.mainEvent}
 冲突点：${chapterPlan.conflict}
 结尾钩子：${chapterPlan.hook}` : ''}
-
-${nextChapterIdea ? `【用户希望下一章】\n${nextChapterIdea}` : ''}
+${userDirectionSection}
+${nextChapterIdea && !userDirection?.trim() ? `【用户希望下一章】\n${nextChapterIdea}` : ''}
 
 ${nextChapterOutline ? `【下一章大纲】\n${nextChapterOutline}` : ''}
 

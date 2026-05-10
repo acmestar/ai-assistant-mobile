@@ -131,6 +131,10 @@ export default function SuperWritingTab() {
   const [nextChapterIdea, setNextChapterIdea] = useState('');
   const [nextChapterOutline, setNextChapterOutline] = useState('');
 
+  // 后续剧情控制状态
+  const [novelNewCharacterNote, setNovelNewCharacterNote] = useState('');
+  const [novelNewPlotNote, setNovelNewPlotNote] = useState('');
+
   // 章节队列状态
   const [novelChapterQueue, setNovelChapterQueue] = useState<NovelChapterQueueItem[]>([]);
   const [batchChapterCount, setBatchChapterCount] = useState<number>(3);
@@ -144,6 +148,16 @@ export default function SuperWritingTab() {
 
   // 小说改写状态
   const [rewriteLoading, setRewriteLoading] = useState(false);
+  const [novelChapterRevision, setNovelChapterRevision] = useState<{
+    chapterNo: number;
+    title: string;
+    actionType: NovelRewriteType;
+    actionLabel: string;
+    originalContent: string;
+    content: string;
+  } | null>(null);
+  const [novelChapterRevisionCopied, setNovelChapterRevisionCopied] = useState(false);
+  const [novelChapterRevisionCopyError, setNovelChapterRevisionCopyError] = useState('');
 
   // 可编辑区块展开状态
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['basic', 'characters']));
@@ -167,12 +181,45 @@ export default function SuperWritingTab() {
     !novelChapterResult?.content?.trim() &&
     novelGenerationStep === 'error';
 
+  // 构建统一的用户后续剧情要求文本
+  const buildNovelUserDirectionText = () => {
+    const parts: string[] = [];
+
+    if (nextChapterIdea.trim()) {
+      parts.push(
+        language === 'zh'
+          ? `【你后面想看什么】\n${nextChapterIdea.trim()}`
+          : `[What you want to see next]\n${nextChapterIdea.trim()}`
+      );
+    }
+
+    if (novelNewCharacterNote.trim()) {
+      parts.push(
+        language === 'zh'
+          ? `【角色添加】\n${novelNewCharacterNote.trim()}`
+          : `[Add Character]\n${novelNewCharacterNote.trim()}`
+      );
+    }
+
+    if (novelNewPlotNote.trim()) {
+      parts.push(
+        language === 'zh'
+          ? `【新剧情加入】\n${novelNewPlotNote.trim()}`
+          : `[Add New Plot]\n${novelNewPlotNote.trim()}`
+      );
+    }
+
+    return parts.join('\n\n');
+  };
+
   // 清理小说后续章节相关状态（队列、续写等）
   const clearNovelContinuationState = () => {
     setNovelChapterQueue([]);
     setNextChapterIdea('');
     setNextChapterOutline('');
     setBatchChapterIdea('');
+    setNovelNewCharacterNote('');
+    setNovelNewPlotNote('');
     setIsNovelQueueRunning(false);
   };
 
@@ -190,6 +237,9 @@ export default function SuperWritingTab() {
     setFullNovelCopyError('');
     setCurrentChapterCopied(false);
     setCurrentChapterCopyError('');
+    setNovelChapterRevision(null);
+    setNovelChapterRevisionCopied(false);
+    setNovelChapterRevisionCopyError('');
     clearNovelContinuationState();
   };
 
@@ -625,12 +675,15 @@ export default function SuperWritingTab() {
     setFastLoading(true);
     setFastError(null);
 
+    const userDirection = buildNovelUserDirectionText();
+
     try {
       const prompt = buildNovelContinueChapterPrompt({
         novelProject,
         chapters: novelChapters,
         nextChapterIdea,
         nextChapterOutline: undefined,
+        userDirection,
       });
 
       console.log('[NovelModelCall]', {
@@ -638,6 +691,8 @@ export default function SuperWritingTab() {
         effectiveModelId,
         chapterCount: novelChapters.length,
         promptLength: prompt.length,
+        hasUserDirection: !!userDirection.trim(),
+        userDirectionLength: userDirection.length,
       });
 
       const result = await callChatCompletionRaw(prompt, {
@@ -686,17 +741,22 @@ export default function SuperWritingTab() {
     setFastLoading(true);
     setFastError(null);
 
+    const userDirection = buildNovelUserDirectionText();
+
     try {
       const prompt = buildNovelNextOutlinePrompt({
         novelProject,
         chapters: novelChapters,
         nextChapterIdea,
+        userDirection,
       });
 
       console.log('[NovelModelCall]', {
         source: 'handleGenerateNextOutline',
         effectiveModelId,
         promptLength: prompt.length,
+        hasUserDirection: !!userDirection.trim(),
+        userDirectionLength: userDirection.length,
       });
 
       const result = await callChatCompletionRaw(prompt, {
@@ -739,18 +799,23 @@ export default function SuperWritingTab() {
     setFastLoading(true);
     setFastError(null);
 
+    const userDirection = buildNovelUserDirectionText();
+
     try {
       const prompt = buildNovelContinueChapterPrompt({
         novelProject,
         chapters: novelChapters,
         nextChapterIdea,
         nextChapterOutline,
+        userDirection,
       });
 
       console.log('[NovelModelCall]', {
         source: 'handleWriteFromNextOutline',
         effectiveModelId,
         promptLength: prompt.length,
+        hasUserDirection: !!userDirection.trim(),
+        userDirectionLength: userDirection.length,
       });
 
       const result = await callChatCompletionRaw(prompt, {
@@ -792,6 +857,9 @@ export default function SuperWritingTab() {
       ? Math.max(...novelChapters.map(c => c.chapterNo))
       : 0;
 
+    // 保存创建时的用户后续要求
+    const userDirection = buildNovelUserDirectionText();
+
     const queueItems: NovelChapterQueueItem[] = [];
     const count = Math.min(batchChapterCount, novelProject.chapters.length - lastChapterNo);
 
@@ -805,6 +873,7 @@ export default function SuperWritingTab() {
         title: plan?.title || `第 ${chapterNo} 章`,
         outline: plan ? `章节标题：${plan.title}\n本章目标：${plan.goal}\n主要事件：${plan.mainEvent}\n冲突点：${plan.conflict}\n结尾钩子：${plan.hook}` : '',
         userIdea: batchChapterIdea,
+        userDirection,
         status: 'pending',
       });
     }
@@ -853,11 +922,16 @@ export default function SuperWritingTab() {
       ));
 
       try {
+        // 优先使用队列项保存的 userDirection，其次使用当前输入
+        const currentUserDirection = buildNovelUserDirectionText();
+        const effectiveUserDirection = item.userDirection || currentUserDirection;
+
         const prompt = buildNovelContinueChapterPrompt({
           novelProject,
           chapters: workingChapters, // 使用工作副本
           nextChapterIdea: batchChapterIdea || item.userIdea,
           nextChapterOutline: item.outline,
+          userDirection: effectiveUserDirection,
         });
 
         console.log('[NovelGenerateStep]', {
@@ -867,6 +941,8 @@ export default function SuperWritingTab() {
           selectedWritingModelId,
           promptLength: prompt.length,
           workingChaptersCount: workingChapters.length,
+          hasUserDirection: !!effectiveUserDirection?.trim(),
+          userDirectionLength: effectiveUserDirection?.length || 0,
         });
 
         const result = await callChatCompletionRaw(prompt, {
@@ -943,12 +1019,17 @@ export default function SuperWritingTab() {
     ));
 
     try {
+      // 优先使用队列项保存的 userDirection，其次使用当前输入
+      const currentUserDirection = buildNovelUserDirectionText();
+      const effectiveUserDirection = item.userDirection || currentUserDirection;
+
       // 使用最新的章节列表
       const prompt = buildNovelContinueChapterPrompt({
         novelProject,
         chapters: novelChapters,
         nextChapterIdea: item.userIdea,
         nextChapterOutline: item.outline,
+        userDirection: effectiveUserDirection,
       });
 
       console.log('[NovelGenerateStep]', {
@@ -957,6 +1038,8 @@ export default function SuperWritingTab() {
         effectiveModelId,
         selectedWritingModelId,
         promptLength: prompt.length,
+        hasUserDirection: !!effectiveUserDirection?.trim(),
+        userDirectionLength: effectiveUserDirection?.length || 0,
       });
 
       const result = await callChatCompletionRaw(prompt, {
@@ -1153,38 +1236,123 @@ export default function SuperWritingTab() {
     }
   };
 
-  // 小说改写处理 - 基于章节正文
+  // 小说改写处理 - 基于章节正文，生成候选结果
   const handleNovelRewrite = async (rewriteType: NovelRewriteType) => {
-    const textToRewrite = novelChapterResult?.content || fastResult;
-    if (!textToRewrite?.trim() || !apiKey) return;
+    const textToRewrite = novelChapterResult?.content;
+
+    // 校验前置条件，不要 silent return
+    if (!textToRewrite?.trim() || !novelChapterResult) {
+      setFastError(language === 'zh' ? '没有章节内容可处理' : 'No chapter content to process');
+      return;
+    }
+    if (!apiKey) {
+      setFastError(language === 'zh' ? '请先配置 API Key' : 'Please configure API Key first');
+      return;
+    }
+    if (!effectiveModelId) {
+      setFastError(language === 'zh' ? '请先选择生成模型' : 'Please select a model first');
+      return;
+    }
+
+    const actionLabel = language === 'zh'
+      ? NOVEL_REWRITE_NAMES[rewriteType].zh
+      : NOVEL_REWRITE_NAMES[rewriteType].en;
 
     setRewriteLoading(true);
+    setFastError('');
+    setNovelChapterRevisionCopyError('');
+    setNovelChapterRevisionCopied(false);
+
     try {
       const prompt = buildNovelRewritePrompt(rewriteType, textToRewrite);
+
+      console.log('[NovelRewrite]', {
+        rewriteType,
+        chapterNo: novelChapterResult?.chapterNo,
+        effectiveModelId,
+        selectedWritingModelId,
+        promptLength: prompt.length,
+      });
+
       const result = await callChatCompletionRaw(prompt, {
         modelId: effectiveModelId,
       });
-      // 优先更新章节正文
-      if (novelChapterResult) {
-        const updatedChapter: NovelChapterDraft = {
-          ...novelChapterResult,
-          content: result,
-        };
-        setNovelChapterResult(updatedChapter);
-        setCurrentChapterCopied(false);
-        setCurrentChapterCopyError('');
-        // 同步更新 novelChapters
-        setNovelChapters(prev => prev.map(c =>
-          c.chapterNo === novelChapterResult.chapterNo ? updatedChapter : c
-        ));
-      } else {
-        setFastResult(result);
+
+      if (!result || !result.trim()) {
+        throw new Error(language === 'zh' ? '模型返回为空' : 'Model returned empty content');
       }
+
+      // 保存候选结果，不直接覆盖原文
+      setNovelChapterRevision({
+        chapterNo: novelChapterResult.chapterNo,
+        title: novelChapterResult.title || '',
+        actionType: rewriteType,
+        actionLabel,
+        originalContent: textToRewrite,
+        content: result.trim(),
+      });
     } catch (error: any) {
-      console.error('改写失败:', error);
-      setFastError(error.message || '改写失败');
+      console.error('[NovelRewriteError]', error);
+      setFastError(
+        language === 'zh'
+          ? `${actionLabel}失败，请稍后重试`
+          : `${actionLabel} failed, please try again later`
+      );
     } finally {
       setRewriteLoading(false);
+    }
+  };
+
+  // 应用候选结果到当前章节
+  const handleApplyNovelChapterRevision = () => {
+    if (!novelChapterRevision || !novelChapterResult) return;
+
+    const updatedChapter: NovelChapterDraft = {
+      ...novelChapterResult,
+      content: novelChapterRevision.content,
+    };
+
+    setNovelChapterResult(updatedChapter);
+    setNovelChapters(prev =>
+      prev.map(c =>
+        c.chapterNo === novelChapterRevision.chapterNo ? updatedChapter : c
+      )
+    );
+
+    // 清空候选结果
+    setNovelChapterRevision(null);
+    setNovelChapterRevisionCopied(false);
+    setNovelChapterRevisionCopyError('');
+    setCurrentChapterCopied(false);
+    setCurrentChapterCopyError('');
+  };
+
+  // 放弃候选结果
+  const handleDiscardNovelChapterRevision = () => {
+    setNovelChapterRevision(null);
+    setNovelChapterRevisionCopied(false);
+    setNovelChapterRevisionCopyError('');
+  };
+
+  // 复制候选结果
+  const handleCopyNovelChapterRevision = async () => {
+    if (!novelChapterRevision?.content?.trim()) {
+      setNovelChapterRevisionCopyError(language === 'zh' ? '没有可复制的内容' : 'No content to copy');
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(novelChapterRevision.content);
+      setNovelChapterRevisionCopied(true);
+      setNovelChapterRevisionCopyError('');
+      window.setTimeout(() => setNovelChapterRevisionCopied(false), 1500);
+    } catch (error) {
+      console.error('[NovelChapterRevisionCopyError]', error);
+      setNovelChapterRevisionCopyError(
+        language === 'zh'
+          ? '复制失败，请手动选择文本复制'
+          : 'Copy failed, please copy manually'
+      );
     }
   };
 
@@ -2406,6 +2574,85 @@ export default function SuperWritingTab() {
               </div>
             )}
 
+            {/* 后续内容补充（选填） - 仅在第一章成功后显示 */}
+            {canContinueNovel && (
+              <div style={{ marginBottom: 12, padding: 12, background: 'var(--bg-tertiary)', borderRadius: 8 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)' }}>
+                    {language === 'zh' ? '后续内容补充（选填）' : 'Additional Notes (Optional)'}
+                  </span>
+                  <button
+                    onClick={() => {
+                      setNextChapterIdea('');
+                      setNovelNewCharacterNote('');
+                      setNovelNewPlotNote('');
+                      setBatchChapterIdea('');
+                      setNextChapterOutline('');
+                    }}
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      color: 'var(--text-muted)',
+                      fontSize: 11,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {language === 'zh' ? '清空' : 'Clear'}
+                  </button>
+                </div>
+
+                {/* 角色添加 */}
+                <div style={{ marginBottom: 8 }}>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>
+                    {language === 'zh' ? '角色添加（选填）' : 'Add Character (Optional)'}
+                  </div>
+                  <textarea
+                    value={novelNewCharacterNote}
+                    onChange={(e) => setNovelNewCharacterNote(e.target.value)}
+                    placeholder={language === 'zh'
+                      ? '例如：顾沉，32岁，心理咨询师，女主大学时期的学长。表面温和可靠，实际在调查男主家族。希望他第一次出场带来压迫感和暧昧感。'
+                      : 'Example: Ethan, 32, a therapist and the heroine\'s senior from college. He appears gentle and reliable, but is secretly investigating the hero\'s family. His first appearance should feel tense and ambiguous.'}
+                    rows={2}
+                    style={{
+                      width: '100%',
+                      padding: 8,
+                      background: 'var(--bg-primary)',
+                      border: '1px solid var(--border)',
+                      borderRadius: 6,
+                      color: 'var(--text-primary)',
+                      fontSize: 12,
+                      resize: 'vertical',
+                    }}
+                  />
+                </div>
+
+                {/* 新剧情加入 */}
+                <div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>
+                    {language === 'zh' ? '新剧情加入（选填）' : 'Add New Plot (Optional)'}
+                  </div>
+                  <textarea
+                    value={novelNewPlotNote}
+                    onChange={(e) => setNovelNewPlotNote(e.target.value)}
+                    placeholder={language === 'zh'
+                      ? '例如：顾沉第一次出场；女主和顾沉单独谈话；男主看到后产生误会；结尾顾沉收到一条神秘短信。'
+                      : 'Example: Ethan appears for the first time; the heroine talks to him alone; the hero sees them and misunderstands; Ethan receives a mysterious text message at the end.'}
+                    rows={2}
+                    style={{
+                      width: '100%',
+                      padding: 8,
+                      background: 'var(--bg-primary)',
+                      border: '1px solid var(--border)',
+                      borderRadius: 6,
+                      color: 'var(--text-primary)',
+                      fontSize: 12,
+                      resize: 'vertical',
+                    }}
+                  />
+                </div>
+              </div>
+            )}
+
             {/* 下一章大纲 - 仅在第一章成功后显示 */}
             {canContinueNovel && nextChapterOutline && (
               <div style={{ marginBottom: 12, padding: 12, background: 'var(--bg-tertiary)', borderRadius: 8 }}>
@@ -2572,6 +2819,87 @@ export default function SuperWritingTab() {
                       {language === 'zh' ? NOVEL_REWRITE_NAMES[rewriteType].zh : NOVEL_REWRITE_NAMES[rewriteType].en}
                     </button>
                   ))}
+                </div>
+              </div>
+            )}
+
+            {/* 候选结果预览区 */}
+            {novelChapterRevision && (
+              <div style={{
+                marginTop: 12,
+                padding: 12,
+                background: 'var(--bg-secondary)',
+                border: '1px solid var(--accent)',
+                borderRadius: 12,
+              }}>
+                <div style={{ fontWeight: 600, marginBottom: 8, color: 'var(--text-primary)' }}>
+                  {language === 'zh'
+                    ? `候选结果：第 ${novelChapterRevision.chapterNo} 章 · ${novelChapterRevision.actionLabel}`
+                    : `Candidate: Chapter ${novelChapterRevision.chapterNo} · ${novelChapterRevision.actionLabel}`}
+                </div>
+                <pre style={{
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                  fontSize: 13,
+                  lineHeight: 1.6,
+                  color: 'var(--text-secondary)',
+                  maxHeight: 300,
+                  overflow: 'auto',
+                  margin: 0,
+                  padding: 8,
+                  background: 'var(--bg-tertiary)',
+                  borderRadius: 8,
+                }}>
+                  {novelChapterRevision.content}
+                </pre>
+                {novelChapterRevisionCopyError && (
+                  <div style={{ color: 'var(--danger)', fontSize: 12, marginTop: 8 }}>
+                    {novelChapterRevisionCopyError}
+                  </div>
+                )}
+                <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+                  <button
+                    onClick={handleApplyNovelChapterRevision}
+                    style={{
+                      padding: '8px 16px',
+                      background: 'var(--accent)',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: 8,
+                      fontSize: 13,
+                      fontWeight: 500,
+                    }}
+                  >
+                    {language === 'zh' ? '应用到当前章节' : 'Apply'}
+                  </button>
+                  <button
+                    onClick={handleCopyNovelChapterRevision}
+                    style={{
+                      padding: '8px 16px',
+                      background: 'var(--bg-tertiary)',
+                      color: novelChapterRevisionCopied ? 'var(--accent)' : 'var(--text-secondary)',
+                      border: '1px solid var(--border)',
+                      borderRadius: 8,
+                      fontSize: 13,
+                    }}
+                  >
+                    {novelChapterRevisionCopied
+                      ? (language === 'zh' ? '已复制' : 'Copied')
+                      : (language === 'zh' ? '复制候选结果' : 'Copy')}
+                  </button>
+                  <button
+                    onClick={handleDiscardNovelChapterRevision}
+                    style={{
+                      padding: '8px 16px',
+                      background: 'transparent',
+                      color: 'var(--text-muted)',
+                      border: '1px solid var(--border)',
+                      borderRadius: 8,
+                      fontSize: 13,
+                    }}
+                  >
+                    {language === 'zh' ? '放弃' : 'Discard'}
+                  </button>
                 </div>
               </div>
             )}
