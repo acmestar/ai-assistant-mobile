@@ -240,6 +240,7 @@ export default function SuperWritingTab() {
     setNovelChapterRevision(null);
     setNovelChapterRevisionCopied(false);
     setNovelChapterRevisionCopyError('');
+    setRewriteLoading(false);
     clearNovelContinuationState();
   };
 
@@ -1305,18 +1306,22 @@ export default function SuperWritingTab() {
 
   // 应用候选结果到当前章节
   const handleApplyNovelChapterRevision = () => {
-    if (!novelChapterRevision || !novelChapterResult) return;
+    if (!novelChapterRevision) return;
 
-    const updatedChapter: NovelChapterDraft = {
-      ...novelChapterResult,
-      content: novelChapterRevision.content,
-    };
-
-    setNovelChapterResult(updatedChapter);
+    // 根据 chapterNo 更新 novelChapters 中对应章节
     setNovelChapters(prev =>
-      prev.map(c =>
-        c.chapterNo === novelChapterRevision.chapterNo ? updatedChapter : c
+      prev.map(chapter =>
+        chapter.chapterNo === novelChapterRevision.chapterNo
+          ? { ...chapter, content: novelChapterRevision.content }
+          : chapter
       )
+    );
+
+    // 如果 novelChapterResult 正好是同一章，同步更新
+    setNovelChapterResult(prev =>
+      prev && prev.chapterNo === novelChapterRevision.chapterNo
+        ? { ...prev, content: novelChapterRevision.content }
+        : prev
     );
 
     // 清空候选结果
