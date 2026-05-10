@@ -1240,11 +1240,16 @@ export default function SuperWritingTab() {
   };
 
   // 小说改写处理 - 基于章节正文，生成候选结果
-  const handleNovelRewrite = async (rewriteType: NovelRewriteType) => {
-    const textToRewrite = novelChapterResult?.content;
+  const handleNovelRewrite = async (
+    rewriteType: NovelRewriteType,
+    chapter?: NovelChapterDraft
+  ) => {
+    // 支持指定章节，fallback 到当前章节
+    const targetChapter = chapter || novelChapterResult;
+    const textToRewrite = targetChapter?.content || '';
 
     // 校验前置条件，不要 silent return
-    if (!textToRewrite?.trim() || !novelChapterResult) {
+    if (!targetChapter || !textToRewrite.trim()) {
       setRewriteError(language === 'zh' ? '没有章节内容可处理' : 'No chapter content to process');
       return;
     }
@@ -1271,7 +1276,7 @@ export default function SuperWritingTab() {
 
       console.log('[NovelRewrite]', {
         rewriteType,
-        chapterNo: novelChapterResult?.chapterNo,
+        chapterNo: targetChapter.chapterNo,
         effectiveModelId,
         selectedWritingModelId,
         promptLength: prompt.length,
@@ -1287,8 +1292,8 @@ export default function SuperWritingTab() {
 
       // 保存候选结果，不直接覆盖原文
       setNovelChapterRevision({
-        chapterNo: novelChapterResult.chapterNo,
-        title: novelChapterResult.title || '',
+        chapterNo: targetChapter.chapterNo,
+        title: targetChapter.title || '',
         actionType: rewriteType,
         actionLabel,
         originalContent: textToRewrite,
@@ -2811,7 +2816,7 @@ export default function SuperWritingTab() {
                   {(Object.keys(NOVEL_REWRITE_NAMES) as NovelRewriteType[]).slice(0, 6).map((rewriteType) => (
                     <button
                       key={rewriteType}
-                      onClick={() => handleNovelRewrite(rewriteType)}
+                      onClick={() => handleNovelRewrite(rewriteType, novelChapterResult)}
                       disabled={rewriteLoading}
                       style={{
                         padding: '6px 8px',
