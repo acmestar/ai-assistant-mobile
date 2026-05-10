@@ -148,6 +148,7 @@ export default function SuperWritingTab() {
 
   // 小说改写状态
   const [rewriteLoading, setRewriteLoading] = useState(false);
+  const [rewriteError, setRewriteError] = useState('');
   const [novelChapterRevision, setNovelChapterRevision] = useState<{
     chapterNo: number;
     title: string;
@@ -241,6 +242,7 @@ export default function SuperWritingTab() {
     setNovelChapterRevisionCopied(false);
     setNovelChapterRevisionCopyError('');
     setRewriteLoading(false);
+    setRewriteError('');
     clearNovelContinuationState();
   };
 
@@ -1243,15 +1245,15 @@ export default function SuperWritingTab() {
 
     // 校验前置条件，不要 silent return
     if (!textToRewrite?.trim() || !novelChapterResult) {
-      setFastError(language === 'zh' ? '没有章节内容可处理' : 'No chapter content to process');
+      setRewriteError(language === 'zh' ? '没有章节内容可处理' : 'No chapter content to process');
       return;
     }
     if (!apiKey) {
-      setFastError(language === 'zh' ? '请先配置 API Key' : 'Please configure API Key first');
+      setRewriteError(language === 'zh' ? '请先配置 API Key' : 'Please configure API Key first');
       return;
     }
     if (!effectiveModelId) {
-      setFastError(language === 'zh' ? '请先选择生成模型' : 'Please select a model first');
+      setRewriteError(language === 'zh' ? '请先选择生成模型' : 'Please select a model first');
       return;
     }
 
@@ -1260,7 +1262,7 @@ export default function SuperWritingTab() {
       : NOVEL_REWRITE_NAMES[rewriteType].en;
 
     setRewriteLoading(true);
-    setFastError('');
+    setRewriteError('');
     setNovelChapterRevisionCopyError('');
     setNovelChapterRevisionCopied(false);
 
@@ -1294,7 +1296,7 @@ export default function SuperWritingTab() {
       });
     } catch (error: any) {
       console.error('[NovelRewriteError]', error);
-      setFastError(
+      setRewriteError(
         language === 'zh'
           ? `${actionLabel}失败，请稍后重试`
           : `${actionLabel} failed, please try again later`
@@ -2825,6 +2827,11 @@ export default function SuperWritingTab() {
                     </button>
                   ))}
                 </div>
+                {rewriteError && (
+                  <div style={{ color: 'var(--danger)', fontSize: 12, marginTop: 8 }}>
+                    {rewriteError}
+                  </div>
+                )}
               </div>
             )}
 
