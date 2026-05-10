@@ -156,14 +156,18 @@ export default function ChatTab() {
     }
   }, []); // 空依赖数组
 
+  // 清理录音超时定时器
+  const clearRecordingTimer = () => {
+    if (recordingTimerRef.current) {
+      window.clearTimeout(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+  };
+
   // 组件卸载时清理语音资源
   useEffect(() => {
     return () => {
-      // 清理超时定时器
-      if (recordingTimerRef.current) {
-        clearTimeout(recordingTimerRef.current);
-        recordingTimerRef.current = null;
-      }
+      clearRecordingTimer();
       // 停止语音识别
       if (recognitionRef.current) {
         try {
@@ -172,16 +176,17 @@ export default function ChatTab() {
         recognitionRef.current = null;
       }
       // 停止 TTS
-      if (currentUtterance) {
-        speechSynthesis.cancel();
+      try {
+        if ('speechSynthesis' in window) {
+          speechSynthesis.cancel();
+        }
         currentUtterance = null;
-      }
+      } catch {}
       // 释放音频设备
       if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
         audioContextRef.current.close().catch(() => {});
         audioContextRef.current = null;
       }
-      console.log('[Voice] Component unmounted, resources cleaned up');
     };
   }, []);
 
@@ -282,7 +287,6 @@ export default function ChatTab() {
       } else if (event.error === 'network') {
         setVoiceError(language === 'zh' ? '网络错误，请检查网络连接' : 'Network error, please check connection');
       } else if (event.error === 'aborted') {
-        // 用户中断，静默处理
         console.log('[Voice] Recognition aborted');
       } else if (event.error === 'service-not-allowed') {
         setVoiceError(language === 'zh' ? '语音服务不可用，请使用 Safari 或 Chrome' : 'Voice service unavailable, please use Safari or Chrome');
@@ -290,21 +294,18 @@ export default function ChatTab() {
         setVoiceError(language === 'zh' ? '语音识别出错，请重试' : 'Voice recognition error, please try again');
       }
 
+      clearRecordingTimer();
+      isPressingRef.current = false;
       isRecordingRef.current = false;
       setIsRecording(false);
     };
 
     recognition.onend = () => {
-      // 清理超时定时器
-      if (recordingTimerRef.current) {
-        clearTimeout(recordingTimerRef.current);
-        recordingTimerRef.current = null;
-      }
+      clearRecordingTimer();
       if (isRecordingRef.current) {
         isRecordingRef.current = false;
         setIsRecording(false);
       }
-      // 识别结束后释放音频设备
       releaseAudioDevice();
     };
 
@@ -329,12 +330,8 @@ export default function ChatTab() {
   const exitVoiceMode = async () => {
     setIsVoiceMode(false);
     setVoiceText('');
-    setVoiceError(''); // 清除错误
-    // 清理超时定时器
-    if (recordingTimerRef.current) {
-      clearTimeout(recordingTimerRef.current);
-      recordingTimerRef.current = null;
-    }
+    setVoiceError('');
+    clearRecordingTimer();
     if (isRecordingRef.current && recognitionRef.current) {
       isRecordingRef.current = false;
       try {
@@ -342,7 +339,7 @@ export default function ChatTab() {
       } catch {}
     }
     setIsRecording(false);
-    // 释放音频设备
+    await releaseAudioDevice();
     await releaseAudioDevice();
   };
 
@@ -426,15 +423,11 @@ export default function ChatTab() {
   // 停止录音（松开）
   const stopRecording = () => {
     if (!isRecordingRef.current) return;
-    hapticFeedback('light'); // 停止录音震动反馈
+    hapticFeedback('light');
     isRecordingRef.current = false;
     setIsRecording(false);
 
-    // 清理超时定时器
-    if (recordingTimerRef.current) {
-      clearTimeout(recordingTimerRef.current);
-      recordingTimerRef.current = null;
-    }
+    clearRecordingTimer();
 
     if (recognitionRef.current) {
       try {
@@ -497,14 +490,23 @@ export default function ChatTab() {
           }
         }
       } else if (document.visibilityState === 'hidden') {
-        // 页面隐藏时，停止录音并释放音频设备
+        // 页面隐藏时，停止录音和朗读，释放资源
         if (isRecordingRef.current && recognitionRef.current) {
           try {
             recognitionRef.current.stop();
           } catch {}
-          isRecordingRef.current = false;
-          setIsRecording(false);
         }
+        clearRecordingTimer();
+        isPressingRef.current = false;
+        isRecordingRef.current = false;
+        setIsRecording(false);
+        // 停止 TTS
+        try {
+          if ('speechSynthesis' in window) {
+            speechSynthesis.cancel();
+          }
+          currentUtterance = null;
+        } catch {}
         await releaseAudioDevice();
       }
     };
