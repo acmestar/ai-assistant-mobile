@@ -176,6 +176,8 @@ export default function SuperWritingTab() {
     setNovelChapters([]);
     setNovelRawText('');
     setNovelError('');
+    setNovelGenerationStep('idle');
+    setFastError('');
     setShowFullNovelReader(false);
     setFullNovelCopied(false);
     setFullNovelCopyError('');
