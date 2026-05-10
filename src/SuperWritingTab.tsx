@@ -160,6 +160,30 @@ export default function SuperWritingTab() {
     novelChapters.some(c => c.chapterNo === 1 && c.content?.trim()) &&
     !fastLoading;
 
+  // 清理小说后续章节相关状态（队列、续写等）
+  const clearNovelContinuationState = () => {
+    setNovelChapterQueue([]);
+    setNextChapterIdea('');
+    setNextChapterOutline('');
+    setBatchChapterIdea('');
+    setIsNovelQueueRunning(false);
+  };
+
+  // 清理所有小说相关状态（设定、章节、队列等）
+  const clearAllNovelState = () => {
+    setNovelProject(null);
+    setNovelChapterResult(null);
+    setNovelChapters([]);
+    setNovelRawText('');
+    setNovelError('');
+    setShowFullNovelReader(false);
+    setFullNovelCopied(false);
+    setFullNovelCopyError('');
+    setCurrentChapterCopied(false);
+    setCurrentChapterCopyError('');
+    clearNovelContinuationState();
+  };
+
   // 接收从聊天页传递的需求
   useEffect(() => {
     if (pendingWritingRequirement.trim()) {
@@ -406,23 +430,8 @@ export default function SuperWritingTab() {
     setFastError('');
     setFastLoading(true);
 
-    // 清空旧小说残留
-    setNovelProject(null);
-    setNovelChapterResult(null);
-    setNovelChapters([]);
-    setNovelRawText('');
-    setShowFullNovelReader(false);
-    setFullNovelCopied(false);
-    setFullNovelCopyError('');
-    setCurrentChapterCopied(false);
-    setCurrentChapterCopyError('');
-
-    // 清空旧队列和后续章节状态
-    setNovelChapterQueue([]);
-    setNextChapterIdea('');
-    setNextChapterOutline('');
-    setBatchChapterIdea('');
-    setIsNovelQueueRunning(false);
+    // 清空旧小说残留（使用统一清理函数）
+    clearAllNovelState();
 
     // 生成小说设定
     setNovelGenerationStep('planning');
@@ -1797,12 +1806,7 @@ export default function SuperWritingTab() {
               </span>
               <div style={{ display: 'flex', gap: 8 }}>
                 <button
-                  onClick={() => {
-                    setNovelProject(null);
-                    setNovelRawText('');
-                    setNovelChapterResult(null);
-                    setNovelChapters([]);
-                  }}
+                  onClick={clearAllNovelState}
                   style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: 12 }}
                 >
                   {language === 'zh' ? '重新生成' : 'Regenerate'}
@@ -2462,7 +2466,7 @@ export default function SuperWritingTab() {
                   >
                     {language === 'zh' ? '生成队列' : 'Create Queue'}
                   </button>
-                {novelChapterQueue.length > 0 && (
+                {canContinueNovel && novelChapterQueue.length > 0 && (
                   <button
                     onClick={handleRunNovelChapterQueue}
                     disabled={isNovelQueueRunning}
