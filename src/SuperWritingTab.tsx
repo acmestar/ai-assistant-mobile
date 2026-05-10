@@ -124,6 +124,10 @@ export default function SuperWritingTab() {
   const [fullNovelCopied, setFullNovelCopied] = useState(false);
   const [fullNovelCopyError, setFullNovelCopyError] = useState('');
 
+  // 当前章节复制状态
+  const [currentChapterCopied, setCurrentChapterCopied] = useState(false);
+  const [currentChapterCopyError, setCurrentChapterCopyError] = useState('');
+
   // 快速修改状态
   const [quickHeroName, setQuickHeroName] = useState('');
   const [quickLoveInterestName, setQuickLoveInterestName] = useState('');
@@ -417,6 +421,8 @@ export default function SuperWritingTab() {
     setNovelRawText('');
     setShowFullNovelReader(false);
     setFullNovelCopied(false);
+    setCurrentChapterCopied(false);
+    setCurrentChapterCopyError('');
 
     // 清空旧队列和后续章节状态
     setNovelChapterQueue([]);
@@ -509,6 +515,8 @@ export default function SuperWritingTab() {
       setNovelChapterResult(firstChapter);
       setNovelChapters([firstChapter]);
       setNovelGenerationStep('done');
+      setCurrentChapterCopied(false);
+      setCurrentChapterCopyError('');
 
       console.log('[NovelGenerateStep]', {
         step: 'chapter-done',
@@ -554,6 +562,8 @@ export default function SuperWritingTab() {
     setNovelError('');
     setFastLoading(true);
     setNovelGenerationStep('chapter');
+    setCurrentChapterCopied(false);
+    setCurrentChapterCopyError('');
 
     try {
       const chapterPrompt = buildNovelFirstChapterPlainPrompt({
@@ -599,6 +609,8 @@ export default function SuperWritingTab() {
         return newChapters.sort((a, b) => a.chapterNo - b.chapterNo);
       });
       setNovelGenerationStep('done');
+      setCurrentChapterCopied(false);
+      setCurrentChapterCopyError('');
 
     } catch (error: any) {
       console.error('[RegenerateFirstChapterError]', error);
@@ -724,6 +736,8 @@ export default function SuperWritingTab() {
         setNovelChapters(prev => [...prev, parsed]);
         setNextChapterIdea('');
         setNextChapterOutline('');
+        setCurrentChapterCopied(false);
+        setCurrentChapterCopyError('');
       } else {
         setFastError(language === 'zh' ? '解析章节失败' : 'Failed to parse chapter');
       }
@@ -835,6 +849,8 @@ export default function SuperWritingTab() {
         setNovelChapters(prev => [...prev, parsed]);
         setNextChapterIdea('');
         setNextChapterOutline('');
+        setCurrentChapterCopied(false);
+        setCurrentChapterCopyError('');
       } else {
         setFastError(language === 'zh' ? '解析章节失败' : 'Failed to parse chapter');
       }
@@ -952,6 +968,8 @@ export default function SuperWritingTab() {
           // 更新 React state
           setNovelChapters(workingChapters);
           setNovelChapterResult(parsed);
+          setCurrentChapterCopied(false);
+          setCurrentChapterCopyError('');
 
           // 标记完成
           setNovelChapterQueue(prev => prev.map(q =>
@@ -1044,6 +1062,8 @@ export default function SuperWritingTab() {
           return newChapters.sort((a, b) => a.chapterNo - b.chapterNo);
         });
         setNovelChapterResult(parsed);
+        setCurrentChapterCopied(false);
+        setCurrentChapterCopyError('');
         setNovelChapterQueue(prev => prev.map(q =>
           q.id === itemId ? { ...q, status: 'done' as const, result: parsed } : q
         ));
@@ -1237,6 +1257,8 @@ export default function SuperWritingTab() {
           content: result,
         };
         setNovelChapterResult(updatedChapter);
+        setCurrentChapterCopied(false);
+        setCurrentChapterCopyError('');
         // 同步更新 novelChapters
         setNovelChapters(prev => prev.map(c =>
           c.chapterNo === novelChapterResult.chapterNo ? updatedChapter : c
@@ -2372,12 +2394,66 @@ export default function SuperWritingTab() {
             {/* 复制按钮 */}
             <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
               <button
-                onClick={() => navigator.clipboard.writeText(novelChapterResult.content)}
-                style={{ background: 'transparent', border: 'none', color: 'var(--accent)', fontSize: 12 }}
+                onClick={async () => {
+                  try {
+                    setCurrentChapterCopyError('');
+
+                    if (!novelChapterResult) {
+                      throw new Error(language === 'zh' ? '没有可复制的章节内容' : 'No chapter content to copy');
+                    }
+
+                    const currentChapterText = [
+                      novelProject?.title ? `《${novelProject.title}》` : '',
+                      '',
+                      `第${novelChapterResult.chapterNo}章 ${novelChapterResult.title}`,
+                      '',
+                      novelChapterResult.content,
+                    ].join('\n').trim();
+
+                    if (!currentChapterText) {
+                      throw new Error(language === 'zh' ? '没有可复制的章节内容' : 'No chapter content to copy');
+                    }
+
+                    await navigator.clipboard.writeText(currentChapterText);
+
+                    setCurrentChapterCopied(true);
+                    window.setTimeout(() => {
+                      setCurrentChapterCopied(false);
+                    }, 1500);
+                  } catch (error) {
+                    console.error('[CopyCurrentChapterError]', error);
+                    setCurrentChapterCopyError(
+                      language === 'zh'
+                        ? '复制失败，请手动选择文本复制'
+                        : 'Copy failed, please copy manually'
+                    );
+                  }
+                }}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: currentChapterCopied ? 'var(--accent)' : 'var(--accent)',
+                  fontSize: 12,
+                  fontWeight: currentChapterCopied ? 600 : 400,
+                }}
               >
-                {language === 'zh' ? '复制正文' : 'Copy'}
+                {currentChapterCopied
+                  ? (language === 'zh' ? '已复制' : 'Copied')
+                  : (language === 'zh' ? '复制正文' : 'Copy Chapter')}
               </button>
             </div>
+
+            {/* 复制失败提示 */}
+            {currentChapterCopyError && (
+              <div style={{
+                fontSize: 12,
+                color: 'var(--danger)',
+                marginBottom: 8,
+                textAlign: 'right',
+              }}>
+                {currentChapterCopyError}
+              </div>
+            )}
 
             {/* 续写设置区 - 仅在第一章成功后显示 */}
             {canContinueNovel && (
