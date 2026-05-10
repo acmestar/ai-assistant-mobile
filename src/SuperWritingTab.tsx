@@ -160,6 +160,13 @@ export default function SuperWritingTab() {
     novelChapters.some(c => c.chapterNo === 1 && c.content?.trim()) &&
     !fastLoading;
 
+  // 判断第一章是否生成失败
+  const isFirstChapterFailed =
+    creationMode === 'novel' &&
+    !!novelProject &&
+    !novelChapterResult?.content?.trim() &&
+    novelGenerationStep === 'error';
+
   // 清理小说后续章节相关状态（队列、续写等）
   const clearNovelContinuationState = () => {
     setNovelChapterQueue([]);
@@ -364,13 +371,13 @@ export default function SuperWritingTab() {
   // 快速生成 - 一次 API 完成创作（非小说模式）
   // 小说模式使用两步生成：handleGenerateNovelProject
   const handleFastGenerate = async () => {
-    if (!outlineText.trim() || !apiKey) return;
-
-    // 小说模式使用专门的两步生成函数
+    // 小说模式优先交给专门函数处理（内部有错误提示）
     if (creationMode === 'novel') {
       await handleGenerateNovelProject();
       return;
     }
+
+    if (!outlineText.trim() || !apiKey) return;
 
     setFastLoading(true);
     setFastError(null);
@@ -2223,9 +2230,11 @@ export default function SuperWritingTab() {
             {/* 确认设定并生成第一章按钮 - 仅在第一章未生成或失败时显示 */}
             {(!novelChapterResult || !novelChapterResult.content?.trim()) && !fastLoading && (
               <div style={{ marginTop: 12 }}>
-                {novelChapterResult && (
+                {isFirstChapterFailed && (
                   <div style={{ color: 'var(--danger)', fontSize: 12, marginBottom: 8 }}>
-                    {language === 'zh' ? '第一章生成失败，请修改设定后重试。' : 'First chapter generation failed. Please modify the setup and retry.'}
+                    {language === 'zh'
+                      ? '第一章生成失败，请修改设定后重试，或直接重新生成第一章。'
+                      : 'Failed to generate Chapter 1. Please edit the setup and try again, or regenerate Chapter 1.'}
                   </div>
                 )}
                 <button
@@ -2242,9 +2251,9 @@ export default function SuperWritingTab() {
                     fontWeight: 500,
                   }}
                 >
-                  {novelChapterResult
+                  {isFirstChapterFailed
                     ? (language === 'zh' ? '重新生成第一章' : 'Regenerate First Chapter')
-                    : (language === 'zh' ? '确认设定并生成第一章' : 'Confirm Setup & Generate First Chapter')}
+                    : (language === 'zh' ? '确认设定并生成第一章' : 'Confirm Setup and Generate Chapter 1')}
                 </button>
               </div>
             )}
