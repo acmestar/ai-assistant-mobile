@@ -155,6 +155,15 @@ export default function SuperWritingTab() {
   // 获取实际使用的模型ID（优先使用创作台默认模型，否则使用全局模型）
   const effectiveModelId = selectedWritingModelId || chatModelId;
 
+  // 判断是否可以继续生成后续章节（第一章必须成功生成）
+  const canContinueNovel =
+    creationMode === 'novel' &&
+    !!novelProject &&
+    !!novelChapterResult &&
+    !!novelChapterResult.content?.trim() &&
+    novelChapters.some(c => c.chapterNo === 1 && c.content?.trim()) &&
+    !fastLoading;
+
   // 接收从聊天页传递的需求
   useEffect(() => {
     if (pendingWritingRequirement.trim()) {
@@ -409,6 +418,13 @@ export default function SuperWritingTab() {
     setShowFullNovelReader(false);
     setFullNovelCopied(false);
 
+    // 清空旧队列和后续章节状态
+    setNovelChapterQueue([]);
+    setNextChapterIdea('');
+    setNextChapterOutline('');
+    setBatchChapterIdea('');
+    setIsNovelQueueRunning(false);
+
     // ========== 第一步：生成小说设定 ==========
 
     setNovelGenerationStep('planning');
@@ -457,14 +473,21 @@ export default function SuperWritingTab() {
       });
 
       console.log('[NovelGenerateStep]', {
-        step: 'chapter',
+        step: 'chapter-start',
         effectiveModelId,
         selectedWritingModelId,
         promptLength: chapterPrompt.length,
+        projectTitle: project.title,
+        chapterTitle: project.chapters?.[0]?.title,
       });
 
       const chapterText = await callChatCompletionRaw(chapterPrompt, {
         modelId: effectiveModelId,
+      });
+
+      console.log('[NovelGenerateStep]', {
+        step: 'chapter-received',
+        contentLength: chapterText?.length || 0,
       });
 
       if (!chapterText || !chapterText.trim()) {
@@ -487,6 +510,13 @@ export default function SuperWritingTab() {
       setNovelChapters([firstChapter]);
       setNovelGenerationStep('done');
 
+      console.log('[NovelGenerateStep]', {
+        step: 'chapter-done',
+        chapterNo: firstChapter.chapterNo,
+        title: firstChapter.title,
+        contentLength: firstChapter.content.length,
+      });
+
       // 清空快速修改字段
       setQuickHeroName('');
       setQuickLoveInterestName('');
@@ -495,9 +525,9 @@ export default function SuperWritingTab() {
       setQuickEnding('');
 
     } catch (error: any) {
-      console.error('[NovelGenerateError]', error);
+      console.error('[NovelFirstChapterError]', error);
       setNovelGenerationStep('error');
-      const errorMessage = error.message || (language === 'zh' ? '生成失败' : 'Generation failed');
+      const errorMessage = error.message || (language === 'zh' ? '第一章生成失败' : 'First chapter generation failed');
       if (error.message?.includes('API 错误:')) {
         setNovelError(error.message);
       } else if (error.response) {
@@ -505,7 +535,8 @@ export default function SuperWritingTab() {
       } else {
         setNovelError(errorMessage);
       }
-      // 如果 novelProject 已经存在，不要清空
+      // 第一章失败时，保留 novelProject，不清空
+      // 用户可以点击"重新生成第一章"
     } finally {
       setFastLoading(false);
     }
@@ -647,7 +678,23 @@ export default function SuperWritingTab() {
 
   // 智能续写下一章
   const handleContinueNextChapter = async () => {
-    if (!novelProject || novelChapters.length === 0 || !apiKey) return;
+    // 检查前置条件，不要 silent return
+    if (!novelProject) {
+      setNovelError(language === 'zh' ? '请先生成小说设定' : 'Please generate novel setup first');
+      return;
+    }
+    if (!novelChapterResult?.content?.trim()) {
+      setNovelError(language === 'zh' ? '请先生成第一章，再继续生成后续章节' : 'Please generate first chapter first');
+      return;
+    }
+    if (!apiKey) {
+      setNovelError(language === 'zh' ? '请先配置 API Key' : 'Please configure API Key first');
+      return;
+    }
+    if (!effectiveModelId) {
+      setNovelError(language === 'zh' ? '请先选择生成模型' : 'Please select a model first');
+      return;
+    }
 
     setFastLoading(true);
     setFastError(null);
@@ -690,7 +737,23 @@ export default function SuperWritingTab() {
 
   // 生成下一章大纲
   const handleGenerateNextOutline = async () => {
-    if (!novelProject || novelChapters.length === 0 || !apiKey) return;
+    // 检查前置条件，不要 silent return
+    if (!novelProject) {
+      setNovelError(language === 'zh' ? '请先生成小说设定' : 'Please generate novel setup first');
+      return;
+    }
+    if (!novelChapterResult?.content?.trim()) {
+      setNovelError(language === 'zh' ? '请先生成第一章，再继续生成后续章节' : 'Please generate first chapter first');
+      return;
+    }
+    if (!apiKey) {
+      setNovelError(language === 'zh' ? '请先配置 API Key' : 'Please configure API Key first');
+      return;
+    }
+    if (!effectiveModelId) {
+      setNovelError(language === 'zh' ? '请先选择生成模型' : 'Please select a model first');
+      return;
+    }
 
     setFastLoading(true);
     setFastError(null);
@@ -723,7 +786,27 @@ export default function SuperWritingTab() {
 
   // 根据大纲写正文
   const handleWriteFromNextOutline = async () => {
-    if (!novelProject || novelChapters.length === 0 || !nextChapterOutline || !apiKey) return;
+    // 检查前置条件，不要 silent return
+    if (!novelProject) {
+      setNovelError(language === 'zh' ? '请先生成小说设定' : 'Please generate novel setup first');
+      return;
+    }
+    if (!novelChapterResult?.content?.trim()) {
+      setNovelError(language === 'zh' ? '请先生成第一章，再继续生成后续章节' : 'Please generate first chapter first');
+      return;
+    }
+    if (!nextChapterOutline) {
+      setNovelError(language === 'zh' ? '请先生成下一章大纲' : 'Please generate next chapter outline first');
+      return;
+    }
+    if (!apiKey) {
+      setNovelError(language === 'zh' ? '请先配置 API Key' : 'Please configure API Key first');
+      return;
+    }
+    if (!effectiveModelId) {
+      setNovelError(language === 'zh' ? '请先选择生成模型' : 'Please select a model first');
+      return;
+    }
 
     setFastLoading(true);
     setFastError(null);
@@ -765,7 +848,15 @@ export default function SuperWritingTab() {
 
   // 创建章节队列
   const handleCreateNovelChapterQueue = () => {
-    if (!novelProject) return;
+    // 检查前置条件，不要 silent return
+    if (!novelProject) {
+      setNovelError(language === 'zh' ? '请先生成小说设定' : 'Please generate novel setup first');
+      return;
+    }
+    if (!novelChapterResult?.content?.trim()) {
+      setNovelError(language === 'zh' ? '请先生成第一章，再继续生成后续章节' : 'Please generate first chapter first');
+      return;
+    }
 
     const lastChapterNo = novelChapters.length > 0
       ? Math.max(...novelChapters.map(c => c.chapterNo))
@@ -793,7 +884,27 @@ export default function SuperWritingTab() {
 
   // 执行章节队列
   const handleRunNovelChapterQueue = async () => {
-    if (!novelProject || novelChapterQueue.length === 0 || !apiKey) return;
+    // 检查前置条件，不要 silent return
+    if (!novelProject) {
+      setNovelError(language === 'zh' ? '请先生成小说设定' : 'Please generate novel setup first');
+      return;
+    }
+    if (!novelChapterResult?.content?.trim()) {
+      setNovelError(language === 'zh' ? '请先生成第一章，再继续生成后续章节' : 'Please generate first chapter first');
+      return;
+    }
+    if (novelChapterQueue.length === 0) {
+      setNovelError(language === 'zh' ? '请先创建章节队列' : 'Please create chapter queue first');
+      return;
+    }
+    if (!apiKey) {
+      setNovelError(language === 'zh' ? '请先配置 API Key' : 'Please configure API Key first');
+      return;
+    }
+    if (!effectiveModelId) {
+      setNovelError(language === 'zh' ? '请先选择生成模型' : 'Please select a model first');
+      return;
+    }
 
     setIsNovelQueueRunning(true);
 
@@ -871,10 +982,29 @@ export default function SuperWritingTab() {
 
   // 重试队列项
   const handleRetryNovelQueueItem = async (itemId: string) => {
-    if (!novelProject || !apiKey) return;
+    // 检查前置条件，不要 silent return
+    if (!novelProject) {
+      setNovelError(language === 'zh' ? '请先生成小说设定' : 'Please generate novel setup first');
+      return;
+    }
+    if (!novelChapterResult?.content?.trim()) {
+      setNovelError(language === 'zh' ? '请先生成第一章，再继续生成后续章节' : 'Please generate first chapter first');
+      return;
+    }
+    if (!apiKey) {
+      setNovelError(language === 'zh' ? '请先配置 API Key' : 'Please configure API Key first');
+      return;
+    }
+    if (!effectiveModelId) {
+      setNovelError(language === 'zh' ? '请先选择生成模型' : 'Please select a model first');
+      return;
+    }
 
     const item = novelChapterQueue.find(q => q.id === itemId);
-    if (!item) return;
+    if (!item) {
+      setNovelError(language === 'zh' ? '队列项不存在' : 'Queue item not found');
+      return;
+    }
 
     setNovelChapterQueue(prev => prev.map(q =>
       q.id === itemId ? { ...q, status: 'running' as const, error: undefined } : q
@@ -1705,8 +1835,8 @@ export default function SuperWritingTab() {
           </div>
         )}
 
-        {/* 设定已生成但第一章未生成 */}
-        {creationMode === 'novel' && novelProject && !novelChapterResult && !fastLoading && (
+        {/* 设定已生成但第一章未生成或内容为空 */}
+        {creationMode === 'novel' && novelProject && (!novelChapterResult || !novelChapterResult.content?.trim()) && !fastLoading && (
           <div style={{
             padding: 16,
             background: 'var(--bg-secondary)',
@@ -1717,7 +1847,9 @@ export default function SuperWritingTab() {
               《{novelProject.title}》
             </div>
             <div style={{ color: 'var(--text-muted)', fontSize: 13, marginBottom: 16 }}>
-              {language === 'zh' ? '小说设定已生成，但第一章暂未生成。' : 'Novel setup generated, but first chapter is not ready.'}
+              {novelChapterResult
+                ? (language === 'zh' ? '第一章生成失败或内容为空，请重新生成。' : 'First chapter generation failed or content is empty. Please regenerate.')
+                : (language === 'zh' ? '小说设定已生成，但第一章暂未生成。' : 'Novel setup generated, but first chapter is not ready.')}
             </div>
             <button
               onClick={handleRegenerateFirstChapter}
@@ -1738,7 +1870,7 @@ export default function SuperWritingTab() {
                   {language === 'zh' ? '生成中...' : 'Generating...'}
                 </>
               ) : (
-                language === 'zh' ? '生成第一章' : 'Generate First Chapter'
+                language === 'zh' ? '重新生成第一章' : 'Regenerate First Chapter'
               )}
             </button>
           </div>
@@ -2205,8 +2337,8 @@ export default function SuperWritingTab() {
           </div>
         )}
 
-        {/* 小说章节正文结果 - 正文优先展示 */}
-        {creationMode === 'novel' && novelChapterResult && (
+        {/* 小说章节正文结果 - 仅在有实际内容时显示 */}
+        {creationMode === 'novel' && novelChapterResult && novelChapterResult.content?.trim() && (
           <div style={{
             padding: 16,
             background: 'var(--bg-secondary)',
@@ -2247,56 +2379,58 @@ export default function SuperWritingTab() {
               </button>
             </div>
 
-            {/* 续写设置区 */}
-            <div style={{ marginBottom: 12, padding: 12, background: 'var(--bg-tertiary)', borderRadius: 8 }}>
-              <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 8 }}>
-                {language === 'zh' ? '下一章你想看什么？（可不填，AI 自动续写）' : 'What do you want next? (Optional)'}
-              </div>
-              <textarea
-                value={nextChapterIdea}
-                onChange={(e) => setNextChapterIdea(e.target.value)}
-                placeholder={language === 'zh' ? '例如：让他们误会加深 / 写甜一点 / 让反派出现' : 'e.g., More misunderstandings / Sweeter / Introduce villain'}
-                rows={2}
-                style={{
-                  width: '100%',
-                  padding: 8,
-                  background: 'var(--bg-primary)',
-                  border: '1px solid var(--border)',
-                  borderRadius: 6,
-                  color: 'var(--text-primary)',
-                  fontSize: 12,
-                  resize: 'vertical',
-                }}
-              />
-              <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
-                <button
-                  onClick={handleContinueNextChapter}
-                  disabled={fastLoading}
-                  className="btn-primary"
-                  style={{ padding: '8px 12px', fontSize: 12 }}
-                >
-                  {fastLoading ? <RefreshCw size={12} className="spin" /> : <Sparkles size={12} />}
-                  {language === 'zh' ? '智能续写下一章' : 'Continue'}
-                </button>
-                <button
-                  onClick={handleGenerateNextOutline}
-                  disabled={fastLoading}
+            {/* 续写设置区 - 仅在第一章成功后显示 */}
+            {canContinueNovel && (
+              <div style={{ marginBottom: 12, padding: 12, background: 'var(--bg-tertiary)', borderRadius: 8 }}>
+                <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 8 }}>
+                  {language === 'zh' ? '下一章你想看什么？（可不填，AI 自动续写）' : 'What do you want next? (Optional)'}
+                </div>
+                <textarea
+                  value={nextChapterIdea}
+                  onChange={(e) => setNextChapterIdea(e.target.value)}
+                  placeholder={language === 'zh' ? '例如：让他们误会加深 / 写甜一点 / 让反派出现' : 'e.g., More misunderstandings / Sweeter / Introduce villain'}
+                  rows={2}
                   style={{
-                    padding: '8px 12px',
+                    width: '100%',
+                    padding: 8,
                     background: 'var(--bg-primary)',
                     border: '1px solid var(--border)',
                     borderRadius: 6,
-                    color: 'var(--text-secondary)',
+                    color: 'var(--text-primary)',
                     fontSize: 12,
+                    resize: 'vertical',
                   }}
-                >
-                  {language === 'zh' ? '先生成大纲' : 'Outline First'}
-                </button>
+                />
+                <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+                  <button
+                    onClick={handleContinueNextChapter}
+                    disabled={fastLoading}
+                    className="btn-primary"
+                    style={{ padding: '8px 12px', fontSize: 12 }}
+                  >
+                    {fastLoading ? <RefreshCw size={12} className="spin" /> : <Sparkles size={12} />}
+                    {language === 'zh' ? '智能续写下一章' : 'Continue'}
+                  </button>
+                  <button
+                    onClick={handleGenerateNextOutline}
+                    disabled={fastLoading}
+                    style={{
+                      padding: '8px 12px',
+                      background: 'var(--bg-primary)',
+                      border: '1px solid var(--border)',
+                      borderRadius: 6,
+                      color: 'var(--text-secondary)',
+                      fontSize: 12,
+                    }}
+                  >
+                    {language === 'zh' ? '先生成大纲' : 'Outline First'}
+                  </button>
+                </div>
               </div>
-            </div>
+            )}
 
-            {/* 下一章大纲 */}
-            {nextChapterOutline && (
+            {/* 下一章大纲 - 仅在第一章成功后显示 */}
+            {canContinueNovel && nextChapterOutline && (
               <div style={{ marginBottom: 12, padding: 12, background: 'var(--bg-tertiary)', borderRadius: 8 }}>
                 <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 8 }}>
                   {language === 'zh' ? '下一章大纲（可编辑）' : 'Next Chapter Outline (Editable)'}
@@ -2327,99 +2461,102 @@ export default function SuperWritingTab() {
               </div>
             )}
 
-            {/* 快速修改区 */}
-            <div style={{ marginBottom: 12, padding: 12, background: 'var(--bg-tertiary)', borderRadius: 8 }}>
-              <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 8 }}>
-                ⚡ {language === 'zh' ? '快速定制' : 'Quick Customization'}
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
-                <input
-                  type="text"
-                  value={quickHeroName}
-                  onChange={(e) => setQuickHeroName(e.target.value)}
-                  placeholder={language === 'zh' ? '主角名字' : 'Hero Name'}
-                  style={{ padding: '6px 8px', background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 12 }}
-                />
-                <input
-                  type="text"
-                  value={quickLoveInterestName}
-                  onChange={(e) => setQuickLoveInterestName(e.target.value)}
-                  placeholder={language === 'zh' ? '另一位主角' : 'Love Interest'}
-                  style={{ padding: '6px 8px', background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 12 }}
-                />
-                <input
-                  type="text"
-                  value={quickTone}
-                  onChange={(e) => setQuickTone(e.target.value)}
-                  placeholder={language === 'zh' ? '风格：甜/虐/爽/治愈' : 'Tone'}
-                  style={{ padding: '6px 8px', background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 12 }}
-                />
-                <input
-                  type="text"
-                  value={quickRelationship}
-                  onChange={(e) => setQuickRelationship(e.target.value)}
-                  placeholder={language === 'zh' ? '关系：暗恋/冤家/救赎' : 'Relationship'}
-                  style={{ padding: '6px 8px', background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 12 }}
-                />
-              </div>
-              <button
-                onClick={handleApplyQuickEdit}
-                disabled={fastLoading || (!quickHeroName && !quickLoveInterestName && !quickTone && !quickRelationship && !quickEnding)}
-                style={{
-                  width: '100%',
-                  padding: '8px 12px',
-                  background: 'var(--accent)',
-                  border: 'none',
-                  borderRadius: 6,
-                  color: 'white',
-                  fontSize: 12,
-                  opacity: (quickHeroName || quickLoveInterestName || quickTone || quickRelationship || quickEnding) ? 1 : 0.5,
-                }}
-              >
-                {language === 'zh' ? '应用修改并重写当前章' : 'Apply Changes'}
-              </button>
-            </div>
-
-            {/* 批量生成章节队列 */}
-            <div style={{ marginBottom: 12, padding: 12, background: 'var(--bg-tertiary)', borderRadius: 8 }}>
-              <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 8 }}>
-                📚 {language === 'zh' ? '批量生成后续章节' : 'Batch Generate'}
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8 }}>
-                {language === 'zh' ? 'AI 会按章节规划顺序生成，自动参考前文避免剧情断裂。' : 'AI generates in order, referencing previous chapters.'}
-              </div>
-              <div style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
-                <select
-                  value={batchChapterCount}
-                  onChange={(e) => setBatchChapterCount(Number(e.target.value))}
-                  style={{ padding: '6px 8px', background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 12 }}
-                >
-                  <option value={3}>{language === 'zh' ? '后续 3 章' : 'Next 3'}</option>
-                  <option value={5}>{language === 'zh' ? '后续 5 章' : 'Next 5'}</option>
-                  <option value={10}>{language === 'zh' ? '后续 10 章' : 'Next 10'}</option>
-                </select>
-                <input
-                  type="text"
-                  value={batchChapterIdea}
-                  onChange={(e) => setBatchChapterIdea(e.target.value)}
-                  placeholder={language === 'zh' ? '这一批想看什么？（可选）' : 'Batch idea (optional)'}
-                  style={{ flex: 1, padding: '6px 8px', background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 12 }}
-                />
-              </div>
-              <div style={{ display: 'flex', gap: 8 }}>
+            {/* 快速修改区 - 仅在第一章成功后显示 */}
+            {canContinueNovel && (
+              <div style={{ marginBottom: 12, padding: 12, background: 'var(--bg-tertiary)', borderRadius: 8 }}>
+                <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 8 }}>
+                  ⚡ {language === 'zh' ? '快速定制' : 'Quick Customization'}
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+                  <input
+                    type="text"
+                    value={quickHeroName}
+                    onChange={(e) => setQuickHeroName(e.target.value)}
+                    placeholder={language === 'zh' ? '主角名字' : 'Hero Name'}
+                    style={{ padding: '6px 8px', background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 12 }}
+                  />
+                  <input
+                    type="text"
+                    value={quickLoveInterestName}
+                    onChange={(e) => setQuickLoveInterestName(e.target.value)}
+                    placeholder={language === 'zh' ? '另一位主角' : 'Love Interest'}
+                    style={{ padding: '6px 8px', background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 12 }}
+                  />
+                  <input
+                    type="text"
+                    value={quickTone}
+                    onChange={(e) => setQuickTone(e.target.value)}
+                    placeholder={language === 'zh' ? '风格：甜/虐/爽/治愈' : 'Tone'}
+                    style={{ padding: '6px 8px', background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 12 }}
+                  />
+                  <input
+                    type="text"
+                    value={quickRelationship}
+                    onChange={(e) => setQuickRelationship(e.target.value)}
+                    placeholder={language === 'zh' ? '关系：暗恋/冤家/救赎' : 'Relationship'}
+                    style={{ padding: '6px 8px', background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 12 }}
+                  />
+                </div>
                 <button
-                  onClick={handleCreateNovelChapterQueue}
+                  onClick={handleApplyQuickEdit}
+                  disabled={fastLoading || (!quickHeroName && !quickLoveInterestName && !quickTone && !quickRelationship && !quickEnding)}
                   style={{
+                    width: '100%',
                     padding: '8px 12px',
-                    background: 'var(--bg-primary)',
-                    border: '1px solid var(--border)',
+                    background: 'var(--accent)',
+                    border: 'none',
                     borderRadius: 6,
-                    color: 'var(--text-secondary)',
+                    color: 'white',
                     fontSize: 12,
+                    opacity: (quickHeroName || quickLoveInterestName || quickTone || quickRelationship || quickEnding) ? 1 : 0.5,
                   }}
                 >
-                  {language === 'zh' ? '生成队列' : 'Create Queue'}
+                  {language === 'zh' ? '应用修改并重写当前章' : 'Apply Changes'}
                 </button>
+              </div>
+            )}
+
+            {/* 批量生成章节队列 - 仅在第一章成功后显示 */}
+            {canContinueNovel && (
+              <div style={{ marginBottom: 12, padding: 12, background: 'var(--bg-tertiary)', borderRadius: 8 }}>
+                <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 8 }}>
+                  📚 {language === 'zh' ? '批量生成后续章节' : 'Batch Generate'}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8 }}>
+                  {language === 'zh' ? 'AI 会按章节规划顺序生成，自动参考前文避免剧情断裂。' : 'AI generates in order, referencing previous chapters.'}
+                </div>
+                <div style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
+                  <select
+                    value={batchChapterCount}
+                    onChange={(e) => setBatchChapterCount(Number(e.target.value))}
+                    style={{ padding: '6px 8px', background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 12 }}
+                  >
+                    <option value={3}>{language === 'zh' ? '后续 3 章' : 'Next 3'}</option>
+                    <option value={5}>{language === 'zh' ? '后续 5 章' : 'Next 5'}</option>
+                    <option value={10}>{language === 'zh' ? '后续 10 章' : 'Next 10'}</option>
+                  </select>
+                  <input
+                    type="text"
+                    value={batchChapterIdea}
+                    onChange={(e) => setBatchChapterIdea(e.target.value)}
+                    placeholder={language === 'zh' ? '这一批想看什么？（可选）' : 'Batch idea (optional)'}
+                    style={{ flex: 1, padding: '6px 8px', background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 12 }}
+                  />
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button
+                    onClick={handleCreateNovelChapterQueue}
+                    style={{
+                      padding: '8px 12px',
+                      background: 'var(--bg-primary)',
+                      border: '1px solid var(--border)',
+                      borderRadius: 6,
+                      color: 'var(--text-secondary)',
+                      fontSize: 12,
+                    }}
+                  >
+                    {language === 'zh' ? '生成队列' : 'Create Queue'}
+                  </button>
                 {novelChapterQueue.length > 0 && (
                   <button
                     onClick={handleRunNovelChapterQueue}
@@ -2433,9 +2570,10 @@ export default function SuperWritingTab() {
                 )}
               </div>
             </div>
+            )}
 
-            {/* 章节队列显示 */}
-            {novelChapterQueue.length > 0 && (
+            {/* 章节队列显示 - 仅在第一章成功后显示 */}
+            {canContinueNovel && novelChapterQueue.length > 0 && (
               <div style={{ marginBottom: 12, padding: 12, background: 'var(--bg-tertiary)', borderRadius: 8 }}>
                 <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 8 }}>
                   {language === 'zh' ? `章节队列 (${novelChapterQueue.length})` : `Queue (${novelChapterQueue.length})`}
@@ -2486,33 +2624,35 @@ export default function SuperWritingTab() {
               </div>
             )}
 
-            {/* 正文优化按钮 */}
-            <div style={{ marginBottom: 12 }}>
-              <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
-                <Wand2 size={14} style={{ color: 'var(--accent)' }} />
-                {language === 'zh' ? '正文优化' : 'Optimize'}
+            {/* 正文优化按钮 - 仅在第一章成功后显示 */}
+            {canContinueNovel && (
+              <div style={{ marginBottom: 12 }}>
+                <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Wand2 size={14} style={{ color: 'var(--accent)' }} />
+                  {language === 'zh' ? '正文优化' : 'Optimize'}
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(80px, 1fr))', gap: 6 }}>
+                  {(Object.keys(NOVEL_REWRITE_NAMES) as NovelRewriteType[]).slice(0, 6).map((rewriteType) => (
+                    <button
+                      key={rewriteType}
+                      onClick={() => handleNovelRewrite(rewriteType)}
+                      disabled={rewriteLoading}
+                      style={{
+                        padding: '6px 8px',
+                        background: 'var(--bg-tertiary)',
+                        border: '1px solid var(--border)',
+                        borderRadius: 6,
+                        color: 'var(--text-secondary)',
+                        fontSize: 11,
+                        opacity: rewriteLoading ? 0.6 : 1,
+                      }}
+                    >
+                      {language === 'zh' ? NOVEL_REWRITE_NAMES[rewriteType].zh : NOVEL_REWRITE_NAMES[rewriteType].en}
+                    </button>
+                  ))}
+                </div>
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(80px, 1fr))', gap: 6 }}>
-                {(Object.keys(NOVEL_REWRITE_NAMES) as NovelRewriteType[]).slice(0, 6).map((rewriteType) => (
-                  <button
-                    key={rewriteType}
-                    onClick={() => handleNovelRewrite(rewriteType)}
-                    disabled={rewriteLoading}
-                    style={{
-                      padding: '6px 8px',
-                      background: 'var(--bg-tertiary)',
-                      border: '1px solid var(--border)',
-                      borderRadius: 6,
-                      color: 'var(--text-secondary)',
-                      fontSize: 11,
-                      opacity: rewriteLoading ? 0.6 : 1,
-                    }}
-                  >
-                    {language === 'zh' ? NOVEL_REWRITE_NAMES[rewriteType].zh : NOVEL_REWRITE_NAMES[rewriteType].en}
-                  </button>
-                ))}
-              </div>
-            </div>
+            )}
           </div>
         )}
 
