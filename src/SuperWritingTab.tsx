@@ -25,7 +25,6 @@ import { executeModelQueue, regenerateQueueItem, callChatCompletionRaw } from '.
 import {
   buildCreationPrompt,
   buildNovelRewritePrompt,
-  buildNovelApplyQuickEditPrompt,
   buildNovelNextOutlinePrompt,
   buildNovelContinueChapterPrompt,
   parseNovelChapterDraft,
@@ -116,7 +115,7 @@ export default function SuperWritingTab() {
   const [showAdvancedNovelSettings, setShowAdvancedNovelSettings] = useState(false);
 
   // 小说生成步骤状态
-  const [novelGenerationStep, setNovelGenerationStep] = useState<'idle' | 'planning' | 'chapter' | 'done' | 'error'>('idle');
+  const [novelGenerationStep, setNovelGenerationStep] = useState<'idle' | 'planning' | 'project-ready' | 'chapter' | 'done' | 'error'>('idle');
   const [novelError, setNovelError] = useState('');
 
   // 完整小说稿阅读区
@@ -127,13 +126,6 @@ export default function SuperWritingTab() {
   // 当前章节复制状态
   const [currentChapterCopied, setCurrentChapterCopied] = useState(false);
   const [currentChapterCopyError, setCurrentChapterCopyError] = useState('');
-
-  // 快速修改状态
-  const [quickHeroName, setQuickHeroName] = useState('');
-  const [quickLoveInterestName, setQuickLoveInterestName] = useState('');
-  const [quickTone, setQuickTone] = useState('');
-  const [quickRelationship, setQuickRelationship] = useState('');
-  const [quickEnding, setQuickEnding] = useState('');
 
   // 续写状态
   const [nextChapterIdea, setNextChapterIdea] = useState('');
@@ -344,13 +336,13 @@ export default function SuperWritingTab() {
   };
 
   // 快速生成 - 一次 API 完成创作（非小说模式）
-  // 小说模式使用两步生成：handleGenerateNovel
+  // 小说模式使用两步生成：handleGenerateNovelProject
   const handleFastGenerate = async () => {
     if (!outlineText.trim() || !apiKey) return;
 
     // 小说模式使用专门的两步生成函数
     if (creationMode === 'novel') {
-      await handleGenerateNovel();
+      await handleGenerateNovelProject();
       return;
     }
 
@@ -398,8 +390,8 @@ export default function SuperWritingTab() {
     }
   };
 
-  // 小说两步生成：第一步生成设定，第二步生成第一章正文
-  const handleGenerateNovel = async () => {
+  // 小说生成：只生成设定，不自动生成第一章
+  const handleGenerateNovelProject = async () => {
     if (!outlineText.trim() || !apiKey) return;
 
     // 校验 effectiveModelId 存在
@@ -421,6 +413,7 @@ export default function SuperWritingTab() {
     setNovelRawText('');
     setShowFullNovelReader(false);
     setFullNovelCopied(false);
+    setFullNovelCopyError('');
     setCurrentChapterCopied(false);
     setCurrentChapterCopyError('');
 
@@ -431,8 +424,7 @@ export default function SuperWritingTab() {
     setBatchChapterIdea('');
     setIsNovelQueueRunning(false);
 
-    // ========== 第一步：生成小说设定 ==========
-
+    // 生成小说设定
     setNovelGenerationStep('planning');
 
     try {
@@ -462,80 +454,24 @@ export default function SuperWritingTab() {
         setNovelError(language === 'zh' ? '小说设定解析失败，已显示模型原始返回' : 'Novel project parsing failed, showing raw output');
         setNovelProject(null);
         setFastLoading(false);
-        return; // 不继续生成第一章
+        return;
       }
 
-      // 解析成功
+      // 解析成功，只保存设定，不自动生成第一章
       setNovelProject(project);
-
-      // ========== 第二步：生成第一章正文 ==========
-
-      setNovelGenerationStep('chapter');
-
-      const chapterPrompt = buildNovelFirstChapterPlainPrompt({
-        requirement: outlineText,
-        novelProject: project,
-        chapterPlan: project.chapters?.[0],
-      });
+      setNovelGenerationStep('project-ready');
 
       console.log('[NovelGenerateStep]', {
-        step: 'chapter-start',
-        effectiveModelId,
-        selectedWritingModelId,
-        promptLength: chapterPrompt.length,
-        projectTitle: project.title,
-        chapterTitle: project.chapters?.[0]?.title,
+        step: 'project-ready',
+        title: project.title,
+        genre: project.genre,
+        chaptersCount: project.chapters?.length || 0,
       });
-
-      const chapterText = await callChatCompletionRaw(chapterPrompt, {
-        modelId: effectiveModelId,
-      });
-
-      console.log('[NovelGenerateStep]', {
-        step: 'chapter-received',
-        contentLength: chapterText?.length || 0,
-      });
-
-      if (!chapterText || !chapterText.trim()) {
-        throw new Error(language === 'zh' ? '模型返回为空' : 'Model returned empty content');
-      }
-
-      // 构造 firstChapter（纯文本，不解析 JSON）
-      const firstChapter: NovelChapterDraft = {
-        chapterNo: 1,
-        title: project.chapters?.[0]?.title || (language === 'zh' ? '第一章' : 'Chapter 1'),
-        content: chapterText.trim(),
-        summary: '',
-        characterChanges: '',
-        clues: '',
-        nextChapterHint: '',
-      };
-
-      // 保存结果
-      setNovelChapterResult(firstChapter);
-      setNovelChapters([firstChapter]);
-      setNovelGenerationStep('done');
-      setCurrentChapterCopied(false);
-      setCurrentChapterCopyError('');
-
-      console.log('[NovelGenerateStep]', {
-        step: 'chapter-done',
-        chapterNo: firstChapter.chapterNo,
-        title: firstChapter.title,
-        contentLength: firstChapter.content.length,
-      });
-
-      // 清空快速修改字段
-      setQuickHeroName('');
-      setQuickLoveInterestName('');
-      setQuickTone('');
-      setQuickRelationship('');
-      setQuickEnding('');
 
     } catch (error: any) {
-      console.error('[NovelFirstChapterError]', error);
+      console.error('[NovelProjectError]', error);
       setNovelGenerationStep('error');
-      const errorMessage = error.message || (language === 'zh' ? '第一章生成失败' : 'First chapter generation failed');
+      const errorMessage = error.message || (language === 'zh' ? '小说设定生成失败' : 'Novel project generation failed');
       if (error.message?.includes('API 错误:')) {
         setNovelError(error.message);
       } else if (error.response) {
@@ -543,15 +479,13 @@ export default function SuperWritingTab() {
       } else {
         setNovelError(errorMessage);
       }
-      // 第一章失败时，保留 novelProject，不清空
-      // 用户可以点击"重新生成第一章"
     } finally {
       setFastLoading(false);
     }
   };
 
-  // 重新生成第一章（设定已存在，只重新生成正文）
-  const handleRegenerateFirstChapter = async () => {
+  // 确认设定并生成第一章
+  const handleGenerateFirstChapterFromProject = async () => {
     if (!novelProject || !apiKey) return;
 
     if (!effectiveModelId) {
@@ -573,14 +507,21 @@ export default function SuperWritingTab() {
       });
 
       console.log('[NovelGenerateStep]', {
-        step: 'regenerate-first-chapter',
+        step: 'confirm-and-generate-first-chapter',
         effectiveModelId,
         selectedWritingModelId,
         promptLength: chapterPrompt.length,
+        projectTitle: novelProject.title,
+        chapterTitle: novelProject.chapters?.[0]?.title,
       });
 
       const chapterText = await callChatCompletionRaw(chapterPrompt, {
         modelId: effectiveModelId,
+      });
+
+      console.log('[NovelGenerateStep]', {
+        step: 'chapter-received',
+        contentLength: chapterText?.length || 0,
       });
 
       if (!chapterText || !chapterText.trim()) {
@@ -598,91 +539,30 @@ export default function SuperWritingTab() {
       };
 
       setNovelChapterResult(firstChapter);
-      setNovelChapters(prev => {
-        const newChapters = [...prev];
-        const existingIndex = newChapters.findIndex(c => c.chapterNo === 1);
-        if (existingIndex >= 0) {
-          newChapters[existingIndex] = firstChapter;
-        } else {
-          newChapters.push(firstChapter);
-        }
-        return newChapters.sort((a, b) => a.chapterNo - b.chapterNo);
-      });
+      setNovelChapters([firstChapter]);
       setNovelGenerationStep('done');
       setCurrentChapterCopied(false);
       setCurrentChapterCopyError('');
 
+      console.log('[NovelGenerateStep]', {
+        step: 'chapter-done',
+        chapterNo: firstChapter.chapterNo,
+        title: firstChapter.title,
+        contentLength: firstChapter.content.length,
+      });
+
     } catch (error: any) {
-      console.error('[RegenerateFirstChapterError]', error);
+      console.error('[NovelFirstChapterError]', error);
       setNovelGenerationStep('error');
-      const errorMessage = error.message || (language === 'zh' ? '重新生成失败' : 'Regeneration failed');
+      const errorMessage = error.message || (language === 'zh' ? '第一章生成失败' : 'First chapter generation failed');
       if (error.message?.includes('API 错误:')) {
         setNovelError(error.message);
+      } else if (error.response) {
+        setNovelError(`API 错误: ${error.response.status || '未知'} ${error.response.statusText || ''}`);
       } else {
         setNovelError(errorMessage);
       }
-    } finally {
-      setFastLoading(false);
-    }
-  };
-
-  // 应用快速修改
-  const handleApplyQuickEdit = async () => {
-    if (!novelProject || !novelChapterResult || !apiKey) return;
-
-    setFastLoading(true);
-    setFastError(null);
-
-    try {
-      const prompt = buildNovelApplyQuickEditPrompt({
-        novelProject,
-        currentChapter: novelChapterResult,
-        quickHeroName,
-        quickLoveInterestName,
-        quickTone,
-        quickRelationship,
-        quickEnding,
-      });
-
-      console.log('[NovelModelCall]', {
-        source: 'handleApplyQuickEdit',
-        effectiveModelId,
-        promptLength: prompt.length,
-      });
-
-      const result = await callChatCompletionRaw(prompt, {
-        modelId: effectiveModelId,
-      });
-
-      // 解析 JSON
-      let jsonStr = result.trim();
-      if (jsonStr.startsWith('```')) {
-        const match = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
-        if (match) jsonStr = match[1].trim();
-      }
-      const startIndex = jsonStr.indexOf('{');
-      const lastIndex = jsonStr.lastIndexOf('}');
-      if (startIndex !== -1 && lastIndex !== -1) {
-        jsonStr = jsonStr.slice(startIndex, lastIndex + 1);
-      }
-
-      const parsed = JSON.parse(jsonStr);
-      if (parsed.project && parsed.chapter) {
-        setNovelProject(parsed.project);
-        setNovelChapterResult(parsed.chapter);
-        // 更新 novelChapters 中的当前章节
-        setNovelChapters(prev => {
-          const newChapters = [...prev];
-          const currentIndex = newChapters.findIndex(c => c.chapterNo === parsed.chapter.chapterNo);
-          if (currentIndex >= 0) {
-            newChapters[currentIndex] = parsed.chapter;
-          }
-          return newChapters;
-        });
-      }
-    } catch (error: any) {
-      console.error('[NovelModelError]', error);
-      setFastError(error.message || '修改失败');
+      // 第一章失败时，保留 novelProject，用户可以修改设定后重试
     } finally {
       setFastLoading(false);
     }
@@ -1735,13 +1615,15 @@ export default function SuperWritingTab() {
                   {fastLoading ? (
                     <>
                       <RefreshCw size={14} className="spin" />
-                      {language === 'zh' ? '生成中...' : 'Generating...'}
+                      {creationMode === 'novel'
+                        ? (language === 'zh' ? '正在生成小说设定...' : 'Generating novel setup...')
+                        : (language === 'zh' ? '生成中...' : 'Generating...')}
                     </>
                   ) : (
                     <>
                       <Sparkles size={14} />
                       {creationMode === 'novel'
-                        ? (language === 'zh' ? '生成我的小说' : 'Generate My Novel')
+                        ? (language === 'zh' ? '生成小说设定' : 'Generate Novel Setup')
                         : (language === 'zh' ? '快速生成' : 'Fast Generate')}
                     </>
                   )}
@@ -1870,11 +1752,11 @@ export default function SuperWritingTab() {
             </div>
             <div style={{ color: 'var(--text-muted)', fontSize: 13, marginBottom: 16 }}>
               {novelChapterResult
-                ? (language === 'zh' ? '第一章生成失败或内容为空，请重新生成。' : 'First chapter generation failed or content is empty. Please regenerate.')
-                : (language === 'zh' ? '小说设定已生成，但第一章暂未生成。' : 'Novel setup generated, but first chapter is not ready.')}
+                ? (language === 'zh' ? '第一章生成失败，请修改设定后重试，或直接重新生成第一章。' : 'First chapter generation failed. Please modify the setup and retry, or regenerate the first chapter.')
+                : (language === 'zh' ? '小说设定已生成，请检查或修改设定，然后生成第一章。' : 'Novel setup generated. Please review or modify the setup, then generate the first chapter.')}
             </div>
             <button
-              onClick={handleRegenerateFirstChapter}
+              onClick={handleGenerateFirstChapterFromProject}
               disabled={fastLoading}
               style={{
                 padding: '10px 20px',
@@ -1889,10 +1771,12 @@ export default function SuperWritingTab() {
               {fastLoading ? (
                 <>
                   <RefreshCw size={14} className="spin" style={{ marginRight: 6 }} />
-                  {language === 'zh' ? '生成中...' : 'Generating...'}
+                  {language === 'zh' ? '正在根据当前设定生成第一章...' : 'Generating first chapter from current setup...'}
                 </>
               ) : (
-                language === 'zh' ? '重新生成第一章' : 'Regenerate First Chapter'
+                novelChapterResult
+                  ? (language === 'zh' ? '重新生成第一章' : 'Regenerate First Chapter')
+                  : (language === 'zh' ? '确认设定并生成第一章' : 'Confirm Setup & Generate First Chapter')
               )}
             </button>
           </div>
@@ -2533,61 +2417,6 @@ export default function SuperWritingTab() {
                   style={{ marginTop: 8, padding: '8px 12px', fontSize: 12 }}
                 >
                   {language === 'zh' ? '根据大纲写正文' : 'Write from Outline'}
-                </button>
-              </div>
-            )}
-
-            {/* 快速修改区 - 仅在第一章成功后显示 */}
-            {canContinueNovel && (
-              <div style={{ marginBottom: 12, padding: 12, background: 'var(--bg-tertiary)', borderRadius: 8 }}>
-                <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 8 }}>
-                  ⚡ {language === 'zh' ? '快速定制' : 'Quick Customization'}
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
-                  <input
-                    type="text"
-                    value={quickHeroName}
-                    onChange={(e) => setQuickHeroName(e.target.value)}
-                    placeholder={language === 'zh' ? '主角名字' : 'Hero Name'}
-                    style={{ padding: '6px 8px', background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 12 }}
-                  />
-                  <input
-                    type="text"
-                    value={quickLoveInterestName}
-                    onChange={(e) => setQuickLoveInterestName(e.target.value)}
-                    placeholder={language === 'zh' ? '另一位主角' : 'Love Interest'}
-                    style={{ padding: '6px 8px', background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 12 }}
-                  />
-                  <input
-                    type="text"
-                    value={quickTone}
-                    onChange={(e) => setQuickTone(e.target.value)}
-                    placeholder={language === 'zh' ? '风格：甜/虐/爽/治愈' : 'Tone'}
-                    style={{ padding: '6px 8px', background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 12 }}
-                  />
-                  <input
-                    type="text"
-                    value={quickRelationship}
-                    onChange={(e) => setQuickRelationship(e.target.value)}
-                    placeholder={language === 'zh' ? '关系：暗恋/冤家/救赎' : 'Relationship'}
-                    style={{ padding: '6px 8px', background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 12 }}
-                  />
-                </div>
-                <button
-                  onClick={handleApplyQuickEdit}
-                  disabled={fastLoading || (!quickHeroName && !quickLoveInterestName && !quickTone && !quickRelationship && !quickEnding)}
-                  style={{
-                    width: '100%',
-                    padding: '8px 12px',
-                    background: 'var(--accent)',
-                    border: 'none',
-                    borderRadius: 6,
-                    color: 'white',
-                    fontSize: 12,
-                    opacity: (quickHeroName || quickLoveInterestName || quickTone || quickRelationship || quickEnding) ? 1 : 0.5,
-                  }}
-                >
-                  {language === 'zh' ? '应用修改并重写当前章' : 'Apply Changes'}
                 </button>
               </div>
             )}
