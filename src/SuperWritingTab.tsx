@@ -1242,7 +1242,7 @@ export default function SuperWritingTab() {
   // 小说改写处理 - 基于章节正文，生成候选结果
   const handleNovelRewrite = async (
     rewriteType: NovelRewriteType,
-    chapter?: NovelChapterDraft
+    chapter?: NovelChapterDraft | null
   ) => {
     // 支持指定章节，fallback 到当前章节
     const targetChapter = chapter || novelChapterResult;
@@ -1366,6 +1366,44 @@ export default function SuperWritingTab() {
           : 'Copy failed, please copy manually'
       );
     }
+  };
+
+  // 渲染正文优化按钮（可复用于当前章节和章节列表）
+  const renderNovelRewriteButtons = (chapter: NovelChapterDraft | null | undefined, showError: boolean = false) => {
+    const hasContent = chapter?.content?.trim();
+    return (
+      <div style={{ marginTop: 12 }}>
+        <div style={{ fontSize: 11, fontWeight: 500, color: 'var(--text-muted)', marginBottom: 6 }}>
+          {language === 'zh' ? '正文优化' : 'Optimize'}
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(70px, 1fr))', gap: 4 }}>
+          {(Object.keys(NOVEL_REWRITE_NAMES) as NovelRewriteType[]).slice(0, 6).map((rewriteType) => (
+            <button
+              key={rewriteType}
+              onClick={() => handleNovelRewrite(rewriteType, chapter)}
+              disabled={rewriteLoading || !hasContent}
+              style={{
+                padding: '4px 6px',
+                background: 'var(--bg-tertiary)',
+                border: '1px solid var(--border)',
+                borderRadius: 4,
+                color: 'var(--text-secondary)',
+                fontSize: 10,
+                opacity: rewriteLoading || !hasContent ? 0.5 : 1,
+                cursor: rewriteLoading || !hasContent ? 'not-allowed' : 'pointer',
+              }}
+            >
+              {language === 'zh' ? NOVEL_REWRITE_NAMES[rewriteType].zh : NOVEL_REWRITE_NAMES[rewriteType].en}
+            </button>
+          ))}
+        </div>
+        {showError && rewriteError && (
+          <div style={{ color: 'var(--danger)', fontSize: 11, marginTop: 6 }}>
+            {rewriteError}
+          </div>
+        )}
+      </div>
+    );
   };
 
   // 切换展开结果
@@ -3033,6 +3071,7 @@ export default function SuperWritingTab() {
                       <div style={{ color: 'var(--text-primary)' }}>
                         {chapter.content}
                       </div>
+                      {renderNovelRewriteButtons(chapter, false)}
                     </div>
                   ))}
               </div>
