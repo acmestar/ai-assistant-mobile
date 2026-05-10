@@ -34,20 +34,42 @@ const QUICK_PHRASES: Record<Language, Array<{ key: string; text: string }>> = {
 // 朗读功能
 let currentUtterance: SpeechSynthesisUtterance | null = null;
 
-function speakText(text: string, lang: string) {
-  // 停止当前朗读
-  if (currentUtterance) {
-    speechSynthesis.cancel();
+function speakText(
+  text: string,
+  lang: string,
+  onError?: (message: string) => void
+) {
+  // 检查浏览器支持
+  if (!('speechSynthesis' in window) || typeof SpeechSynthesisUtterance === 'undefined') {
+    onError?.(lang === 'zh' ? '当前浏览器不支持朗读' : 'Text-to-speech is not supported in this browser');
+    return;
   }
 
-  currentUtterance = new SpeechSynthesisUtterance(text);
-  currentUtterance.lang = lang === 'zh' ? 'zh-CN' : 'en-US';
-  currentUtterance.rate = 0.9; // 稍慢一点，更清晰
-  currentUtterance.onend = () => {
-    currentUtterance = null;
-  };
+  try {
+    // 停止当前朗读
+    if (currentUtterance) {
+      speechSynthesis.cancel();
+    }
 
-  speechSynthesis.speak(currentUtterance);
+    currentUtterance = new SpeechSynthesisUtterance(text);
+    currentUtterance.lang = lang === 'zh' ? 'zh-CN' : 'en-US';
+    currentUtterance.rate = 0.9; // 稍慢一点，更清晰
+
+    currentUtterance.onend = () => {
+      currentUtterance = null;
+    };
+
+    currentUtterance.onerror = () => {
+      currentUtterance = null;
+      onError?.(lang === 'zh' ? '朗读失败，请稍后重试' : 'Reading failed, please try again later');
+    };
+
+    speechSynthesis.speak(currentUtterance);
+  } catch (error) {
+    currentUtterance = null;
+    console.error('[TTS error]', error);
+    onError?.(lang === 'zh' ? '朗读失败，请稍后重试' : 'Reading failed, please try again later');
+  }
 }
 
 export default function ChatTab() {
@@ -89,6 +111,7 @@ export default function ChatTab() {
   const [isRecording, setIsRecording] = useState(false);
   const [isVoiceMode, setIsVoiceMode] = useState(false); // 语音输入模式
   const [voiceText, setVoiceText] = useState(''); // 语音识别的文字
+  const [voiceError, setVoiceError] = useState(''); // 语音错误提示
   const [showQuickPhrases, setShowQuickPhrases] = useState(false); // 快捷短语弹窗
   const [isBatchMode, setIsBatchMode] = useState(false); // 批量选择模式
   const [selectedConvIds, setSelectedConvIds] = useState<Set<string>>(new Set()); // 选中的对话ID
@@ -104,6 +127,7 @@ export default function ChatTab() {
   const isRecordingRef = useRef(false); // 用于防止重复触发
   const isPressingRef = useRef(false); // 追踪鼠标/触摸按压状态
   const audioContextRef = useRef<AudioContext | null>(null); // 音频上下文
+  const recordingTimerRef = useRef<number | null>(null); // 录音超时定时器
 
   const conversation = getCurrentConversation();
   const currentModel = CHAT_MODELS.find((m) => m.id === chatModelId);
@@ -131,6 +155,35 @@ export default function ChatTab() {
         : '⚠️ Storage near limit (4MB), please export and clean old tasks');
     }
   }, []); // 空依赖数组
+
+  // 组件卸载时清理语音资源
+  useEffect(() => {
+    return () => {
+      // 清理超时定时器
+      if (recordingTimerRef.current) {
+        clearTimeout(recordingTimerRef.current);
+        recordingTimerRef.current = null;
+      }
+      // 停止语音识别
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch {}
+        recognitionRef.current = null;
+      }
+      // 停止 TTS
+      if (currentUtterance) {
+        speechSynthesis.cancel();
+        currentUtterance = null;
+      }
+      // 释放音频设备
+      if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+        audioContextRef.current.close().catch(() => {});
+        audioContextRef.current = null;
+      }
+      console.log('[Voice] Component unmounted, resources cleaned up');
+    };
+  }, []);
 
   // 释放音频设备
   const releaseAudioDevice = async () => {
@@ -170,14 +223,16 @@ export default function ChatTab() {
       || (window as any).msSpeechRecognition;
 
     if (!SpeechRecognition) {
-      console.log('浏览器不支持语音识别');
+      console.log('[Voice] Browser does not support speech recognition');
+      setVoiceError(language === 'zh' ? '当前浏览器不支持语音识别' : 'Speech recognition not supported');
       return null;
     }
 
     const recognition = new SpeechRecognition();
     recognition.continuous = true;
     recognition.interimResults = true;
-    recognition.lang = 'zh-CN';
+    // 动态语言设置
+    recognition.lang = language === 'zh' ? 'zh-CN' : 'en-US';
 
     recognition.onresult = (event: any) => {
       let finalTranscript = '';
@@ -196,59 +251,43 @@ export default function ChatTab() {
         const newText = finalTranscript || interimTranscript || prev;
         return newText;
       });
+      // 清除之前的错误
+      if (voiceError) setVoiceError('');
     };
 
     recognition.onerror = (event: any) => {
-      console.error('语音识别错误:', event.error, event);
+      console.error('[Voice] Recognition error:', event.error);
       const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
       const isAndroid = /Android/.test(navigator.userAgent);
-      let msg: string;
 
       if (event.error === 'not-allowed' || event.error === 'permission-denied') {
-        if (isIOS && language === 'zh') {
-          msg = '请允许麦克风权限以使用语音功能。\n\niOS 用户提示：\n1. 在 Safari 中使用一次语音功能并授权\n2. 保持 Safari 在后台运行\n3. 或在系统设置 → 隐私 → 麦克风中为 Safari 永久授权';
-        } else if (isIOS) {
-          msg = 'Please allow microphone access.\n\niOS Tips:\n1. Use voice in Safari first and grant permission\n2. Keep Safari running in background\n3. Or grant permanent access in Settings → Privacy → Microphone';
-        } else if (isAndroid && language === 'zh') {
-          msg = '请允许麦克风权限以使用语音功能。\n\nAndroid 提示：\n1. 在浏览器设置中允许麦克风权限\n2. 或在系统设置 → 应用 → 浏览器 → 权限中开启麦克风';
-        } else if (isAndroid) {
-          msg = 'Please allow microphone access.\n\nAndroid Tips:\n1. Allow microphone in browser settings\n2. Or enable in System Settings → Apps → Browser → Permissions';
-        } else if (language === 'zh') {
-          msg = '请允许麦克风权限以使用语音功能。\n\n提示：将应用添加到主屏幕可持久化权限。';
-        } else {
-          msg = 'Please allow microphone access.\n\nTip: Add to home screen to persist permissions.';
-        }
-        alert(msg);
+        const msg = isIOS
+          ? (language === 'zh'
+              ? '请允许麦克风权限。iOS 提示：在 Safari 中授权一次，或在系统设置 → 隐私 → 麦克风中为 Safari 永久授权'
+              : 'Please allow microphone. iOS: Grant in Safari once, or in Settings → Privacy → Microphone')
+          : isAndroid
+            ? (language === 'zh'
+                ? '请允许麦克风权限。在浏览器设置或系统设置中开启'
+                : 'Please allow microphone in browser or system settings')
+            : (language === 'zh'
+                ? '请允许麦克风权限'
+                : 'Please allow microphone access');
+        setVoiceError(msg);
       } else if (event.error === 'no-speech') {
-        // 没有检测到语音，静默处理
-        console.log('未检测到语音输入');
+        // 没有检测到语音，显示提示
+        setVoiceError(language === 'zh' ? '未检测到语音，请重试' : 'No speech detected, please try again');
       } else if (event.error === 'audio-capture') {
-        // 音频捕获失败，可能是设备被占用
-        console.log('音频捕获失败，尝试重新初始化...');
-        releaseAudioDevice().then(() => {
-          alert(language === 'zh'
-            ? '无法捕获音频，可能是麦克风被其他应用占用。\n\n请尝试：\n1. 关闭其他使用麦克风的应用（如微信语音）\n2. 等待几秒后再试\n3. 或刷新页面'
-            : 'Cannot capture audio. Microphone may be occupied by another app.\n\nTry:\n1. Close other apps using microphone (e.g. WeChat voice)\n2. Wait a few seconds\n3. Or refresh the page');
-        });
+        setVoiceError(language === 'zh' ? '无法捕获音频，麦克风可能被占用' : 'Cannot capture audio, microphone may be occupied');
+        releaseAudioDevice();
       } else if (event.error === 'network') {
-        const isEdge = /Edg/.test(navigator.userAgent);
-        if (isEdge) {
-          alert(language === 'zh'
-            ? '网络连接失败：Edge 浏览器的语音识别需要连接微软服务器。\n\n请尝试：\n1. 检查网络连接\n2. 关闭 VPN 或代理后重试\n3. 或使用 Chrome/Safari 浏览器'
-            : 'Network error: Edge voice recognition requires connection to Microsoft servers.\n\nTry:\n1. Check network connection\n2. Disable VPN or proxy\n3. Or use Chrome/Safari browser');
-        } else {
-          alert(language === 'zh' ? '网络错误，请检查网络连接' : 'Network error, please check your connection');
-        }
+        setVoiceError(language === 'zh' ? '网络错误，请检查网络连接' : 'Network error, please check connection');
       } else if (event.error === 'aborted') {
-        console.log('语音识别被中断');
+        // 用户中断，静默处理
+        console.log('[Voice] Recognition aborted');
       } else if (event.error === 'service-not-allowed') {
-        // 服务不允许，可能是浏览器限制
-        alert(language === 'zh'
-          ? '语音服务不可用，请确保在支持的浏览器中使用（推荐 Safari 或 Chrome）'
-          : 'Voice service not available. Please use a supported browser (Safari or Chrome recommended)');
+        setVoiceError(language === 'zh' ? '语音服务不可用，请使用 Safari 或 Chrome' : 'Voice service unavailable, please use Safari or Chrome');
       } else {
-        // 其他错误
-        console.log('其他语音错误:', event.error);
+        setVoiceError(language === 'zh' ? '语音识别出错，请重试' : 'Voice recognition error, please try again');
       }
 
       isRecordingRef.current = false;
@@ -256,6 +295,11 @@ export default function ChatTab() {
     };
 
     recognition.onend = () => {
+      // 清理超时定时器
+      if (recordingTimerRef.current) {
+        clearTimeout(recordingTimerRef.current);
+        recordingTimerRef.current = null;
+      }
       if (isRecordingRef.current) {
         isRecordingRef.current = false;
         setIsRecording(false);
@@ -285,6 +329,12 @@ export default function ChatTab() {
   const exitVoiceMode = async () => {
     setIsVoiceMode(false);
     setVoiceText('');
+    setVoiceError(''); // 清除错误
+    // 清理超时定时器
+    if (recordingTimerRef.current) {
+      clearTimeout(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
     if (isRecordingRef.current && recognitionRef.current) {
       isRecordingRef.current = false;
       try {
@@ -300,19 +350,13 @@ export default function ChatTab() {
   const startRecording = async () => {
     if (isRecordingRef.current) return;
     if (!recognitionRef.current) {
-      const isEdge = /Edg/.test(navigator.userAgent);
-      if (isEdge) {
-        alert(language === 'zh'
-          ? 'Edge 浏览器语音识别需要：\n1. 使用 HTTPS 连接\n2. 允许麦克风权限\n\n建议使用 Chrome 或 Safari 获得最佳体验'
-          : 'Edge voice recognition requires:\n1. HTTPS connection\n2. Microphone permission\n\nRecommend using Chrome or Safari for best experience');
-      } else {
-        alert(T('voiceNotSupported'));
-      }
+      setVoiceError(language === 'zh' ? '语音识别不可用' : 'Voice recognition unavailable');
       return;
     }
 
     hapticFeedback('medium'); // 开始录音震动反馈
     setVoiceText('');
+    setVoiceError(''); // 清除之前的错误
     isRecordingRef.current = true;
     setIsRecording(true);
 
@@ -321,9 +365,23 @@ export default function ChatTab() {
 
     try {
       recognitionRef.current.start();
-      console.log('语音识别已启动');
+      console.log('[Voice] Recognition started');
+
+      // 60秒超时保护
+      recordingTimerRef.current = window.setTimeout(() => {
+        console.log('[Voice] Recording timeout (60s)');
+        setVoiceError(language === 'zh' ? '录音超时，请重新开始' : 'Recording timeout, please try again');
+        if (isRecordingRef.current && recognitionRef.current) {
+          isRecordingRef.current = false;
+          setIsRecording(false);
+          try {
+            recognitionRef.current.stop();
+          } catch {}
+        }
+        recordingTimerRef.current = null;
+      }, 60000);
     } catch (e: any) {
-      console.error('启动语音识别失败:', e.name, e.message);
+      console.error('[Voice] Start error:', e.name);
       // 如果已经在运行，需要先停止
       if (e.name === 'InvalidStateError' || e.message?.includes('already started')) {
         try {
@@ -336,24 +394,31 @@ export default function ChatTab() {
           try {
             if (isRecordingRef.current && recognitionRef.current) {
               recognitionRef.current.start();
+              // 设置超时
+              recordingTimerRef.current = window.setTimeout(() => {
+                setVoiceError(language === 'zh' ? '录音超时，请重新开始' : 'Recording timeout, please try again');
+                if (isRecordingRef.current && recognitionRef.current) {
+                  isRecordingRef.current = false;
+                  setIsRecording(false);
+                  try {
+                    recognitionRef.current.stop();
+                  } catch {}
+                }
+                recordingTimerRef.current = null;
+              }, 60000);
             }
           } catch (err) {
-            console.error('无法启动语音识别:', err);
+            console.error('[Voice] Cannot start:', err);
+            setVoiceError(language === 'zh' ? '无法启动语音识别' : 'Cannot start voice recognition');
             isRecordingRef.current = false;
             setIsRecording(false);
           }
         }, 300);
       } else {
-        console.error('无法启动语音识别:', e);
+        console.error('[Voice] Cannot start:', e);
+        setVoiceError(language === 'zh' ? '无法启动语音识别' : 'Cannot start voice recognition');
         isRecordingRef.current = false;
         setIsRecording(false);
-        // 显示错误信息
-        const isEdge = /Edg/.test(navigator.userAgent);
-        if (isEdge && (e.name === 'NotAllowedError' || e.name === 'SecurityError')) {
-          alert(language === 'zh'
-            ? 'Edge 浏览器限制：请确保网站使用 HTTPS，并刷新页面后重试'
-            : 'Edge restriction: Please ensure HTTPS is used, refresh and try again');
-        }
       }
     }
   };
@@ -364,6 +429,12 @@ export default function ChatTab() {
     hapticFeedback('light'); // 停止录音震动反馈
     isRecordingRef.current = false;
     setIsRecording(false);
+
+    // 清理超时定时器
+    if (recordingTimerRef.current) {
+      clearTimeout(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
 
     if (recognitionRef.current) {
       try {
@@ -833,7 +904,7 @@ export default function ChatTab() {
                   }
                   setSelectedMessageIds(newSet);
                 } else if (elderMode) {
-                  speakText(msg.content, language);
+                  speakText(msg.content, language, setVoiceError);
                 }
               }}
               style={{
@@ -943,6 +1014,34 @@ export default function ChatTab() {
 
       {/* Input - 固定在底部 */}
       <div style={{ padding: 12, background: 'var(--bg-secondary)', borderTop: '1px solid var(--border)', flexShrink: 0 }}>
+        {/* TTS 朗读错误提示（非语音模式下显示） */}
+        {voiceError && !isVoiceMode && (
+          <div style={{
+            marginBottom: 8,
+            padding: '8px 12px',
+            background: 'rgba(239, 68, 68, 0.1)',
+            borderRadius: 8,
+            color: 'var(--danger)',
+            fontSize: 12,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+          }}>
+            <span>{voiceError}</span>
+            <button
+              onClick={() => setVoiceError('')}
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: 'var(--danger)',
+                padding: 2,
+                cursor: 'pointer',
+              }}
+            >
+              <X size={14} />
+            </button>
+          </div>
+        )}
         {attachedImage && !isVoiceMode && (
           <div style={{ marginBottom: 8, position: 'relative', display: 'inline-block' }}>
             <img src={attachedImage} alt="" style={{ height: 60, borderRadius: 12 }} />
@@ -1000,6 +1099,20 @@ export default function ChatTab() {
                 voiceText || (language === 'zh' ? '长按下方按钮开始录音' : 'Long press the button below to start recording')
               )}
             </div>
+
+            {/* 语音错误提示 */}
+            {voiceError && (
+              <div style={{
+                padding: '10px 14px',
+                background: 'rgba(239, 68, 68, 0.1)',
+                borderRadius: 10,
+                color: 'var(--danger)',
+                fontSize: 13,
+                textAlign: 'center',
+              }}>
+                {voiceError}
+              </div>
+            )}
 
             {/* 操作按钮 */}
             <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
