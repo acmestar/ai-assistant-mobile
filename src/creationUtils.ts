@@ -1973,12 +1973,19 @@ ${chapterSummaries}
 【上一章完整内容】
 ${lastChapterContent.slice(-3000)}${lastChapterContent.length > 3000 ? '...(前文已省略)' : ''}
 
-${chapterPlan ? `【章节规划】
+${chapterPlan ? `【章节规划 - 必须严格遵守】
 章节标题：${chapterPlan.title}
 本章目标：${chapterPlan.goal}
 主要事件：${chapterPlan.mainEvent}
 冲突点：${chapterPlan.conflict}
-结尾钩子：${chapterPlan.hook}` : ''}
+结尾钩子：${chapterPlan.hook}
+
+【重要】以上章节规划是用户确认/整合后的最终版本，必须严格执行：
+- 标题必须使用"${chapterPlan.title}"
+- 主要事件"${chapterPlan.mainEvent}"必须在正文中实际发生
+- 本章目标"${chapterPlan.goal}"必须达成
+- 冲突点"${chapterPlan.conflict}"必须体现
+- 结尾钩子"${chapterPlan.hook}"必须在章末出现` : ''}
 ${userDirectionSection}
 ${nextChapterIdea && !userDirection?.trim() ? `【用户希望下一章】\n${nextChapterIdea}` : ''}
 
