@@ -135,12 +135,12 @@ export default function SuperWritingTab() {
   const [novelNewCharacterNote, setNovelNewCharacterNote] = useState('');
   const [novelNewPlotNote, setNovelNewPlotNote] = useState('');
 
-  // 小说结构参数 - number state
+  // 小说结构参数 - number state（用于提交）
   const [novelCreationMode, setNovelCreationMode] = useState<'inspiration' | 'opening' | 'full_story'>('inspiration');
-  const [targetChapterCount, setTargetChapterCount] = useState<number>(10);
-  const [targetWordsPerChapter, setTargetWordsPerChapter] = useState<number>(1500);
-  const [protagonistCount, setProtagonistCount] = useState<number>(2);
-  const [supportingCharacterCount, setSupportingCharacterCount] = useState<number>(3);
+  const [_targetChapterCount, setTargetChapterCount] = useState<number>(10);
+  const [_targetWordsPerChapter, setTargetWordsPerChapter] = useState<number>(1500);
+  const [_protagonistCount, setProtagonistCount] = useState<number>(2);
+  const [_supportingCharacterCount, setSupportingCharacterCount] = useState<number>(3);
 
   // 小说结构参数 - 字符串草稿 state（用于输入框自由编辑）
   const [targetChapterCountInput, setTargetChapterCountInput] = useState<string>('10');
@@ -178,63 +178,66 @@ export default function SuperWritingTab() {
   // 获取实际使用的模型ID（优先使用创作台默认模型，否则使用全局模型）
   const effectiveModelId = selectedWritingModelId || chatModelId;
 
-  // 数字输入校验函数
-  const normalizeIntegerInput = (
-    raw: string,
-    fallback: number,
-    min: number,
-    max: number
-  ): number => {
-    const parsed = parseInt(raw, 10);
-    if (!Number.isFinite(parsed)) return fallback;
-    return Math.max(min, Math.min(max, parsed));
-  };
+  // 小说动作状态（独立 loading）
+  const [activeNovelAction, setActiveNovelAction] = useState<string | null>(null);
+  const [novelActionProgress, setNovelActionProgress] = useState<string | null>(null);
 
-  // 校验并同步小说参数（在提交动作前调用）
-  const getValidatedNovelSettings = () => {
-    const protagonistCountValue = normalizeIntegerInput(
-      protagonistCountInput,
-      protagonistCount,
-      1,
-      10
-    );
-    const supportingCharacterCountValue = normalizeIntegerInput(
-      supportingCharacterCountInput,
-      supportingCharacterCount,
-      0,
-      20
-    );
-    const targetChapterCountValue = normalizeIntegerInput(
-      targetChapterCountInput,
-      targetChapterCount,
-      1,
-      30
-    );
-    const targetWordsPerChapterValue = normalizeIntegerInput(
-      targetWordsPerChapterInput,
-      targetWordsPerChapter,
-      500,
-      5000
-    );
+  // 新增角色输入（章节工作台内）
+  const [newCharacterInput, setNewCharacterInput] = useState('');
 
-    // 回写 number state 和 input string
-    setProtagonistCount(protagonistCountValue);
-    setProtagonistCountInput(String(protagonistCountValue));
+  // 校验小说参数（返回校验结果或错误信息）
+  const validateNovelSettings = (): { valid: boolean; settings?: { protagonistCount: number; supportingCharacterCount: number; targetChapterCount: number; targetWordsPerChapter: number }; error?: string } => {
+    const protagonistRaw = protagonistCountInput.trim();
+    const supportingRaw = supportingCharacterCountInput.trim();
+    const chapterRaw = targetChapterCountInput.trim();
+    const wordsRaw = targetWordsPerChapterInput.trim();
 
-    setSupportingCharacterCount(supportingCharacterCountValue);
-    setSupportingCharacterCountInput(String(supportingCharacterCountValue));
+    // 主角数量校验
+    const protagonistParsed = parseInt(protagonistRaw, 10);
+    if (!protagonistRaw || !Number.isFinite(protagonistParsed) || protagonistParsed < 1) {
+      return { valid: false, error: language === 'zh' ? '主角数量至少为 1' : 'Protagonist count must be at least 1' };
+    }
 
-    setTargetChapterCount(targetChapterCountValue);
-    setTargetChapterCountInput(String(targetChapterCountValue));
+    // 配角数量校验
+    const supportingParsed = parseInt(supportingRaw, 10);
+    if (!supportingRaw || !Number.isFinite(supportingParsed) || supportingParsed < 0) {
+      return { valid: false, error: language === 'zh' ? '配角数量不能为负数' : 'Supporting count cannot be negative' };
+    }
 
-    setTargetWordsPerChapter(targetWordsPerChapterValue);
-    setTargetWordsPerChapterInput(String(targetWordsPerChapterValue));
+    // 章节数量校验
+    const chapterParsed = parseInt(chapterRaw, 10);
+    if (!chapterRaw || !Number.isFinite(chapterParsed) || chapterParsed < 1) {
+      return { valid: false, error: language === 'zh' ? '章节数量至少为 1' : 'Chapter count must be at least 1' };
+    }
+    if (chapterParsed > 30) {
+      // 软提示，不阻止提交
+      console.warn('[NovelSettings] Chapter count exceeds 30, user input:', chapterParsed);
+    }
+
+    // 每章字数校验
+    const wordsParsed = parseInt(wordsRaw, 10);
+    if (!wordsRaw || !Number.isFinite(wordsParsed) || wordsParsed < 1000) {
+      return { valid: false, error: language === 'zh' ? '每章目标字数建议填写 1000-10000' : 'Target words per chapter should be 1000-10000' };
+    }
+    if (wordsParsed > 10000) {
+      // 软提示，不阻止提交
+      console.warn('[NovelSettings] Words per chapter exceeds 10000, user input:', wordsParsed);
+    }
+
+    // 更新 number state（但不改写输入框）
+    setProtagonistCount(protagonistParsed);
+    setSupportingCharacterCount(supportingParsed);
+    setTargetChapterCount(chapterParsed);
+    setTargetWordsPerChapter(wordsParsed);
 
     return {
-      protagonistCount: protagonistCountValue,
-      supportingCharacterCount: supportingCharacterCountValue,
-      targetChapterCount: targetChapterCountValue,
-      targetWordsPerChapter: targetWordsPerChapterValue,
+      valid: true,
+      settings: {
+        protagonistCount: protagonistParsed,
+        supportingCharacterCount: supportingParsed,
+        targetChapterCount: chapterParsed,
+        targetWordsPerChapter: wordsParsed,
+      },
     };
   };
 
@@ -550,8 +553,16 @@ export default function SuperWritingTab() {
       return;
     }
 
-    // 校验并同步小说参数
-    const validatedSettings = getValidatedNovelSettings();
+    // 校验小说参数
+    const validation = validateNovelSettings();
+    if (!validation.valid || !validation.settings) {
+      setNovelError(validation.error || '参数校验失败');
+      return;
+    }
+
+    // 设置动作状态
+    setActiveNovelAction('generatingProject');
+    setNovelActionProgress(language === 'zh' ? '正在生成小说企划...' : 'Generating novel project...');
 
     // 清空旧错误和旧结果（重新生成整本小说时清空所有）
     setNovelError('');
@@ -568,10 +579,10 @@ export default function SuperWritingTab() {
       const projectPrompt = buildNovelProjectPrompt({
         requirement: outlineText,
         creationMode: novelCreationMode,
-        targetChapterCount: validatedSettings.targetChapterCount,
-        targetWordsPerChapter: validatedSettings.targetWordsPerChapter,
-        protagonistCount: validatedSettings.protagonistCount,
-        supportingCharacterCount: validatedSettings.supportingCharacterCount,
+        targetChapterCount: validation.settings.targetChapterCount,
+        targetWordsPerChapter: validation.settings.targetWordsPerChapter,
+        protagonistCount: validation.settings.protagonistCount,
+        supportingCharacterCount: validation.settings.supportingCharacterCount,
       });
 
       console.log('[NovelGenerateStep]', {
@@ -580,9 +591,9 @@ export default function SuperWritingTab() {
         selectedWritingModelId,
         promptLength: projectPrompt.length,
         creationMode: novelCreationMode,
-        targetChapterCount: validatedSettings.targetChapterCount,
-        protagonistCount: validatedSettings.protagonistCount,
-        supportingCharacterCount: validatedSettings.supportingCharacterCount,
+        targetChapterCount: validation.settings.targetChapterCount,
+        protagonistCount: validation.settings.protagonistCount,
+        supportingCharacterCount: validation.settings.supportingCharacterCount,
       });
 
       const rawProjectText = await callChatCompletionRaw(projectPrompt, {
@@ -600,11 +611,13 @@ export default function SuperWritingTab() {
           : 'Failed to parse novel plan. Please try again or simplify your story description.');
         setNovelProject(null);
         setFastLoading(false);
+        setActiveNovelAction(null);
+        setNovelActionProgress(null);
         return;
       }
 
       // 规范化小说企划，确保章节数量和角色数量符合预期
-      const project = normalizeNovelProject(parsedProject, validatedSettings.targetChapterCount, validatedSettings.protagonistCount, validatedSettings.supportingCharacterCount);
+      const project = normalizeNovelProject(parsedProject, validation.settings.targetChapterCount, validation.settings.protagonistCount, validation.settings.supportingCharacterCount);
 
       // 解析成功，只保存设定，不自动生成第一章
       setNovelProject(project);
@@ -652,10 +665,16 @@ export default function SuperWritingTab() {
     }
 
     // 校验并同步小说参数
-    const validatedSettings = getValidatedNovelSettings();
+    const validation = validateNovelSettings();
+    if (!validation.valid || !validation.settings) {
+      setNovelError(validation.error || (language === 'zh' ? '参数校验失败' : 'Validation failed'));
+      return;
+    }
+    const validatedSettings = validation.settings;
 
     setNovelError('');
-    setFastLoading(true);
+    setActiveNovelAction('generatingFirst');
+    setNovelActionProgress(language === 'zh' ? '正在生成第一章...' : 'Generating first chapter...');
     setNovelGenerationStep('chapter');
     setCurrentChapterCopied(false);
     setCurrentChapterCopyError('');
@@ -727,6 +746,8 @@ export default function SuperWritingTab() {
       }
       // 第一章失败时，保留 novelProject，用户可以修改设定后重试
     } finally {
+      setActiveNovelAction(null);
+      setNovelActionProgress(null);
       setFastLoading(false);
     }
   };
@@ -751,9 +772,14 @@ export default function SuperWritingTab() {
     }
 
     // 校验并同步小说参数
-    getValidatedNovelSettings();
+    const validation = validateNovelSettings();
+    if (!validation.valid || !validation.settings) {
+      setNovelError(validation.error || (language === 'zh' ? '参数校验失败' : 'Validation failed'));
+      return;
+    }
 
-    setFastLoading(true);
+    setActiveNovelAction('integrating');
+    setNovelActionProgress(language === 'zh' ? '正在整合进后续规划...' : 'Integrating into future plan...');
     setFastError(null);
 
     // 计算已生成到第几章
@@ -821,6 +847,8 @@ export default function SuperWritingTab() {
       console.error('[NovelModelError]', error);
       setFastError(error.message || '整合失败');
     } finally {
+      setActiveNovelAction(null);
+      setNovelActionProgress(null);
       setFastLoading(false);
     }
   };
@@ -848,9 +876,15 @@ export default function SuperWritingTab() {
     }
 
     // 校验并同步小说参数
-    const validatedSettings = getValidatedNovelSettings();
+    const validation = validateNovelSettings();
+    if (!validation.valid || !validation.settings) {
+      setNovelError(validation.error || (language === 'zh' ? '参数校验失败' : 'Validation failed'));
+      return;
+    }
+    const validatedSettings = validation.settings;
 
-    setFastLoading(true);
+    setActiveNovelAction('regenerating');
+    setNovelActionProgress(language === 'zh' ? `正在重新生成第 ${targetNo} 章...` : `Regenerating chapter ${targetNo}...`);
     setFastError(null);
 
     try {
@@ -904,6 +938,8 @@ export default function SuperWritingTab() {
       console.error('[NovelModelError]', error);
       setFastError(error.message || '重新生成失败');
     } finally {
+      setActiveNovelAction(null);
+      setNovelActionProgress(null);
       setFastLoading(false);
     }
   };
@@ -928,9 +964,15 @@ export default function SuperWritingTab() {
     }
 
     // 校验并同步小说参数
-    const validatedSettings = getValidatedNovelSettings();
+    const validation = validateNovelSettings();
+    if (!validation.valid || !validation.settings) {
+      setNovelError(validation.error || (language === 'zh' ? '参数校验失败' : 'Validation failed'));
+      return;
+    }
+    const validatedSettings = validation.settings;
 
-    setFastLoading(true);
+    setActiveNovelAction('generatingNext');
+    setNovelActionProgress(language === 'zh' ? '正在生成下一章...' : 'Generating next chapter...');
     setFastError(null);
 
     const userDirection = buildNovelUserDirectionText();
@@ -973,6 +1015,8 @@ export default function SuperWritingTab() {
       console.error('[NovelModelError]', error);
       setFastError(error.message || '续写失败');
     } finally {
+      setActiveNovelAction(null);
+      setNovelActionProgress(null);
       setFastLoading(false);
     }
   };
@@ -997,9 +1041,14 @@ export default function SuperWritingTab() {
     }
 
     // 校验并同步小说参数
-    const validatedSettings = getValidatedNovelSettings();
+    const validation = validateNovelSettings();
+    if (!validation.valid || !validation.settings) {
+      setNovelError(validation.error || (language === 'zh' ? '参数校验失败' : 'Validation failed'));
+      return;
+    }
+    const validatedSettings = validation.settings;
 
-    setFastLoading(true);
+    setActiveNovelAction('batchGenerating');
     setFastError(null);
 
     const lastChapterNo = Math.max(...novelChapters.map(c => c.chapterNo));
@@ -1007,7 +1056,8 @@ export default function SuperWritingTab() {
 
     if (count <= 0) {
       setFastError(language === 'zh' ? '所有章节已生成完毕' : 'All chapters have been generated');
-      setFastLoading(false);
+      setActiveNovelAction(null);
+      setNovelActionProgress(null);
       return;
     }
 
@@ -1015,11 +1065,14 @@ export default function SuperWritingTab() {
     let workingChapters = [...novelChapters];
     const userDirection = buildNovelUserDirectionText();
 
-    for (let i = 0; i < count; i++) {
-      const chapterNo = lastChapterNo + i + 1;
-      const plan = novelProject.chapters.find(c => c.chapterNo === chapterNo);
+    try {
+      for (let i = 0; i < count; i++) {
+        const chapterNo = lastChapterNo + i + 1;
+        const plan = novelProject.chapters.find(c => c.chapterNo === chapterNo);
 
-      try {
+        // 更新进度显示
+        setNovelActionProgress(language === 'zh' ? `正在生成第 ${chapterNo} 章... (${i + 1}/${count})` : `Generating chapter ${chapterNo}... (${i + 1}/${count})`);
+
         const prompt = buildNovelContinueChapterPrompt({
           novelProject,
           chapters: workingChapters,
@@ -1041,15 +1094,17 @@ export default function SuperWritingTab() {
         } else {
           console.warn('[BatchGenerate] Failed to parse chapter', chapterNo);
         }
-      } catch (error: any) {
-        console.error('[BatchGenerate] Error at chapter', chapterNo, error);
-        setFastError(`${language === 'zh' ? '生成第' : 'Failed to generate chapter '}${chapterNo}${language === 'zh' ? '章时出错' : ''}: ${error.message}`);
-        break;
       }
-    }
 
-    setWorkbenchInput('');
-    setFastLoading(false);
+      setWorkbenchInput('');
+    } catch (error: any) {
+      console.error('[BatchGenerate] Error', error);
+      setFastError(error.message || '批量生成失败');
+    } finally {
+      setActiveNovelAction(null);
+      setNovelActionProgress(null);
+      setFastLoading(false);
+    }
   };
 
   // 更新小说企划字段
@@ -1738,11 +1793,7 @@ export default function SuperWritingTab() {
                         onChange={(e) => {
                           setTargetChapterCountInput(e.target.value.replace(/[^\d]/g, ''));
                         }}
-                        onBlur={() => {
-                          const next = normalizeIntegerInput(targetChapterCountInput, targetChapterCount, 1, 30);
-                          setTargetChapterCount(next);
-                          setTargetChapterCountInput(String(next));
-                        }}
+                        placeholder="建议 1-30"
                         style={{
                           width: '100%',
                           padding: '6px 8px',
@@ -1767,11 +1818,7 @@ export default function SuperWritingTab() {
                         onChange={(e) => {
                           setTargetWordsPerChapterInput(e.target.value.replace(/[^\d]/g, ''));
                         }}
-                        onBlur={() => {
-                          const next = normalizeIntegerInput(targetWordsPerChapterInput, targetWordsPerChapter, 500, 5000);
-                          setTargetWordsPerChapter(next);
-                          setTargetWordsPerChapterInput(String(next));
-                        }}
+                        placeholder="1000-10000"
                         style={{
                           width: '100%',
                           padding: '6px 8px',
@@ -1796,11 +1843,7 @@ export default function SuperWritingTab() {
                         onChange={(e) => {
                           setProtagonistCountInput(e.target.value.replace(/[^\d]/g, ''));
                         }}
-                        onBlur={() => {
-                          const next = normalizeIntegerInput(protagonistCountInput, protagonistCount, 1, 10);
-                          setProtagonistCount(next);
-                          setProtagonistCountInput(String(next));
-                        }}
+                        placeholder="至少 1"
                         style={{
                           width: '100%',
                           padding: '6px 8px',
@@ -1825,11 +1868,7 @@ export default function SuperWritingTab() {
                         onChange={(e) => {
                           setSupportingCharacterCountInput(e.target.value.replace(/[^\d]/g, ''));
                         }}
-                        onBlur={() => {
-                          const next = normalizeIntegerInput(supportingCharacterCountInput, supportingCharacterCount, 0, 20);
-                          setSupportingCharacterCount(next);
-                          setSupportingCharacterCountInput(String(next));
-                        }}
+                        placeholder="可为 0"
                         style={{
                           width: '100%',
                           padding: '6px 8px',
@@ -2728,11 +2767,52 @@ export default function SuperWritingTab() {
                   </div>
                 </div>
 
+                {/* 添加新角色（选填） */}
+                <div style={{ marginBottom: 8 }}>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>
+                    {language === 'zh' ? '添加新角色（选填）' : 'Add New Character (Optional)'}
+                  </div>
+                  <input
+                    type="text"
+                    value={newCharacterInput}
+                    onChange={(e) => setNewCharacterInput(e.target.value)}
+                    placeholder={language === 'zh'
+                      ? '例如：神秘医生张三，性格阴郁，是主角失散多年的兄弟'
+                      : 'E.g., Dr. Zhang, gloomy personality, protagonist\'s long-lost brother'}
+                    style={{
+                      width: '100%',
+                      padding: 8,
+                      background: 'var(--bg-primary)',
+                      border: '1px solid var(--border)',
+                      borderRadius: 6,
+                      color: 'var(--text-primary)',
+                      fontSize: 12,
+                    }}
+                  />
+                </div>
+
+                {/* 进度显示区域 */}
+                {novelActionProgress && (
+                  <div style={{
+                    padding: 10,
+                    background: 'var(--bg-primary)',
+                    borderRadius: 6,
+                    marginBottom: 12,
+                    borderLeft: '3px solid var(--accent)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                  }}>
+                    <RefreshCw size={14} className="spin" style={{ color: 'var(--accent)' }} />
+                    <span style={{ fontSize: 12, color: 'var(--text-primary)' }}>{novelActionProgress}</span>
+                  </div>
+                )}
+
                 {/* 四个主要操作按钮 */}
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
                   <button
                     onClick={handleIntegrateFuturePlan}
-                    disabled={fastLoading || !workbenchInput.trim()}
+                    disabled={!!activeNovelAction || !workbenchInput.trim()}
                     style={{
                       padding: '8px 12px',
                       background: 'var(--bg-secondary)',
@@ -2742,20 +2822,21 @@ export default function SuperWritingTab() {
                       fontSize: 12,
                     }}
                   >
+                    {activeNovelAction === 'integrating' && <RefreshCw size={12} className="spin" style={{ marginRight: 4 }} />}
                     {language === 'zh' ? '整合进后续规划' : 'Integrate'}
                   </button>
                   <button
                     onClick={handleContinueNextChapter}
-                    disabled={fastLoading || !(novelChapters.length > 0 || novelProject)}
+                    disabled={!!activeNovelAction || !(novelChapters.length > 0 || novelProject)}
                     className="btn-primary"
                     style={{ padding: '8px 12px', fontSize: 12 }}
                   >
-                    {fastLoading ? <RefreshCw size={12} className="spin" /> : <Sparkles size={12} />}
+                    {activeNovelAction === 'generatingNext' ? <RefreshCw size={12} className="spin" /> : <Sparkles size={12} />}
                     {language === 'zh' ? '生成下一章' : 'Next Chapter'}
                   </button>
                   <button
                     onClick={handleRegenerateChapter}
-                    disabled={fastLoading || !selectedChapterNo}
+                    disabled={!!activeNovelAction || !selectedChapterNo}
                     style={{
                       padding: '8px 12px',
                       background: 'var(--bg-secondary)',
@@ -2765,6 +2846,7 @@ export default function SuperWritingTab() {
                       fontSize: 12,
                     }}
                   >
+                    {activeNovelAction === 'regenerating' && <RefreshCw size={12} className="spin" style={{ marginRight: 4 }} />}
                     {language === 'zh' ? '重新生成本章' : 'Regenerate'}
                   </button>
                 </div>
@@ -2790,7 +2872,7 @@ export default function SuperWritingTab() {
                     </select>
                     <button
                       onClick={handleRunBatchGenerate}
-                      disabled={fastLoading}
+                      disabled={!!activeNovelAction}
                       style={{
                         padding: '6px 12px',
                         background: 'var(--accent)',
@@ -2800,6 +2882,7 @@ export default function SuperWritingTab() {
                         fontSize: 12,
                       }}
                     >
+                      {activeNovelAction === 'batchGenerating' && <RefreshCw size={12} className="spin" style={{ marginRight: 4 }} />}
                       {language === 'zh' ? '按当前规划批量生成' : 'Batch Generate'}
                     </button>
                   </div>
@@ -2813,6 +2896,49 @@ export default function SuperWritingTab() {
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {/* 当前后续规划区域 */}
+        {creationMode === 'novel' && novelProject && novelProject.chapters && novelProject.chapters.length > 0 && (
+          <div style={{
+            marginTop: 16,
+            padding: 16,
+            background: 'var(--bg-secondary)',
+            borderRadius: 8,
+            border: '1px solid var(--border)',
+          }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 12 }}>
+              📖 {language === 'zh' ? '当前后续规划' : 'Future Chapter Plan'}
+            </div>
+            <div style={{ maxHeight: 300, overflowY: 'auto' }}>
+              {novelProject.chapters.map((chapter, index) => {
+                const isGenerated = novelChapters.some(c => c.chapterNo === chapter.chapterNo);
+                return (
+                  <div
+                    key={chapter.id || index}
+                    style={{
+                      padding: 8,
+                      marginBottom: 4,
+                      background: isGenerated ? 'var(--bg-tertiary)' : 'var(--bg-primary)',
+                      borderRadius: 4,
+                      borderLeft: `3px solid ${isGenerated ? 'var(--accent)' : 'var(--border)'}`,
+                      opacity: isGenerated ? 0.7 : 1,
+                    }}
+                  >
+                    <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 2 }}>
+                      {language === 'zh' ? `第 ${chapter.chapterNo} 章` : `Chapter ${chapter.chapterNo}`}: {chapter.title}
+                      {isGenerated && <span style={{ marginLeft: 8, fontSize: 10, color: 'var(--accent)' }}>({language === 'zh' ? '已生成' : 'Generated'})</span>}
+                    </div>
+                    {chapter.goal && (
+                      <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                        {language === 'zh' ? '目标' : 'Goal'}: {chapter.goal}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
 

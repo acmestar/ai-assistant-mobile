@@ -1120,6 +1120,24 @@ export function normalizeNovelProject(
           characters[idx] = { ...characters[idx], role: 'protagonist' };
         });
       }
+      // 如果还是不够，补足可编辑的占位角色
+      const stillNeeded = protagonistCount - protagonists.length - toPromote.length - (others.slice(0, needed - toPromote.length).length);
+      if (stillNeeded > 0) {
+        for (let i = 0; i < stillNeeded; i++) {
+          characters.push({
+            id: `char_placeholder_protagonist_${i + 1}`,
+            name: `主角${protagonists.length + toPromote.length + i + 1}（待完善）`,
+            role: 'protagonist',
+            identity: '待设定',
+            personality: '待设定',
+            desire: '',
+            weakness: '',
+            relationship: '',
+            arc: '',
+            locked: false,
+          });
+        }
+      }
     }
 
     // 重新统计（因为上面可能改了）
@@ -1152,6 +1170,24 @@ export function normalizeNovelProject(
       toPromote.forEach(idx => {
         characters[idx] = { ...characters[idx], role: 'supporting' };
       });
+      // 如果还是不够，补足可编辑的占位角色
+      const stillNeeded = supportingCharacterCount - newSupportings.length - toPromote.length;
+      if (stillNeeded > 0) {
+        for (let i = 0; i < stillNeeded; i++) {
+          characters.push({
+            id: `char_placeholder_supporting_${i + 1}`,
+            name: `重要配角${newSupportings.length + toPromote.length + i + 1}（待完善）`,
+            role: 'supporting',
+            identity: '待设定',
+            personality: '待设定',
+            desire: '',
+            weakness: '',
+            relationship: '',
+            arc: '',
+            locked: false,
+          });
+        }
+      }
     }
   }
 
