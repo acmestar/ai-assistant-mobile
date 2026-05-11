@@ -135,12 +135,18 @@ export default function SuperWritingTab() {
   const [novelNewCharacterNote, setNovelNewCharacterNote] = useState('');
   const [novelNewPlotNote, setNovelNewPlotNote] = useState('');
 
-  // 小说结构参数
+  // 小说结构参数 - number state
   const [novelCreationMode, setNovelCreationMode] = useState<'inspiration' | 'opening' | 'full_story'>('inspiration');
   const [targetChapterCount, setTargetChapterCount] = useState<number>(10);
   const [targetWordsPerChapter, setTargetWordsPerChapter] = useState<number>(1500);
   const [protagonistCount, setProtagonistCount] = useState<number>(2);
   const [supportingCharacterCount, setSupportingCharacterCount] = useState<number>(3);
+
+  // 小说结构参数 - 字符串草稿 state（用于输入框自由编辑）
+  const [targetChapterCountInput, setTargetChapterCountInput] = useState<string>('10');
+  const [targetWordsPerChapterInput, setTargetWordsPerChapterInput] = useState<string>('1500');
+  const [protagonistCountInput, setProtagonistCountInput] = useState<string>('2');
+  const [supportingCharacterCountInput, setSupportingCharacterCountInput] = useState<string>('3');
 
   // 章节队列状态
   const [batchChapterCount, setBatchChapterCount] = useState<number>(3);
@@ -171,6 +177,66 @@ export default function SuperWritingTab() {
 
   // 获取实际使用的模型ID（优先使用创作台默认模型，否则使用全局模型）
   const effectiveModelId = selectedWritingModelId || chatModelId;
+
+  // 数字输入校验函数
+  const normalizeIntegerInput = (
+    raw: string,
+    fallback: number,
+    min: number,
+    max: number
+  ): number => {
+    const parsed = parseInt(raw, 10);
+    if (!Number.isFinite(parsed)) return fallback;
+    return Math.max(min, Math.min(max, parsed));
+  };
+
+  // 校验并同步小说参数（在提交动作前调用）
+  const getValidatedNovelSettings = () => {
+    const protagonistCountValue = normalizeIntegerInput(
+      protagonistCountInput,
+      protagonistCount,
+      1,
+      10
+    );
+    const supportingCharacterCountValue = normalizeIntegerInput(
+      supportingCharacterCountInput,
+      supportingCharacterCount,
+      0,
+      20
+    );
+    const targetChapterCountValue = normalizeIntegerInput(
+      targetChapterCountInput,
+      targetChapterCount,
+      1,
+      30
+    );
+    const targetWordsPerChapterValue = normalizeIntegerInput(
+      targetWordsPerChapterInput,
+      targetWordsPerChapter,
+      500,
+      5000
+    );
+
+    // 回写 number state 和 input string
+    setProtagonistCount(protagonistCountValue);
+    setProtagonistCountInput(String(protagonistCountValue));
+
+    setSupportingCharacterCount(supportingCharacterCountValue);
+    setSupportingCharacterCountInput(String(supportingCharacterCountValue));
+
+    setTargetChapterCount(targetChapterCountValue);
+    setTargetChapterCountInput(String(targetChapterCountValue));
+
+    setTargetWordsPerChapter(targetWordsPerChapterValue);
+    setTargetWordsPerChapterInput(String(targetWordsPerChapterValue));
+
+    return {
+      protagonistCount: protagonistCountValue,
+      supportingCharacterCount: supportingCharacterCountValue,
+      targetChapterCount: targetChapterCountValue,
+      targetWordsPerChapter: targetWordsPerChapterValue,
+    };
+  };
 
   // 判断第一章是否生成失败
   const isFirstChapterFailed =
@@ -484,6 +550,9 @@ export default function SuperWritingTab() {
       return;
     }
 
+    // 校验并同步小说参数
+    const validatedSettings = getValidatedNovelSettings();
+
     // 清空旧错误和旧结果（重新生成整本小说时清空所有）
     setNovelError('');
     setFastError('');
@@ -499,10 +568,10 @@ export default function SuperWritingTab() {
       const projectPrompt = buildNovelProjectPrompt({
         requirement: outlineText,
         creationMode: novelCreationMode,
-        targetChapterCount,
-        targetWordsPerChapter,
-        protagonistCount,
-        supportingCharacterCount,
+        targetChapterCount: validatedSettings.targetChapterCount,
+        targetWordsPerChapter: validatedSettings.targetWordsPerChapter,
+        protagonistCount: validatedSettings.protagonistCount,
+        supportingCharacterCount: validatedSettings.supportingCharacterCount,
       });
 
       console.log('[NovelGenerateStep]', {
@@ -511,7 +580,9 @@ export default function SuperWritingTab() {
         selectedWritingModelId,
         promptLength: projectPrompt.length,
         creationMode: novelCreationMode,
-        targetChapterCount,
+        targetChapterCount: validatedSettings.targetChapterCount,
+        protagonistCount: validatedSettings.protagonistCount,
+        supportingCharacterCount: validatedSettings.supportingCharacterCount,
       });
 
       const rawProjectText = await callChatCompletionRaw(projectPrompt, {
@@ -533,7 +604,7 @@ export default function SuperWritingTab() {
       }
 
       // 规范化小说企划，确保章节数量和角色数量符合预期
-      const project = normalizeNovelProject(parsedProject, targetChapterCount, protagonistCount, supportingCharacterCount);
+      const project = normalizeNovelProject(parsedProject, validatedSettings.targetChapterCount, validatedSettings.protagonistCount, validatedSettings.supportingCharacterCount);
 
       // 解析成功，只保存设定，不自动生成第一章
       setNovelProject(project);
@@ -580,6 +651,9 @@ export default function SuperWritingTab() {
       return;
     }
 
+    // 校验并同步小说参数
+    const validatedSettings = getValidatedNovelSettings();
+
     setNovelError('');
     setFastLoading(true);
     setNovelGenerationStep('chapter');
@@ -591,7 +665,7 @@ export default function SuperWritingTab() {
         requirement: outlineText,
         novelProject: novelProject,
         chapterPlan: novelProject.chapters?.[0],
-        targetWordsPerChapter,
+        targetWordsPerChapter: validatedSettings.targetWordsPerChapter,
       });
 
       console.log('[NovelGenerateStep]', {
@@ -601,7 +675,7 @@ export default function SuperWritingTab() {
         promptLength: chapterPrompt.length,
         projectTitle: novelProject.title,
         chapterTitle: novelProject.chapters?.[0]?.title,
-        targetWordsPerChapter,
+        targetWordsPerChapter: validatedSettings.targetWordsPerChapter,
       });
 
       const chapterText = await callChatCompletionRaw(chapterPrompt, {
@@ -675,6 +749,9 @@ export default function SuperWritingTab() {
       setNovelError(language === 'zh' ? '请先选择生成模型' : 'Please select a model first');
       return;
     }
+
+    // 校验并同步小说参数
+    getValidatedNovelSettings();
 
     setFastLoading(true);
     setFastError(null);
@@ -770,6 +847,9 @@ export default function SuperWritingTab() {
       return;
     }
 
+    // 校验并同步小说参数
+    const validatedSettings = getValidatedNovelSettings();
+
     setFastLoading(true);
     setFastError(null);
 
@@ -780,7 +860,7 @@ export default function SuperWritingTab() {
         previousChapters: novelChapters.filter(c => c.chapterNo < targetNo),
         originalContent: novelChapters.find(c => c.chapterNo === targetNo)?.content,
         userRequest: workbenchInput || (language === 'zh' ? '重新生成' : 'Regenerate'),
-        targetWordsPerChapter,
+        targetWordsPerChapter: validatedSettings.targetWordsPerChapter,
       });
 
       console.log('[NovelModelCall]', {
@@ -788,6 +868,7 @@ export default function SuperWritingTab() {
         effectiveModelId,
         targetNo,
         promptLength: prompt.length,
+        targetWordsPerChapter: validatedSettings.targetWordsPerChapter,
       });
 
       const result = await callChatCompletionRaw(prompt, {
@@ -846,6 +927,9 @@ export default function SuperWritingTab() {
       return;
     }
 
+    // 校验并同步小说参数
+    const validatedSettings = getValidatedNovelSettings();
+
     setFastLoading(true);
     setFastError(null);
 
@@ -858,7 +942,7 @@ export default function SuperWritingTab() {
         nextChapterIdea,
         nextChapterOutline: undefined,
         userDirection,
-        targetWordsPerChapter,
+        targetWordsPerChapter: validatedSettings.targetWordsPerChapter,
       });
 
       console.log('[NovelModelCall]', {
@@ -868,6 +952,7 @@ export default function SuperWritingTab() {
         promptLength: prompt.length,
         hasUserDirection: !!userDirection.trim(),
         userDirectionLength: userDirection.length,
+        targetWordsPerChapter: validatedSettings.targetWordsPerChapter,
       });
 
       const result = await callChatCompletionRaw(prompt, {
@@ -911,6 +996,9 @@ export default function SuperWritingTab() {
       return;
     }
 
+    // 校验并同步小说参数
+    const validatedSettings = getValidatedNovelSettings();
+
     setFastLoading(true);
     setFastError(null);
 
@@ -938,10 +1026,10 @@ export default function SuperWritingTab() {
           nextChapterIdea: workbenchInput || '',
           nextChapterOutline: plan ? `章节标题：${plan.title}\n本章目标：${plan.goal}\n主要事件：${plan.mainEvent}\n冲突点：${plan.conflict}\n结尾钩子：${plan.hook}` : '',
           userDirection,
-          targetWordsPerChapter,
+          targetWordsPerChapter: validatedSettings.targetWordsPerChapter,
         });
 
-        console.log('[BatchGenerate]', { chapterNo, step: i + 1, total: count });
+        console.log('[BatchGenerate]', { chapterNo, step: i + 1, total: count, targetWordsPerChapter: validatedSettings.targetWordsPerChapter });
 
         const result = await callChatCompletionRaw(prompt, { modelId: effectiveModelId });
         const parsed = parseNovelChapterDraft(result);
@@ -1643,13 +1731,17 @@ export default function SuperWritingTab() {
                         {language === 'zh' ? '章节数量' : 'Chapters'}
                       </div>
                       <input
-                        type="number"
-                        min={1}
-                        max={30}
-                        value={targetChapterCount}
+                        type="text"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        value={targetChapterCountInput}
                         onChange={(e) => {
-                          const v = parseInt(e.target.value) || 1;
-                          setTargetChapterCount(Math.max(1, Math.min(30, v)));
+                          setTargetChapterCountInput(e.target.value.replace(/[^\d]/g, ''));
+                        }}
+                        onBlur={() => {
+                          const next = normalizeIntegerInput(targetChapterCountInput, targetChapterCount, 1, 30);
+                          setTargetChapterCount(next);
+                          setTargetChapterCountInput(String(next));
                         }}
                         style={{
                           width: '100%',
@@ -1668,14 +1760,17 @@ export default function SuperWritingTab() {
                         {language === 'zh' ? '每章目标字数' : 'Target words/chapter'}
                       </div>
                       <input
-                        type="number"
-                        min={500}
-                        max={5000}
-                        step={100}
-                        value={targetWordsPerChapter}
+                        type="text"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        value={targetWordsPerChapterInput}
                         onChange={(e) => {
-                          const v = parseInt(e.target.value) || 500;
-                          setTargetWordsPerChapter(Math.max(500, Math.min(5000, v)));
+                          setTargetWordsPerChapterInput(e.target.value.replace(/[^\d]/g, ''));
+                        }}
+                        onBlur={() => {
+                          const next = normalizeIntegerInput(targetWordsPerChapterInput, targetWordsPerChapter, 500, 5000);
+                          setTargetWordsPerChapter(next);
+                          setTargetWordsPerChapterInput(String(next));
                         }}
                         style={{
                           width: '100%',
@@ -1694,13 +1789,17 @@ export default function SuperWritingTab() {
                         {language === 'zh' ? '主角数量' : 'Protagonists'}
                       </div>
                       <input
-                        type="number"
-                        min={1}
-                        max={6}
-                        value={protagonistCount}
+                        type="text"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        value={protagonistCountInput}
                         onChange={(e) => {
-                          const v = parseInt(e.target.value) || 1;
-                          setProtagonistCount(Math.max(1, Math.min(6, v)));
+                          setProtagonistCountInput(e.target.value.replace(/[^\d]/g, ''));
+                        }}
+                        onBlur={() => {
+                          const next = normalizeIntegerInput(protagonistCountInput, protagonistCount, 1, 10);
+                          setProtagonistCount(next);
+                          setProtagonistCountInput(String(next));
                         }}
                         style={{
                           width: '100%',
@@ -1719,13 +1818,17 @@ export default function SuperWritingTab() {
                         {language === 'zh' ? '重要配角' : 'Supporting'}
                       </div>
                       <input
-                        type="number"
-                        min={0}
-                        max={12}
-                        value={supportingCharacterCount}
+                        type="text"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        value={supportingCharacterCountInput}
                         onChange={(e) => {
-                          const v = parseInt(e.target.value) || 0;
-                          setSupportingCharacterCount(Math.max(0, Math.min(12, v)));
+                          setSupportingCharacterCountInput(e.target.value.replace(/[^\d]/g, ''));
+                        }}
+                        onBlur={() => {
+                          const next = normalizeIntegerInput(supportingCharacterCountInput, supportingCharacterCount, 0, 20);
+                          setSupportingCharacterCount(next);
+                          setSupportingCharacterCountInput(String(next));
                         }}
                         style={{
                           width: '100%',
