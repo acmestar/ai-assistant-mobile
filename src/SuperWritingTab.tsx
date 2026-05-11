@@ -120,6 +120,7 @@ export default function SuperWritingTab() {
 
   // 完整小说稿阅读区
   const [showFullNovelReader, setShowFullNovelReader] = useState(false);
+  const [showNovelToc, setShowNovelToc] = useState(false); // 目录显示
   const [fullNovelCopied, setFullNovelCopied] = useState(false);
   const [fullNovelCopyError, setFullNovelCopyError] = useState('');
 
@@ -3041,10 +3042,80 @@ export default function SuperWritingTab() {
                     《{novelProject.title}》
                   </div>
                 )}
+
+                {/* 章节目录 */}
+                <div
+                  onClick={() => setShowNovelToc(!showNovelToc)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '8px 12px',
+                    background: 'var(--bg-secondary)',
+                    borderRadius: 6,
+                    marginBottom: showNovelToc ? 12 : 24,
+                    cursor: 'pointer',
+                    userSelect: 'none',
+                  }}
+                >
+                  <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-secondary)' }}>
+                    📖 {language === 'zh' ? '章节目录' : 'Table of Contents'} ({novelChapters.length} {language === 'zh' ? '章' : 'chapters'})
+                  </span>
+                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                    {showNovelToc ? '▲' : '▼'}
+                  </span>
+                </div>
+
+                {showNovelToc && (
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fill, minmax(80px, 1fr))',
+                    gap: 6,
+                    marginBottom: 24,
+                    padding: 12,
+                    background: 'var(--bg-secondary)',
+                    borderRadius: 6,
+                  }}>
+                    {[...novelChapters]
+                      .sort((a, b) => a.chapterNo - b.chapterNo)
+                      .map(chapter => (
+                        <button
+                          key={chapter.chapterNo}
+                          onClick={() => {
+                            const el = document.getElementById(`novel-chapter-${chapter.chapterNo}`);
+                            if (el) {
+                              el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                            }
+                          }}
+                          style={{
+                            padding: '6px 8px',
+                            background: 'transparent',
+                            border: '1px solid var(--border)',
+                            borderRadius: 4,
+                            fontSize: 12,
+                            color: 'var(--text-secondary)',
+                            cursor: 'pointer',
+                            textAlign: 'left' as const,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                          title={`第${chapter.chapterNo}章 ${chapter.title}`}
+                        >
+                          {chapter.chapterNo}. {chapter.title}
+                        </button>
+                      ))}
+                  </div>
+                )}
+
                 {[...novelChapters]
                   .sort((a, b) => a.chapterNo - b.chapterNo)
                   .map((chapter, index) => (
-                    <div key={chapter.chapterNo} style={{ marginBottom: index < novelChapters.length - 1 ? 32 : 0 }}>
+                    <div
+                      key={chapter.chapterNo}
+                      id={`novel-chapter-${chapter.chapterNo}`}
+                      style={{ marginBottom: index < novelChapters.length - 1 ? 32 : 0 }}
+                    >
                       <div style={{ fontSize: 16, fontWeight: 500, color: 'var(--accent)', marginBottom: 12 }}>
                         第{chapter.chapterNo}章 {chapter.title}
                       </div>
