@@ -9,8 +9,8 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg', 'apple-touch-icon.svg', 'logo.png'],
       manifest: {
-        name: 'AI 助手',
-        short_name: 'AI助手',
+        name: '极星AI',
+        short_name: '极星AI',
         description: 'AI 聊天与生图助手',
         theme_color: '#F8F9FA',
         background_color: '#F8F9FA',

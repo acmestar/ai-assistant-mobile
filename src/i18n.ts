@@ -2,7 +2,7 @@ export type Language = 'zh' | 'en';
 
 export const translations: Record<Language, Record<string, string>> = {
   zh: {
-    appName: 'AI 助手',
+    appName: '极星AI',
     chat: '聊天',
     image: '生图',
     settings: '设置',
@@ -107,7 +107,7 @@ export const translations: Record<Language, Record<string, string>> = {
     doubleTapToZoom: '双击放大',
   },
   en: {
-    appName: 'AI Assistant',
+    appName: 'JiXing AI',
     chat: 'Chat',
     image: 'Image',
     settings: 'Settings',
