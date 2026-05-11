@@ -549,8 +549,8 @@ export default function SuperWritingTab() {
         return;
       }
 
-      // 规范化小说企划，确保章节数量符合预期
-      const project = normalizeNovelProject(parsedProject, targetChapterCount);
+      // 规范化小说企划，确保章节数量和角色数量符合预期
+      const project = normalizeNovelProject(parsedProject, targetChapterCount, protagonistCount, supportingCharacterCount);
 
       // 解析成功，只保存设定，不自动生成第一章
       setNovelProject(project);
@@ -706,6 +706,7 @@ export default function SuperWritingTab() {
         nextChapterIdea,
         nextChapterOutline: undefined,
         userDirection,
+        targetWordsPerChapter,
       });
 
       console.log('[NovelModelCall]', {
@@ -830,6 +831,7 @@ export default function SuperWritingTab() {
         nextChapterIdea,
         nextChapterOutline,
         userDirection,
+        targetWordsPerChapter,
       });
 
       console.log('[NovelModelCall]', {
@@ -954,6 +956,7 @@ export default function SuperWritingTab() {
           nextChapterIdea: batchChapterIdea || item.userIdea,
           nextChapterOutline: item.outline,
           userDirection: effectiveUserDirection,
+          targetWordsPerChapter,
         });
 
         console.log('[NovelGenerateStep]', {
@@ -1052,6 +1055,7 @@ export default function SuperWritingTab() {
         nextChapterIdea: item.userIdea,
         nextChapterOutline: item.outline,
         userDirection: effectiveUserDirection,
+        targetWordsPerChapter,
       });
 
       console.log('[NovelGenerateStep]', {
@@ -1842,11 +1846,11 @@ export default function SuperWritingTab() {
                       <input
                         type="number"
                         min={1}
-                        max={50}
+                        max={30}
                         value={targetChapterCount}
                         onChange={(e) => {
                           const v = parseInt(e.target.value) || 1;
-                          setTargetChapterCount(Math.max(1, Math.min(50, v)));
+                          setTargetChapterCount(Math.max(1, Math.min(30, v)));
                         }}
                         style={{
                           width: '100%',
@@ -1859,10 +1863,10 @@ export default function SuperWritingTab() {
                         }}
                       />
                     </div>
-                    {/* 每章字数 */}
+                    {/* 每章目标字数 */}
                     <div>
                       <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 4 }}>
-                        {language === 'zh' ? '每章字数' : 'Words/chapter'}
+                        {language === 'zh' ? '每章目标字数' : 'Target words/chapter'}
                       </div>
                       <input
                         type="number"

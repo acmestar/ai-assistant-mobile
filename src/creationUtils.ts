@@ -1036,10 +1036,12 @@ export function parseNovelPlanJSON(text: string): NovelProject | null {
  */
 export function normalizeNovelProject(
   project: NovelProject,
-  targetChapterCount: number
+  targetChapterCount: number,
+  protagonistCount?: number,
+  supportingCharacterCount?: number
 ): NovelProject {
   // 确保 characters 是数组
-  const characters = Array.isArray(project.characters) ? project.characters : [];
+  let characters = Array.isArray(project.characters) ? [...project.characters] : [];
 
   // 规范化章节
   let chapters = Array.isArray(project.chapters) ? [...project.chapters] : [];
@@ -1071,6 +1073,87 @@ export function normalizeNovelProject(
     id: ch.id || `chap_${index + 1}`,
     chapterNo: index + 1,
   }));
+
+  // 角色归一化（如果提供了参数）
+  if (protagonistCount !== undefined && supportingCharacterCount !== undefined) {
+    // 统计当前各角色类型
+    const protagonists: number[] = [];
+    const supportings: number[] = [];
+    const others: number[] = [];
+
+    characters.forEach((c, index) => {
+      const role = (c.role || '').toLowerCase();
+      if (role === 'protagonist') {
+        protagonists.push(index);
+      } else if (role === 'supporting') {
+        supportings.push(index);
+      } else {
+        others.push(index);
+      }
+    });
+
+    // 处理 protagonist 数量
+    if (protagonists.length > protagonistCount) {
+      // 多余的 protagonist 改成 supporting 或 other
+      const excess = protagonists.slice(protagonistCount);
+      excess.forEach(idx => {
+        if (supportings.length < supportingCharacterCount) {
+          characters[idx] = { ...characters[idx], role: 'supporting' };
+          supportings.push(idx);
+        } else {
+          characters[idx] = { ...characters[idx], role: 'other' };
+        }
+      });
+    } else if (protagonists.length < protagonistCount) {
+      // 不足的从非 protagonist 角色中提升
+      const needed = protagonistCount - protagonists.length;
+      // 优先从 supporting 中提升
+      const toPromote = supportings.slice(0, needed);
+      toPromote.forEach(idx => {
+        characters[idx] = { ...characters[idx], role: 'protagonist' };
+      });
+      // 如果 supporting 不够，从 others 中提升
+      if (toPromote.length < needed) {
+        const moreNeeded = needed - toPromote.length;
+        const moreToPromote = others.slice(0, moreNeeded);
+        moreToPromote.forEach(idx => {
+          characters[idx] = { ...characters[idx], role: 'protagonist' };
+        });
+      }
+    }
+
+    // 重新统计（因为上面可能改了）
+    const newProtagonists: number[] = [];
+    const newSupportings: number[] = [];
+    const newOthers: number[] = [];
+
+    characters.forEach((c, index) => {
+      const role = (c.role || '').toLowerCase();
+      if (role === 'protagonist') {
+        newProtagonists.push(index);
+      } else if (role === 'supporting') {
+        newSupportings.push(index);
+      } else {
+        newOthers.push(index);
+      }
+    });
+
+    // 处理 supporting 数量
+    if (newSupportings.length > supportingCharacterCount) {
+      // 多余的 supporting 改成 other/minor
+      const excess = newSupportings.slice(supportingCharacterCount);
+      excess.forEach(idx => {
+        characters[idx] = { ...characters[idx], role: 'minor' };
+      });
+    } else if (newSupportings.length < supportingCharacterCount) {
+      // 不足的从 others 中补足
+      const needed = supportingCharacterCount - newSupportings.length;
+      const toPromote = newOthers.slice(0, needed);
+      toPromote.forEach(idx => {
+        characters[idx] = { ...characters[idx], role: 'supporting' };
+      });
+    }
+  }
 
   return {
     ...project,
@@ -1280,7 +1363,7 @@ export function buildNovelProjectPrompt(options: {
     chapterInfo,
     creationMode = 'inspiration',
     targetChapterCount = 10,
-    targetWordsPerChapter = 1500,
+    targetWordsPerChapter: _targetWordsPerChapter = 1500, // 用于提示每章字数，但不在 prompt 中直接使用
     protagonistCount = 2,
     supportingCharacterCount = 3,
   } = options;
@@ -1379,14 +1462,25 @@ ${creationModeHints[creationMode]}
 }
 
 要求：
-1. 请生成约 ${protagonistCount} 个主角和约 ${supportingCharacterCount} 个重要配角。如果剧情需要，可以额外加入反派、导师、家人、路人等功能角色。不要强制只有 3 个角色。
-2. 请生成 ${targetChapterCount} 个章节规划。每章目标正文约 ${targetWordsPerChapter} 字。如果用户输入的是完整故事，请把完整剧情均匀拆入这些章节中，不要只规划开头部分。
-3. characters 数量应根据参数生成，不限于示例数量。
-4. chapters 数量必须尽量等于 ${targetChapterCount}。
-5. 只输出合法 JSON，不要 Markdown，不要解释
-6. 不要生成第一章正文
-7. 不要输出 firstChapter 字段
-8. 不要输出 content 正文字段`;
+1. 【角色数量严格约束】
+   - role = "protagonist" 的角色数量必须严格等于 ${protagonistCount}。
+   - role = "supporting" 的角色数量应等于 ${supportingCharacterCount}。
+   - 其他人物可以存在，但不得标记为 protagonist 或 supporting。
+   - 不要把反派、导师、家人、恋人、伙伴全部标成 protagonist。
+   - protagonist 只表示承担主线成长或主要视角的人。
+   - 反派用 antagonist，导师用 mentor，家人用 family，路人用 minor，其他用 other。
+2. 【章节数量约束】
+   - chapters 数组长度必须等于 ${targetChapterCount}。
+   ${targetChapterCount === 1 ? '- 当前是单章短篇，只生成 1 个章节规划，包含完整起承转合，不要设计后续章节，不要留下必须依赖下一章才能解决的主线 hook。' : ''}
+   ${targetChapterCount > 20 ? '- 章节数量较多，每章的 goal 和 mainEvent 控制在 60 个中文字符以内，保持简洁。' : ''}
+3. 【JSON 格式约束】
+   - 只输出合法 JSON，不要 Markdown，不要解释。
+   - characters 必须是数组。
+   - chapters 必须是数组。
+   - 不要在 JSON 外添加任何解释文字。
+4. 不要生成第一章正文。
+5. 不要输出 firstChapter 字段。
+6. 不要输出 content 正文字段。`;
 }
 
 /**
@@ -1405,8 +1499,8 @@ export function buildNovelFirstChapterPlainPrompt(options: {
     .map(c => `- ${c.name}（${c.role === 'protagonist' ? '主角' : c.role === 'antagonist' ? '反派' : '配角'}，${c.identity}，${c.personality}）`)
     .join('\n');
 
-  const minWords = Math.floor(targetWordsPerChapter * 0.8);
-  const maxWords = Math.floor(targetWordsPerChapter * 1.2);
+  const minWords = Math.floor(targetWordsPerChapter * 0.75);
+  const maxWords = Math.floor(targetWordsPerChapter * 1.15);
 
   return `你是一个专业的小说作家。请根据以下小说设定，写出第一章正文。
 
@@ -1450,7 +1544,7 @@ ${novelProject.world.forbiddenRules ? `- 不可违背：${novelProject.world.for
 7. 有场景、动作、对白、心理、节奏和结尾钩子
 8. 不要写成大纲，要写真正的小说正文
 9. 不要突然完结，结尾要有钩子
-10. 目标字数约 ${targetWordsPerChapter} 字，可以上下浮动 20%（${minWords}-${maxWords} 字）`;
+10. 正文长度必须控制在 ${minWords}-${maxWords} 个中文字符之间，目标约 ${targetWordsPerChapter} 字。不要超过 ${maxWords} 个中文字符。即使剧情尚未完全展开，也不要为了写完整故事而超出本章字数。本章只写第 1 章正文，不要总结后续章节。`;
 }
 
 /**
@@ -1779,8 +1873,9 @@ export function buildNovelContinueChapterPrompt(options: {
   nextChapterIdea?: string;
   nextChapterOutline?: string;
   userDirection?: string;
+  targetWordsPerChapter?: number;
 }): string {
-  const { novelProject, chapters, nextChapterIdea, nextChapterOutline, userDirection } = options;
+  const { novelProject, chapters, nextChapterIdea, nextChapterOutline, userDirection, targetWordsPerChapter = 1500 } = options;
 
   const nextChapterNo = chapters.length + 1;
   const chapterPlan = novelProject.chapters.find(c => c.chapterNo === nextChapterNo);
@@ -1810,6 +1905,10 @@ ${userDirection}
 - 不要擅自改名、删掉或弱化用户指定的人物、关系、事件和线索。
 - 如果用户没有填写某一项，则不要强行编造对应内容，按小说当前走向自然续写。
 ` : '';
+
+  // 字数控制
+  const minWords = Math.floor(targetWordsPerChapter * 0.75);
+  const maxWords = Math.floor(targetWordsPerChapter * 1.15);
 
   return `你是一个专业的小说作家。请根据小说企划和已有内容，续写下一章正文。
 
@@ -1846,7 +1945,7 @@ ${nextChapterOutline ? `【下一章大纲】\n${nextChapterOutline}` : ''}
 {
   "chapterNo": ${nextChapterNo},
   "title": "章节标题",
-  "content": "正文内容（真正的小说正文，要有场景、动作、对白、心理、节奏和结尾钩子，字数2000-4000字）",
+  "content": "正文内容（真正的小说正文，要有场景、动作、对白、心理、节奏和结尾钩子）",
   "summary": "本章摘要（100字以内）",
   "characterChanges": "人物状态变化",
   "clues": "伏笔/线索",
@@ -1859,7 +1958,8 @@ ${nextChapterOutline ? `【下一章大纲】\n${nextChapterOutline}` : ''}
 3. 遵守小说设定，人物姓名、身份、性格必须一致
 4. 不要跳剧情，不要突然完结
 5. 正文要有场景、动作、对白、心理、节奏和结尾钩子
-6. 只输出 JSON`;
+6. 正文长度控制在 ${minWords}-${maxWords} 个中文字符之间，目标约 ${targetWordsPerChapter} 字，不要超过 ${maxWords} 字
+7. 只输出 JSON`;
 }
 
 /**
