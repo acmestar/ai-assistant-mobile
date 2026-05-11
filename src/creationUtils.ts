@@ -1083,9 +1083,10 @@ export function normalizeNovelProject(
 
     characters.forEach((c, index) => {
       const role = (c.role || '').toLowerCase();
-      if (role === 'protagonist') {
+      // 支持中英文角色标识
+      if (role === 'protagonist' || role === '主角') {
         protagonists.push(index);
-      } else if (role === 'supporting') {
+      } else if (role === 'supporting' || role === '配角') {
         supportings.push(index);
       } else {
         others.push(index);
@@ -1147,9 +1148,10 @@ export function normalizeNovelProject(
 
     characters.forEach((c, index) => {
       const role = (c.role || '').toLowerCase();
-      if (role === 'protagonist') {
+      // 支持中英文角色标识
+      if (role === 'protagonist' || role === '主角') {
         newProtagonists.push(index);
-      } else if (role === 'supporting') {
+      } else if (role === 'supporting' || role === '配角') {
         newSupportings.push(index);
       } else {
         newOthers.push(index);
