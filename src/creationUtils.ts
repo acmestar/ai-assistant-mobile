@@ -1469,18 +1469,23 @@ ${creationModeHints[creationMode]}
    - 不要把反派、导师、家人、恋人、伙伴全部标成 protagonist。
    - protagonist 只表示承担主线成长或主要视角的人。
    - 反派用 antagonist，导师用 mentor，家人用 family，路人用 minor，其他用 other。
-2. 【章节数量约束】
+2. 【临时 NPC 规则】
+   - 主角和重要配角数量只限制核心人物，不限制临时 NPC。
+   - 服务员、路人、守卫、司机、医生、小贩、群众、前台、传令官、同学、记者等可根据场景自然出现。
+   - 临时 NPC 不计入 protagonist 或 supporting 数量，也不需要加入主要人物表。
+   - 请避免所有场景都只有核心人物反复对话。
+3. 【章节数量约束】
    - chapters 数组长度必须等于 ${targetChapterCount}。
    ${targetChapterCount === 1 ? '- 当前是单章短篇，只生成 1 个章节规划，包含完整起承转合，不要设计后续章节，不要留下必须依赖下一章才能解决的主线 hook。' : ''}
    ${targetChapterCount > 20 ? '- 章节数量较多，每章的 goal 和 mainEvent 控制在 60 个中文字符以内，保持简洁。' : ''}
-3. 【JSON 格式约束】
+4. 【JSON 格式约束】
    - 只输出合法 JSON，不要 Markdown，不要解释。
    - characters 必须是数组。
    - chapters 必须是数组。
    - 不要在 JSON 外添加任何解释文字。
-4. 不要生成第一章正文。
-5. 不要输出 firstChapter 字段。
-6. 不要输出 content 正文字段。`;
+5. 不要生成第一章正文。
+6. 不要输出 firstChapter 字段。
+7. 不要输出 content 正文字段。`;
 }
 
 /**
@@ -1544,7 +1549,8 @@ ${novelProject.world.forbiddenRules ? `- 不可违背：${novelProject.world.for
 7. 有场景、动作、对白、心理、节奏和结尾钩子
 8. 不要写成大纲，要写真正的小说正文
 9. 不要突然完结，结尾要有钩子
-10. 正文长度必须控制在 ${minWords}-${maxWords} 个中文字符之间，目标约 ${targetWordsPerChapter} 字。不要超过 ${maxWords} 个中文字符。即使剧情尚未完全展开，也不要为了写完整故事而超出本章字数。本章只写第 1 章正文，不要总结后续章节。`;
+10. 正文长度必须控制在 ${minWords}-${maxWords} 个中文字符之间，目标约 ${targetWordsPerChapter} 字。不要超过 ${maxWords} 个中文字符。即使剧情尚未完全展开，也不要为了写完整故事而超出本章字数。本章只写第 1 章正文，不要总结后续章节。
+11. 主角和重要配角数量只限制核心人物，可以根据场景自然加入服务员、路人、守卫、司机、医生、小贩、群众等临时人物。临时 NPC 不计入主角或配角数量。请避免所有场景都只有核心人物反复对话。`;
 }
 
 /**
@@ -1959,7 +1965,9 @@ ${nextChapterOutline ? `【下一章大纲】\n${nextChapterOutline}` : ''}
 4. 不要跳剧情，不要突然完结
 5. 正文要有场景、动作、对白、心理、节奏和结尾钩子
 6. 正文长度控制在 ${minWords}-${maxWords} 个中文字符之间，目标约 ${targetWordsPerChapter} 字，不要超过 ${maxWords} 字
-7. 只输出 JSON`;
+7. 本章必须围绕第 ${nextChapterNo} 章章节规划展开，不要重新规划主线，不要跳到其他章节内容
+8. 主角和重要配角数量只限制核心人物，可以根据场景自然加入服务员、路人、守卫、司机、医生、小贩、群众等临时人物。临时 NPC 不计入主角或配角数量。请避免所有场景都只有核心人物反复对话。
+9. 只输出 JSON`;
 }
 
 /**
@@ -2000,6 +2008,217 @@ export function parseNovelChapterDraft(text: string): NovelChapterDraft | null {
     };
   } catch (e) {
     console.error('[parseNovelChapterDraft] 解析失败:', e);
+    return null;
+  }
+}
+
+/**
+ * 构建整合进后续规划的 Prompt
+ * 用于将用户新增的人物/剧情整合进未生成章节的规划中
+ */
+export function buildNovelIntegrateFuturePlanPrompt(options: {
+  novelProject: NovelProject;
+  generatedChapters: NovelChapterDraft[];
+  newUserInput: string;
+  fromChapterNo: number;
+}): string {
+  const { novelProject, generatedChapters, newUserInput, fromChapterNo } = options;
+
+  // 已生成章节摘要
+  const generatedSummaries = generatedChapters
+    .map(c => `第 ${c.chapterNo} 章《${c.title}》：${c.summary || '（已生成）'}`)
+    .join('\n');
+
+  // 未生成章节规划
+  const futureChapters = novelProject.chapters
+    .filter(c => c.chapterNo > fromChapterNo)
+    .map(c => `第 ${c.chapterNo} 章《${c.title}》：${c.goal || ''} - ${c.mainEvent || ''}`)
+    .join('\n');
+
+  // 核心人物
+  const coreCharacters = novelProject.characters
+    .filter(c => c.role === 'protagonist' || c.role === 'supporting')
+    .map(c => `${c.name}（${c.role === 'protagonist' ? '主角' : '重要配角'}，${c.identity}）`)
+    .join('、');
+
+  return `你是一个专业的小说规划编辑。请把用户新增的人物或剧情整合进未生成章节的规划中。
+
+【小说标题】
+${novelProject.title}
+
+【核心人物】
+${coreCharacters || '暂无'}
+
+【世界观】
+${novelProject.world.background}
+
+【已生成章节】（不可修改）
+${generatedSummaries || '暂无'}
+
+【当前未生成章节规划】
+${futureChapters || '暂无'}
+
+【用户新增要求】
+${newUserInput}
+
+【执行规则】
+1. 不要修改已生成章节的内容和规划。
+2. 不要推翻已生成章节中已确立的剧情和人物关系。
+3. 只调整第 ${fromChapterNo + 1} 章及之后的章节规划。
+4. 如果新增内容与前文冲突，请尽量解释为后续转折或新线索。
+5. 如果新增的是重要人物（长期参与主线），可以加入核心人物表。
+6. 如果只是服务员、路人、守卫、司机、医生、小贩、群众等临时 NPC，不要加入核心人物表，只需在章节规划中提及。
+7. 保持章节规划的连贯性。
+8. 主角和重要配角数量只限制核心人物，不限制临时 NPC。
+
+请输出 JSON 格式：
+
+{
+  "chapters": [
+    {
+      "chapterNo": 1,
+      "title": "章节标题",
+      "goal": "本章目标",
+      "mainEvent": "主要事件",
+      "conflict": "冲突点",
+      "hook": "结尾钩子"
+    }
+  ],
+  "newCharacters": [
+    {
+      "name": "新角色名",
+      "role": "protagonist/supporting/other",
+      "identity": "身份",
+      "personality": "性格"
+    }
+  ],
+  "notes": "整合说明"
+}
+
+要求：
+1. chapters 数组只需包含需要更新的章节（从第 ${fromChapterNo + 1} 章开始）。
+2. 如果不需要新增核心人物，newCharacters 可以是空数组。
+3. 只输出 JSON，不要输出解释。`;
+}
+
+/**
+ * 构建重新生成本章的 Prompt
+ * 用于根据用户要求重新生成某一章的正文
+ */
+export function buildNovelRegenerateChapterPrompt(options: {
+  novelProject: NovelProject;
+  chapterNo: number;
+  previousChapters: NovelChapterDraft[];
+  originalContent?: string;
+  userRequest: string;
+  targetWordsPerChapter?: number;
+}): string {
+  const { novelProject, chapterNo, previousChapters, originalContent, userRequest, targetWordsPerChapter = 1500 } = options;
+
+  const chapterPlan = novelProject.chapters.find(c => c.chapterNo === chapterNo);
+
+  // 前文摘要
+  const prevSummaries = previousChapters
+    .filter(c => c.chapterNo < chapterNo)
+    .map(c => `第 ${c.chapterNo} 章《${c.title}》：${c.summary || ''}`)
+    .join('\n');
+
+  // 字数控制
+  const minWords = Math.floor(targetWordsPerChapter * 0.75);
+  const maxWords = Math.floor(targetWordsPerChapter * 1.15);
+
+  // 核心人物
+  const coreCharacters = novelProject.characters
+    .map(c => `- ${c.name}（${c.role === 'protagonist' ? '主角' : c.role === 'supporting' ? '重要配角' : c.role}，${c.identity}，${c.personality}）`)
+    .join('\n');
+
+  return `你是一个专业的小说作家。请根据用户要求重新生成本章正文。
+
+【小说标题】
+${novelProject.title}
+
+【核心人物】
+${coreCharacters}
+
+【世界观】
+${novelProject.world.background}
+
+【前文摘要】
+${prevSummaries || '这是第一章'}
+
+【本章规划】
+章节标题：${chapterPlan?.title || `第${chapterNo}章`}
+本章目标：${chapterPlan?.goal || ''}
+主要事件：${chapterPlan?.mainEvent || ''}
+冲突点：${chapterPlan?.conflict || ''}
+结尾钩子：${chapterPlan?.hook || ''}
+
+${originalContent ? `【原正文片段】\n${originalContent.slice(0, 500)}...\n` : ''}
+
+【用户修改要求】
+${userRequest}
+
+【写作要求】
+1. 这是重新生成本章，请根据用户修改要求改写本章正文。
+2. 不要改写其他章节，不要总结后续剧情。
+3. 必须遵守本章规划的目标和事件。
+4. 承接前文，保持人物性格一致。
+5. 有场景、动作、对白、心理、节奏和结尾钩子。
+6. 正文长度控制在 ${minWords}-${maxWords} 个中文字符之间，目标约 ${targetWordsPerChapter} 字。
+7. 主角和重要配角数量只限制核心人物，可以根据场景自然加入服务员、路人、守卫、司机、医生、小贩、群众等临时人物。
+8. 不要让所有场景都只有核心人物反复对话。
+
+请直接输出正文内容，不要输出 JSON，不要解释。`;
+}
+
+/**
+ * 解析整合规划的 JSON 结果
+ */
+export function parseIntegratePlanResult(text: string): {
+  chapters: NovelChapterPlan[];
+  newCharacters: Array<{ name: string; role: string; identity: string; personality: string }>;
+  notes: string;
+} | null {
+  try {
+    let jsonStr = text.trim();
+
+    if (jsonStr.startsWith('```')) {
+      const match = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
+      if (match) {
+        jsonStr = match[1].trim();
+      }
+    }
+
+    const startIndex = jsonStr.indexOf('{');
+    const lastIndex = jsonStr.lastIndexOf('}');
+    if (startIndex === -1 || lastIndex === -1) {
+      return null;
+    }
+    jsonStr = jsonStr.slice(startIndex, lastIndex + 1);
+
+    const parsed = JSON.parse(jsonStr);
+
+    return {
+      chapters: (parsed.chapters || []).map((ch: any, index: number) => ({
+        id: ch.id || `chap_${ch.chapterNo || index + 1}`,
+        chapterNo: ch.chapterNo || index + 1,
+        title: ch.title || '',
+        goal: ch.goal || '',
+        mainEvent: ch.mainEvent || '',
+        conflict: ch.conflict || '',
+        hook: ch.hook || '',
+        locked: false,
+      })),
+      newCharacters: (parsed.newCharacters || []).map((c: any) => ({
+        name: c.name || '',
+        role: c.role || 'other',
+        identity: c.identity || '',
+        personality: c.personality || '',
+      })),
+      notes: parsed.notes || '',
+    };
+  } catch (e) {
+    console.error('[parseIntegratePlanResult] 解析失败:', e);
     return null;
   }
 }
