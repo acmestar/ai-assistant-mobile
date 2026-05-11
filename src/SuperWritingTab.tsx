@@ -14,18 +14,16 @@ import {
   FolderOpen,
   Download,
   BookOpen,
-  Wand2,
   Lock,
   Unlock,
   Plus,
   X,
 } from 'lucide-react';
-import { useAppStore, CHAT_MODELS, NovelRewriteType, NOVEL_REWRITE_NAMES, NovelProject, NovelCharacter, NovelChapterPlan, NovelChapterDraft, NovelChapterQueueItem } from './store';
+import { useAppStore, CHAT_MODELS, NovelRewriteType, NOVEL_REWRITE_NAMES, NovelProject, NovelCharacter, NovelChapterPlan, NovelChapterDraft } from './store';
 import { executeModelQueue, regenerateQueueItem, callChatCompletionRaw } from './api';
 import {
   buildCreationPrompt,
   buildNovelRewritePrompt,
-  buildNovelNextOutlinePrompt,
   buildNovelContinueChapterPrompt,
   parseNovelChapterDraft,
   convertParsedCreationToQueue,
@@ -132,7 +130,6 @@ export default function SuperWritingTab() {
 
   // 续写状态
   const [nextChapterIdea, setNextChapterIdea] = useState('');
-  const [nextChapterOutline, setNextChapterOutline] = useState('');
 
   // 后续剧情控制状态
   const [novelNewCharacterNote, setNovelNewCharacterNote] = useState('');
@@ -146,10 +143,7 @@ export default function SuperWritingTab() {
   const [supportingCharacterCount, setSupportingCharacterCount] = useState<number>(3);
 
   // 章节队列状态
-  const [novelChapterQueue, setNovelChapterQueue] = useState<NovelChapterQueueItem[]>([]);
   const [batchChapterCount, setBatchChapterCount] = useState<number>(3);
-  const [batchChapterIdea, setBatchChapterIdea] = useState('');
-  const [isNovelQueueRunning, setIsNovelQueueRunning] = useState(false);
 
   // 快速生成结果
   const [fastResult, setFastResult] = useState<string>('');
@@ -159,7 +153,7 @@ export default function SuperWritingTab() {
   // 小说改写状态
   const [rewriteLoading, setRewriteLoading] = useState(false);
   const [rewriteError, setRewriteError] = useState('');
-  const [novelChapterRevision, setNovelChapterRevision] = useState<{
+  const [_novelChapterRevision, setNovelChapterRevision] = useState<{
     chapterNo: number;
     title: string;
     actionType: NovelRewriteType;
@@ -167,27 +161,16 @@ export default function SuperWritingTab() {
     originalContent: string;
     content: string;
   } | null>(null);
-  const [novelChapterRevisionCopied, setNovelChapterRevisionCopied] = useState(false);
-  const [novelChapterRevisionCopyError, setNovelChapterRevisionCopyError] = useState('');
 
   // 可编辑区块展开状态
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['basic', 'characters']));
 
   // 章节工作台状态
-  const [selectedChapterNo, setSelectedChapterNo] = useState<number | null>(null);
+  const [selectedChapterNo, _setSelectedChapterNo] = useState<number | null>(null);
   const [workbenchInput, setWorkbenchInput] = useState(''); // 统一输入框
 
   // 获取实际使用的模型ID（优先使用创作台默认模型，否则使用全局模型）
   const effectiveModelId = selectedWritingModelId || chatModelId;
-
-  // 判断是否可以继续生成后续章节（第一章必须成功生成）
-  const canContinueNovel =
-    creationMode === 'novel' &&
-    !!novelProject &&
-    !!novelChapterResult &&
-    !!novelChapterResult.content?.trim() &&
-    novelChapters.some(c => c.chapterNo === 1 && c.content?.trim()) &&
-    !fastLoading;
 
   // 判断第一章是否生成失败
   const isFirstChapterFailed =
@@ -229,13 +212,9 @@ export default function SuperWritingTab() {
 
   // 清理小说后续章节相关状态（队列、续写等）
   const clearNovelContinuationState = () => {
-    setNovelChapterQueue([]);
     setNextChapterIdea('');
-    setNextChapterOutline('');
-    setBatchChapterIdea('');
     setNovelNewCharacterNote('');
     setNovelNewPlotNote('');
-    setIsNovelQueueRunning(false);
   };
 
   // 清理所有小说相关状态（设定、章节、队列等）
@@ -251,9 +230,6 @@ export default function SuperWritingTab() {
     setFullNovelCopyError('');
     setCurrentChapterCopied(false);
     setCurrentChapterCopyError('');
-    setNovelChapterRevision(null);
-    setNovelChapterRevisionCopied(false);
-    setNovelChapterRevisionCopyError('');
     setRewriteLoading(false);
     setRewriteError('');
     clearNovelContinuationState();
@@ -903,7 +879,6 @@ export default function SuperWritingTab() {
         setNovelChapterResult(parsed);
         setNovelChapters(prev => [...prev, parsed]);
         setNextChapterIdea('');
-        setNextChapterOutline('');
         setCurrentChapterCopied(false);
         setCurrentChapterCopyError('');
       } else {
@@ -917,15 +892,14 @@ export default function SuperWritingTab() {
     }
   };
 
-  // 生成下一章大纲
-  const handleGenerateNextOutline = async () => {
-    // 检查前置条件，不要 silent return
+  // 简化版批量生成：直接按当前规划生成多章，不使用队列 UI
+  const handleRunBatchGenerate = async () => {
     if (!novelProject) {
       setNovelError(language === 'zh' ? '请先生成小说设定' : 'Please generate novel setup first');
       return;
     }
-    if (!novelChapterResult?.content?.trim()) {
-      setNovelError(language === 'zh' ? '请先生成第一章，再继续生成后续章节' : 'Please generate first chapter first');
+    if (novelChapters.length === 0) {
+      setNovelError(language === 'zh' ? '请先生成第一章' : 'Please generate first chapter first');
       return;
     }
     if (!apiKey) {
@@ -940,346 +914,54 @@ export default function SuperWritingTab() {
     setFastLoading(true);
     setFastError(null);
 
-    const userDirection = buildNovelUserDirectionText();
-
-    try {
-      const prompt = buildNovelNextOutlinePrompt({
-        novelProject,
-        chapters: novelChapters,
-        nextChapterIdea,
-        userDirection,
-      });
-
-      console.log('[NovelModelCall]', {
-        source: 'handleGenerateNextOutline',
-        effectiveModelId,
-        promptLength: prompt.length,
-        hasUserDirection: !!userDirection.trim(),
-        userDirectionLength: userDirection.length,
-      });
-
-      const result = await callChatCompletionRaw(prompt, {
-        modelId: effectiveModelId,
-      });
-
-      setNextChapterOutline(result);
-    } catch (error: any) {
-      console.error('[NovelModelError]', error);
-      setFastError(error.message || '生成大纲失败');
-    } finally {
-      setFastLoading(false);
-    }
-  };
-
-  // 根据大纲写正文
-  const handleWriteFromNextOutline = async () => {
-    // 检查前置条件，不要 silent return
-    if (!novelProject) {
-      setNovelError(language === 'zh' ? '请先生成小说设定' : 'Please generate novel setup first');
-      return;
-    }
-    if (!novelChapterResult?.content?.trim()) {
-      setNovelError(language === 'zh' ? '请先生成第一章，再继续生成后续章节' : 'Please generate first chapter first');
-      return;
-    }
-    if (!nextChapterOutline) {
-      setNovelError(language === 'zh' ? '请先生成下一章大纲' : 'Please generate next chapter outline first');
-      return;
-    }
-    if (!apiKey) {
-      setNovelError(language === 'zh' ? '请先配置 API Key' : 'Please configure API Key first');
-      return;
-    }
-    if (!effectiveModelId) {
-      setNovelError(language === 'zh' ? '请先选择生成模型' : 'Please select a model first');
-      return;
-    }
-
-    setFastLoading(true);
-    setFastError(null);
-
-    const userDirection = buildNovelUserDirectionText();
-
-    try {
-      const prompt = buildNovelContinueChapterPrompt({
-        novelProject,
-        chapters: novelChapters,
-        nextChapterIdea,
-        nextChapterOutline,
-        userDirection,
-        targetWordsPerChapter,
-      });
-
-      console.log('[NovelModelCall]', {
-        source: 'handleWriteFromNextOutline',
-        effectiveModelId,
-        promptLength: prompt.length,
-        hasUserDirection: !!userDirection.trim(),
-        userDirectionLength: userDirection.length,
-      });
-
-      const result = await callChatCompletionRaw(prompt, {
-        modelId: effectiveModelId,
-      });
-
-      const parsed = parseNovelChapterDraft(result);
-      if (parsed) {
-        setNovelChapterResult(parsed);
-        setNovelChapters(prev => [...prev, parsed]);
-        setNextChapterIdea('');
-        setNextChapterOutline('');
-        setCurrentChapterCopied(false);
-        setCurrentChapterCopyError('');
-      } else {
-        setFastError(language === 'zh' ? '解析章节失败' : 'Failed to parse chapter');
-      }
-    } catch (error: any) {
-      console.error('[NovelModelError]', error);
-      setFastError(error.message || '生成失败');
-    } finally {
-      setFastLoading(false);
-    }
-  };
-
-  // 创建章节队列
-  const handleCreateNovelChapterQueue = () => {
-    // 检查前置条件，不要 silent return
-    if (!novelProject) {
-      setNovelError(language === 'zh' ? '请先生成小说设定' : 'Please generate novel setup first');
-      return;
-    }
-    if (!novelChapterResult?.content?.trim()) {
-      setNovelError(language === 'zh' ? '请先生成第一章，再继续生成后续章节' : 'Please generate first chapter first');
-      return;
-    }
-
-    const lastChapterNo = novelChapters.length > 0
-      ? Math.max(...novelChapters.map(c => c.chapterNo))
-      : 0;
-
-    // 保存创建时的用户后续要求
-    const userDirection = buildNovelUserDirectionText();
-
-    const queueItems: NovelChapterQueueItem[] = [];
+    const lastChapterNo = Math.max(...novelChapters.map(c => c.chapterNo));
     const count = Math.min(batchChapterCount, novelProject.chapters.length - lastChapterNo);
+
+    if (count <= 0) {
+      setFastError(language === 'zh' ? '所有章节已生成完毕' : 'All chapters have been generated');
+      setFastLoading(false);
+      return;
+    }
+
+    // 使用工作副本避免 React state 闭包问题
+    let workingChapters = [...novelChapters];
+    const userDirection = buildNovelUserDirectionText();
 
     for (let i = 0; i < count; i++) {
       const chapterNo = lastChapterNo + i + 1;
       const plan = novelProject.chapters.find(c => c.chapterNo === chapterNo);
 
-      queueItems.push({
-        id: `queue_${Date.now()}_${i}`,
-        chapterNo,
-        title: plan?.title || `第 ${chapterNo} 章`,
-        outline: plan ? `章节标题：${plan.title}\n本章目标：${plan.goal}\n主要事件：${plan.mainEvent}\n冲突点：${plan.conflict}\n结尾钩子：${plan.hook}` : '',
-        userIdea: batchChapterIdea,
-        userDirection,
-        status: 'pending',
-      });
-    }
-
-    setNovelChapterQueue(queueItems);
-  };
-
-  // 执行章节队列
-  const handleRunNovelChapterQueue = async () => {
-    // 检查前置条件，不要 silent return
-    if (!novelProject) {
-      setNovelError(language === 'zh' ? '请先生成小说设定' : 'Please generate novel setup first');
-      return;
-    }
-    if (!novelChapterResult?.content?.trim()) {
-      setNovelError(language === 'zh' ? '请先生成第一章，再继续生成后续章节' : 'Please generate first chapter first');
-      return;
-    }
-    if (novelChapterQueue.length === 0) {
-      setNovelError(language === 'zh' ? '请先创建章节队列' : 'Please create chapter queue first');
-      return;
-    }
-    if (!apiKey) {
-      setNovelError(language === 'zh' ? '请先配置 API Key' : 'Please configure API Key first');
-      return;
-    }
-    if (!effectiveModelId) {
-      setNovelError(language === 'zh' ? '请先选择生成模型' : 'Please select a model first');
-      return;
-    }
-
-    setIsNovelQueueRunning(true);
-
-    // 使用工作副本避免 React state 闭包问题
-    let workingChapters = [...novelChapters];
-    let hasFailed = false;
-    let generatedCount = 0;
-
-    for (let i = 0; i < novelChapterQueue.length; i++) {
-      const item = novelChapterQueue[i];
-      if (item.status !== 'pending') continue;
-
-      // 标记为运行中
-      setNovelChapterQueue(prev => prev.map(q =>
-        q.id === item.id ? { ...q, status: 'running' as const } : q
-      ));
-
       try {
-        // 优先使用队列项保存的 userDirection，其次使用当前输入
-        const currentUserDirection = buildNovelUserDirectionText();
-        const effectiveUserDirection = item.userDirection || currentUserDirection;
-
         const prompt = buildNovelContinueChapterPrompt({
           novelProject,
-          chapters: workingChapters, // 使用工作副本
-          nextChapterIdea: batchChapterIdea || item.userIdea,
-          nextChapterOutline: item.outline,
-          userDirection: effectiveUserDirection,
+          chapters: workingChapters,
+          nextChapterIdea: workbenchInput || '',
+          nextChapterOutline: plan ? `章节标题：${plan.title}\n本章目标：${plan.goal}\n主要事件：${plan.mainEvent}\n冲突点：${plan.conflict}\n结尾钩子：${plan.hook}` : '',
+          userDirection,
           targetWordsPerChapter,
         });
 
-        console.log('[NovelGenerateStep]', {
-          step: 'queue-chapter',
-          chapterNo: item.chapterNo,
-          effectiveModelId,
-          selectedWritingModelId,
-          promptLength: prompt.length,
-          workingChaptersCount: workingChapters.length,
-          hasUserDirection: !!effectiveUserDirection?.trim(),
-          userDirectionLength: effectiveUserDirection?.length || 0,
-        });
+        console.log('[BatchGenerate]', { chapterNo, step: i + 1, total: count });
 
-        const result = await callChatCompletionRaw(prompt, {
-          modelId: effectiveModelId,
-        });
-
+        const result = await callChatCompletionRaw(prompt, { modelId: effectiveModelId });
         const parsed = parseNovelChapterDraft(result);
+
         if (parsed) {
-          // 更新工作副本
           workingChapters = [...workingChapters, parsed];
-          generatedCount += 1;
-
-          // 更新 React state
-          setNovelChapters(workingChapters);
+          setNovelChapters(prev => [...prev, parsed]);
           setNovelChapterResult(parsed);
-          setCurrentChapterCopied(false);
-          setCurrentChapterCopyError('');
-
-          // 标记完成
-          setNovelChapterQueue(prev => prev.map(q =>
-            q.id === item.id ? { ...q, status: 'done' as const, result: parsed } : q
-          ));
         } else {
-          throw new Error(language === 'zh' ? '章节解析失败' : 'Chapter parsing failed');
+          console.warn('[BatchGenerate] Failed to parse chapter', chapterNo);
         }
       } catch (error: any) {
-        console.error('[NovelQueueError]', error);
-        hasFailed = true;
-        // 标记失败
-        setNovelChapterQueue(prev => prev.map(q =>
-          q.id === item.id ? { ...q, status: 'failed' as const, error: error.message } : q
-        ));
-        // 停止队列（小说章节有连续性，失败后不继续）
+        console.error('[BatchGenerate] Error at chapter', chapterNo, error);
+        setFastError(`${language === 'zh' ? '生成第' : 'Failed to generate chapter '}${chapterNo}${language === 'zh' ? '章时出错' : ''}: ${error.message}`);
         break;
       }
     }
 
-    setIsNovelQueueRunning(false);
-
-    // 批量生成完成后自动展开完整小说稿
-    if (!hasFailed && generatedCount > 0) {
-      setShowFullNovelReader(true);
-    }
-  };
-
-  // 重试队列项
-  const handleRetryNovelQueueItem = async (itemId: string) => {
-    // 检查前置条件，不要 silent return
-    if (!novelProject) {
-      setNovelError(language === 'zh' ? '请先生成小说设定' : 'Please generate novel setup first');
-      return;
-    }
-    if (!novelChapterResult?.content?.trim()) {
-      setNovelError(language === 'zh' ? '请先生成第一章，再继续生成后续章节' : 'Please generate first chapter first');
-      return;
-    }
-    if (!apiKey) {
-      setNovelError(language === 'zh' ? '请先配置 API Key' : 'Please configure API Key first');
-      return;
-    }
-    if (!effectiveModelId) {
-      setNovelError(language === 'zh' ? '请先选择生成模型' : 'Please select a model first');
-      return;
-    }
-
-    const item = novelChapterQueue.find(q => q.id === itemId);
-    if (!item) {
-      setNovelError(language === 'zh' ? '队列项不存在' : 'Queue item not found');
-      return;
-    }
-
-    setNovelChapterQueue(prev => prev.map(q =>
-      q.id === itemId ? { ...q, status: 'running' as const, error: undefined } : q
-    ));
-
-    try {
-      // 优先使用队列项保存的 userDirection，其次使用当前输入
-      const currentUserDirection = buildNovelUserDirectionText();
-      const effectiveUserDirection = item.userDirection || currentUserDirection;
-
-      // 使用最新的章节列表
-      const prompt = buildNovelContinueChapterPrompt({
-        novelProject,
-        chapters: novelChapters,
-        nextChapterIdea: item.userIdea,
-        nextChapterOutline: item.outline,
-        userDirection: effectiveUserDirection,
-        targetWordsPerChapter,
-      });
-
-      console.log('[NovelGenerateStep]', {
-        step: 'retry-chapter',
-        chapterNo: item.chapterNo,
-        effectiveModelId,
-        selectedWritingModelId,
-        promptLength: prompt.length,
-        hasUserDirection: !!effectiveUserDirection?.trim(),
-        userDirectionLength: effectiveUserDirection?.length || 0,
-      });
-
-      const result = await callChatCompletionRaw(prompt, {
-        modelId: effectiveModelId,
-      });
-
-      const parsed = parseNovelChapterDraft(result);
-      if (parsed) {
-        setNovelChapters(prev => {
-          const newChapters = [...prev];
-          const existingIndex = newChapters.findIndex(c => c.chapterNo === parsed.chapterNo);
-          if (existingIndex >= 0) {
-            newChapters[existingIndex] = parsed;
-          } else {
-            newChapters.push(parsed);
-          }
-          return newChapters.sort((a, b) => a.chapterNo - b.chapterNo);
-        });
-        setNovelChapterResult(parsed);
-        setCurrentChapterCopied(false);
-        setCurrentChapterCopyError('');
-        setNovelChapterQueue(prev => prev.map(q =>
-          q.id === itemId ? { ...q, status: 'done' as const, result: parsed } : q
-        ));
-      } else {
-        throw new Error(language === 'zh' ? '章节解析失败' : 'Chapter parsing failed');
-      }
-    } catch (error: any) {
-      console.error('[NovelRetryError]', error);
-      setNovelChapterQueue(prev => prev.map(q =>
-        q.id === itemId ? { ...q, status: 'failed' as const, error: error.message } : q
-      ));
-    }
-  };
-
-  // 删除队列项
-  const handleRemoveNovelQueueItem = (itemId: string) => {
-    setNovelChapterQueue(prev => prev.filter(q => q.id !== itemId));
+    setWorkbenchInput('');
+    setFastLoading(false);
   };
 
   // 更新小说企划字段
@@ -1467,8 +1149,6 @@ export default function SuperWritingTab() {
 
     setRewriteLoading(true);
     setRewriteError('');
-    setNovelChapterRevisionCopyError('');
-    setNovelChapterRevisionCopied(false);
 
     try {
       const prompt = buildNovelRewritePrompt(rewriteType, textToRewrite);
@@ -1507,63 +1187,6 @@ export default function SuperWritingTab() {
       );
     } finally {
       setRewriteLoading(false);
-    }
-  };
-
-  // 应用候选结果到当前章节
-  const handleApplyNovelChapterRevision = () => {
-    if (!novelChapterRevision) return;
-
-    // 根据 chapterNo 更新 novelChapters 中对应章节
-    setNovelChapters(prev =>
-      prev.map(chapter =>
-        chapter.chapterNo === novelChapterRevision.chapterNo
-          ? { ...chapter, content: novelChapterRevision.content }
-          : chapter
-      )
-    );
-
-    // 如果 novelChapterResult 正好是同一章，同步更新
-    setNovelChapterResult(prev =>
-      prev && prev.chapterNo === novelChapterRevision.chapterNo
-        ? { ...prev, content: novelChapterRevision.content }
-        : prev
-    );
-
-    // 清空候选结果
-    setNovelChapterRevision(null);
-    setNovelChapterRevisionCopied(false);
-    setNovelChapterRevisionCopyError('');
-    setCurrentChapterCopied(false);
-    setCurrentChapterCopyError('');
-  };
-
-  // 放弃候选结果
-  const handleDiscardNovelChapterRevision = () => {
-    setNovelChapterRevision(null);
-    setNovelChapterRevisionCopied(false);
-    setNovelChapterRevisionCopyError('');
-  };
-
-  // 复制候选结果
-  const handleCopyNovelChapterRevision = async () => {
-    if (!novelChapterRevision?.content?.trim()) {
-      setNovelChapterRevisionCopyError(language === 'zh' ? '没有可复制的内容' : 'No content to copy');
-      return;
-    }
-
-    try {
-      await navigator.clipboard.writeText(novelChapterRevision.content);
-      setNovelChapterRevisionCopied(true);
-      setNovelChapterRevisionCopyError('');
-      window.setTimeout(() => setNovelChapterRevisionCopied(false), 1500);
-    } catch (error) {
-      console.error('[NovelChapterRevisionCopyError]', error);
-      setNovelChapterRevisionCopyError(
-        language === 'zh'
-          ? '复制失败，请手动选择文本复制'
-          : 'Copy failed, please copy manually'
-      );
     }
   };
 
@@ -2787,181 +2410,6 @@ export default function SuperWritingTab() {
               </div>
             )}
 
-            {/* 章节工作台 - 在有章节规划时显示 */}
-            {novelProject && novelProject.chapters && novelProject.chapters.length > 0 && (
-              <div style={{
-                marginTop: 16,
-                padding: 16,
-                background: 'var(--bg-tertiary)',
-                borderRadius: 8,
-                border: '1px solid var(--border)',
-              }}>
-                {/* 工作台标题和进度 */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                  <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>
-                    📋 {language === 'zh' ? '章节工作台' : 'Chapter Workbench'}
-                  </div>
-                  <div style={{ fontSize: 12, color: 'var(--accent)' }}>
-                    {language === 'zh'
-                      ? `已生成 ${novelChapters.length} / ${novelProject.chapters.length} 章`
-                      : `${novelChapters.length} / ${novelProject.chapters.length} chapters`}
-                  </div>
-                </div>
-
-                {/* 说明文案 */}
-                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 12, lineHeight: 1.5 }}>
-                  {language === 'zh'
-                    ? '章节规划是故事路线图。新增人物或剧情请先整合进后续规划，再生成正文。已生成章节默认不会被修改。'
-                    : 'Chapter outline is the story roadmap. Add new plots to the future outline before generating. Generated chapters will not be changed by default.'}
-                </div>
-
-                {/* 章节规划列表 */}
-                <div style={{
-                  maxHeight: 200,
-                  overflow: 'auto',
-                  marginBottom: 12,
-                  background: 'var(--bg-primary)',
-                  borderRadius: 6,
-                  padding: 8,
-                }}>
-                  {novelProject.chapters.map((ch) => {
-                    const isGenerated = novelChapters.some(c => c.chapterNo === ch.chapterNo);
-                    const isSelected = selectedChapterNo === ch.chapterNo;
-                    return (
-                      <div
-                        key={ch.id || ch.chapterNo}
-                        onClick={() => setSelectedChapterNo(isSelected ? null : ch.chapterNo)}
-                        style={{
-                          padding: '8px 10px',
-                          marginBottom: 4,
-                          background: isSelected ? 'var(--accent-dim)' : 'transparent',
-                          borderRadius: 4,
-                          cursor: 'pointer',
-                          borderLeft: isGenerated ? '3px solid var(--accent)' : '3px solid transparent',
-                        }}
-                      >
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)' }}>
-                            {language === 'zh' ? `第${ch.chapterNo}章` : `Ch.${ch.chapterNo}`}：{ch.title || '待定'}
-                          </span>
-                          <span style={{
-                            fontSize: 10,
-                            color: isGenerated ? 'var(--accent)' : 'var(--text-muted)',
-                          }}>
-                            {isGenerated
-                              ? (language === 'zh' ? '已生成' : 'Generated')
-                              : (language === 'zh' ? '待生成' : 'Pending')}
-                          </span>
-                        </div>
-                        {(ch.goal || ch.mainEvent) && (
-                          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>
-                            {ch.goal || ch.mainEvent}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {/* 统一输入框 */}
-                <div style={{ marginBottom: 12 }}>
-                  <textarea
-                    value={workbenchInput}
-                    onChange={(e) => setWorkbenchInput(e.target.value)}
-                    placeholder={language === 'zh'
-                      ? '填写你的要求：可以是本章写作要求，也可以是要加入后续的新人物/新剧情。'
-                      : 'Enter your instruction: chapter writing request, new character, or future plot.'}
-                    rows={3}
-                    style={{
-                      width: '100%',
-                      padding: 10,
-                      background: 'var(--bg-primary)',
-                      border: '1px solid var(--border)',
-                      borderRadius: 6,
-                      color: 'var(--text-primary)',
-                      fontSize: 12,
-                      resize: 'vertical',
-                    }}
-                  />
-                </div>
-
-                {/* 操作按钮 */}
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  <button
-                    onClick={handleIntegrateFuturePlan}
-                    disabled={fastLoading || !workbenchInput.trim()}
-                    style={{
-                      padding: '8px 12px',
-                      background: 'var(--bg-secondary)',
-                      border: '1px solid var(--border)',
-                      borderRadius: 6,
-                      color: 'var(--text-secondary)',
-                      fontSize: 12,
-                    }}
-                  >
-                    {language === 'zh' ? '整合进后续规划' : 'Integrate'}
-                  </button>
-                  <button
-                    onClick={handleContinueNextChapter}
-                    disabled={fastLoading || !canContinueNovel}
-                    className="btn-primary"
-                    style={{ padding: '8px 12px', fontSize: 12 }}
-                  >
-                    {fastLoading ? <RefreshCw size={12} className="spin" /> : <Sparkles size={12} />}
-                    {language === 'zh' ? '生成下一章' : 'Next Chapter'}
-                  </button>
-                  <button
-                    onClick={handleRegenerateChapter}
-                    disabled={fastLoading || !selectedChapterNo}
-                    style={{
-                      padding: '8px 12px',
-                      background: 'var(--bg-secondary)',
-                      border: '1px solid var(--border)',
-                      borderRadius: 6,
-                      color: selectedChapterNo ? 'var(--text-secondary)' : 'var(--text-muted)',
-                      fontSize: 12,
-                    }}
-                  >
-                    {language === 'zh' ? '重新生成本章' : 'Regenerate'}
-                  </button>
-                </div>
-
-                {/* 批量生成按钮 */}
-                {canContinueNovel && (
-                  <div style={{ marginTop: 12, display: 'flex', gap: 8, alignItems: 'center' }}>
-                    <select
-                      value={batchChapterCount}
-                      onChange={(e) => setBatchChapterCount(Number(e.target.value))}
-                      style={{
-                        padding: '6px 8px',
-                        background: 'var(--bg-primary)',
-                        border: '1px solid var(--border)',
-                        borderRadius: 6,
-                        color: 'var(--text-primary)',
-                        fontSize: 12,
-                      }}
-                    >
-                      <option value={3}>{language === 'zh' ? '后续 3 章' : 'Next 3'}</option>
-                      <option value={5}>{language === 'zh' ? '后续 5 章' : 'Next 5'}</option>
-                      <option value={10}>{language === 'zh' ? '后续 10 章' : 'Next 10'}</option>
-                    </select>
-                    <button
-                      onClick={handleCreateNovelChapterQueue}
-                      style={{
-                        padding: '6px 12px',
-                        background: 'var(--accent)',
-                        border: 'none',
-                        borderRadius: 6,
-                        color: 'white',
-                        fontSize: 12,
-                      }}
-                    >
-                      {language === 'zh' ? '按当前规划批量生成' : 'Batch Generate'}
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
           </div>
         )}
 
@@ -3061,387 +2509,204 @@ export default function SuperWritingTab() {
               </div>
             )}
 
-            {/* 续写设置区 - 仅在第一章成功后显示 */}
-            {canContinueNovel && (
-              <div style={{ marginBottom: 12, padding: 12, background: 'var(--bg-tertiary)', borderRadius: 8 }}>
-                <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 8 }}>
-                  {language === 'zh' ? '下一章你想看什么？（可不填，AI 自动续写）' : 'What do you want next? (Optional)'}
+            {/* 章节工作台 - 始终显示在最新章节正文下面 */}
+            {novelProject && novelProject.chapters && novelProject.chapters.length > 0 && (
+              <div style={{
+                marginTop: 16,
+                padding: 16,
+                background: 'var(--bg-tertiary)',
+                borderRadius: 8,
+                border: '1px solid var(--border)',
+              }}>
+                {/* 工作台标题和进度 */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>
+                    📋 {language === 'zh' ? '章节工作台' : 'Chapter Workbench'}
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--accent)' }}>
+                    {language === 'zh'
+                      ? `已生成 ${novelChapters.length} / ${novelProject.chapters.length} 章`
+                      : `${novelChapters.length} / ${novelProject.chapters.length} chapters`}
+                  </div>
                 </div>
-                <textarea
-                  value={nextChapterIdea}
-                  onChange={(e) => setNextChapterIdea(e.target.value)}
-                  placeholder={language === 'zh' ? '例如：让他们误会加深 / 写甜一点 / 让反派出现' : 'e.g., More misunderstandings / Sweeter / Introduce villain'}
-                  rows={2}
-                  style={{
-                    width: '100%',
-                    padding: 8,
-                    background: 'var(--bg-primary)',
-                    border: '1px solid var(--border)',
-                    borderRadius: 6,
-                    color: 'var(--text-primary)',
-                    fontSize: 12,
-                    resize: 'vertical',
-                  }}
-                />
-                <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+
+                {/* 说明文案 */}
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 12, lineHeight: 1.5 }}>
+                  {language === 'zh'
+                    ? '章节规划是故事路线图。新增人物或剧情请先整合进后续规划，再生成正文。已生成章节默认不会被修改。'
+                    : 'Chapter outline is the story roadmap. Add new plots to the future outline before generating. Generated chapters will not be changed by default.'}
+                </div>
+
+                {/* 当前状态 */}
+                {novelChapters.length > 0 ? (
+                  <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 8 }}>
+                    {language === 'zh'
+                      ? `当前最新章节：第 ${Math.max(...novelChapters.map(c => c.chapterNo))} 章`
+                      : `Latest: Chapter ${Math.max(...novelChapters.map(c => c.chapterNo))}`}
+                    {' · '}
+                    {language === 'zh'
+                      ? `下一章：第 ${Math.max(...novelChapters.map(c => c.chapterNo)) + 1} 章`
+                      : `Next: Chapter ${Math.max(...novelChapters.map(c => c.chapterNo)) + 1}`}
+                  </div>
+                ) : (
+                  <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 8 }}>
+                    {language === 'zh'
+                      ? '当前还没有生成正文 · 下一章：第 1 章'
+                      : 'No chapters generated yet · Next: Chapter 1'}
+                  </div>
+                )}
+
+                {/* 下一章规划预览 */}
+                {(() => {
+                  const nextNo = novelChapters.length > 0
+                    ? Math.max(...novelChapters.map(c => c.chapterNo)) + 1
+                    : 1;
+                  const nextPlan = novelProject.chapters.find(c => c.chapterNo === nextNo);
+                  if (nextPlan) {
+                    return (
+                      <div style={{
+                        padding: 10,
+                        background: 'var(--bg-primary)',
+                        borderRadius: 6,
+                        marginBottom: 12,
+                        borderLeft: '3px solid var(--accent)',
+                      }}>
+                        <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 4 }}>
+                          {language === 'zh' ? `下一章规划：第 ${nextNo} 章《${nextPlan.title}》` : `Next Chapter Plan: Ch.${nextNo} "${nextPlan.title}"`}
+                        </div>
+                        {nextPlan.goal && (
+                          <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                            {language === 'zh' ? '目标' : 'Goal'}：{nextPlan.goal}
+                          </div>
+                        )}
+                        {nextPlan.conflict && (
+                          <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                            {language === 'zh' ? '冲突' : 'Conflict'}：{nextPlan.conflict}
+                          </div>
+                        )}
+                        {nextPlan.hook && (
+                          <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                            {language === 'zh' ? '钩子' : 'Hook'}：{nextPlan.hook}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
+
+                {/* 统一输入框 */}
+                <div style={{ marginBottom: 8 }}>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>
+                    {language === 'zh' ? '你的要求' : 'Your Request'}
+                  </div>
+                  <textarea
+                    value={workbenchInput}
+                    onChange={(e) => setWorkbenchInput(e.target.value)}
+                    placeholder={language === 'zh'
+                      ? '可以填写本章写作要求，也可以填写要加入后续的新人物/新剧情。例如：让反派出场、增加误会、加入一个神秘医生。'
+                      : 'Chapter writing request, new character, or future plot. E.g., introduce the villain, add misunderstandings, add a mysterious doctor.'}
+                    rows={3}
+                    style={{
+                      width: '100%',
+                      padding: 10,
+                      background: 'var(--bg-primary)',
+                      border: '1px solid var(--border)',
+                      borderRadius: 6,
+                      color: 'var(--text-primary)',
+                      fontSize: 12,
+                      resize: 'vertical',
+                    }}
+                  />
+                  <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}>
+                    {language === 'zh'
+                      ? '如果只是想影响下一章，直接点击生成下一章；如果是新人物、新支线或长期剧情，请先点击整合进后续规划。'
+                      : 'For one-time changes, click "Next Chapter"; for new characters or long-term plots, click "Integrate" first.'}
+                  </div>
+                </div>
+
+                {/* 四个主要操作按钮 */}
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+                  <button
+                    onClick={handleIntegrateFuturePlan}
+                    disabled={fastLoading || !workbenchInput.trim()}
+                    style={{
+                      padding: '8px 12px',
+                      background: 'var(--bg-secondary)',
+                      border: '1px solid var(--border)',
+                      borderRadius: 6,
+                      color: workbenchInput.trim() ? 'var(--text-secondary)' : 'var(--text-muted)',
+                      fontSize: 12,
+                    }}
+                  >
+                    {language === 'zh' ? '整合进后续规划' : 'Integrate'}
+                  </button>
                   <button
                     onClick={handleContinueNextChapter}
-                    disabled={fastLoading}
+                    disabled={fastLoading || !(novelChapters.length > 0 || novelProject)}
                     className="btn-primary"
                     style={{ padding: '8px 12px', fontSize: 12 }}
                   >
                     {fastLoading ? <RefreshCw size={12} className="spin" /> : <Sparkles size={12} />}
-                    {language === 'zh' ? '智能续写下一章' : 'Continue'}
+                    {language === 'zh' ? '生成下一章' : 'Next Chapter'}
                   </button>
                   <button
-                    onClick={handleGenerateNextOutline}
-                    disabled={fastLoading}
+                    onClick={handleRegenerateChapter}
+                    disabled={fastLoading || !selectedChapterNo}
                     style={{
                       padding: '8px 12px',
-                      background: 'var(--bg-primary)',
+                      background: 'var(--bg-secondary)',
                       border: '1px solid var(--border)',
                       borderRadius: 6,
-                      color: 'var(--text-secondary)',
+                      color: selectedChapterNo ? 'var(--text-secondary)' : 'var(--text-muted)',
                       fontSize: 12,
                     }}
                   >
-                    {language === 'zh' ? '先生成大纲' : 'Outline First'}
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* 后续内容补充（选填） - 仅在第一章成功后显示 */}
-            {canContinueNovel && (
-              <div style={{ marginBottom: 12, padding: 12, background: 'var(--bg-tertiary)', borderRadius: 8 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                  <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)' }}>
-                    {language === 'zh' ? '后续内容补充（选填）' : 'Additional Notes (Optional)'}
-                  </span>
-                  <button
-                    onClick={() => {
-                      setNextChapterIdea('');
-                      setNovelNewCharacterNote('');
-                      setNovelNewPlotNote('');
-                      setBatchChapterIdea('');
-                      setNextChapterOutline('');
-                    }}
-                    style={{
-                      background: 'transparent',
-                      border: 'none',
-                      color: 'var(--text-muted)',
-                      fontSize: 11,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    {language === 'zh' ? '清空' : 'Clear'}
+                    {language === 'zh' ? '重新生成本章' : 'Regenerate'}
                   </button>
                 </div>
 
-                {/* 角色添加 */}
-                <div style={{ marginBottom: 8 }}>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>
-                    {language === 'zh' ? '角色添加（选填）' : 'Add Character (Optional)'}
-                  </div>
-                  <textarea
-                    value={novelNewCharacterNote}
-                    onChange={(e) => setNovelNewCharacterNote(e.target.value)}
-                    placeholder={language === 'zh'
-                      ? '例如：顾沉，32岁，心理咨询师，女主大学时期的学长。表面温和可靠，实际在调查男主家族。希望他第一次出场带来压迫感和暧昧感。'
-                      : 'Example: Ethan, 32, a therapist and the heroine\'s senior from college. He appears gentle and reliable, but is secretly investigating the hero\'s family. His first appearance should feel tense and ambiguous.'}
-                    rows={2}
-                    style={{
-                      width: '100%',
-                      padding: 8,
-                      background: 'var(--bg-primary)',
-                      border: '1px solid var(--border)',
-                      borderRadius: 6,
-                      color: 'var(--text-primary)',
-                      fontSize: 12,
-                      resize: 'vertical',
-                    }}
-                  />
-                </div>
-
-                {/* 新剧情加入 */}
-                <div>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>
-                    {language === 'zh' ? '新剧情加入（选填）' : 'Add New Plot (Optional)'}
-                  </div>
-                  <textarea
-                    value={novelNewPlotNote}
-                    onChange={(e) => setNovelNewPlotNote(e.target.value)}
-                    placeholder={language === 'zh'
-                      ? '例如：顾沉第一次出场；女主和顾沉单独谈话；男主看到后产生误会；结尾顾沉收到一条神秘短信。'
-                      : 'Example: Ethan appears for the first time; the heroine talks to him alone; the hero sees them and misunderstands; Ethan receives a mysterious text message at the end.'}
-                    rows={2}
-                    style={{
-                      width: '100%',
-                      padding: 8,
-                      background: 'var(--bg-primary)',
-                      border: '1px solid var(--border)',
-                      borderRadius: 6,
-                      color: 'var(--text-primary)',
-                      fontSize: 12,
-                      resize: 'vertical',
-                    }}
-                  />
-                </div>
-              </div>
-            )}
-
-            {/* 下一章大纲 - 仅在第一章成功后显示 */}
-            {canContinueNovel && nextChapterOutline && (
-              <div style={{ marginBottom: 12, padding: 12, background: 'var(--bg-tertiary)', borderRadius: 8 }}>
-                <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 8 }}>
-                  {language === 'zh' ? '下一章大纲（可编辑）' : 'Next Chapter Outline (Editable)'}
-                </div>
-                <textarea
-                  value={nextChapterOutline}
-                  onChange={(e) => setNextChapterOutline(e.target.value)}
-                  rows={6}
-                  style={{
-                    width: '100%',
-                    padding: 8,
-                    background: 'var(--bg-primary)',
-                    border: '1px solid var(--border)',
-                    borderRadius: 6,
-                    color: 'var(--text-primary)',
-                    fontSize: 12,
-                    resize: 'vertical',
-                  }}
-                />
-                <button
-                  onClick={handleWriteFromNextOutline}
-                  disabled={fastLoading}
-                  className="btn-primary"
-                  style={{ marginTop: 8, padding: '8px 12px', fontSize: 12 }}
-                >
-                  {language === 'zh' ? '根据大纲写正文' : 'Write from Outline'}
-                </button>
-              </div>
-            )}
-
-            {/* 批量生成章节队列 - 仅在第一章成功后显示 */}
-            {canContinueNovel && (
-              <div style={{ marginBottom: 12, padding: 12, background: 'var(--bg-tertiary)', borderRadius: 8 }}>
-                <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 8 }}>
-                  📚 {language === 'zh' ? '批量生成后续章节' : 'Batch Generate'}
-                </div>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8 }}>
-                  {language === 'zh' ? 'AI 会按章节规划顺序生成，自动参考前文避免剧情断裂。' : 'AI generates in order, referencing previous chapters.'}
-                </div>
-                <div style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
-                  <select
-                    value={batchChapterCount}
-                    onChange={(e) => setBatchChapterCount(Number(e.target.value))}
-                    style={{ padding: '6px 8px', background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 12 }}
-                  >
-                    <option value={3}>{language === 'zh' ? '后续 3 章' : 'Next 3'}</option>
-                    <option value={5}>{language === 'zh' ? '后续 5 章' : 'Next 5'}</option>
-                    <option value={10}>{language === 'zh' ? '后续 10 章' : 'Next 10'}</option>
-                  </select>
-                  <input
-                    type="text"
-                    value={batchChapterIdea}
-                    onChange={(e) => setBatchChapterIdea(e.target.value)}
-                    placeholder={language === 'zh' ? '这一批想看什么？（可选）' : 'Batch idea (optional)'}
-                    style={{ flex: 1, padding: '6px 8px', background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 12 }}
-                  />
-                </div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <button
-                    onClick={handleCreateNovelChapterQueue}
-                    style={{
-                      padding: '8px 12px',
-                      background: 'var(--bg-primary)',
-                      border: '1px solid var(--border)',
-                      borderRadius: 6,
-                      color: 'var(--text-secondary)',
-                      fontSize: 12,
-                    }}
-                  >
-                    {language === 'zh' ? '生成队列' : 'Create Queue'}
-                  </button>
-                {canContinueNovel && novelChapterQueue.length > 0 && (
-                  <button
-                    onClick={handleRunNovelChapterQueue}
-                    disabled={isNovelQueueRunning}
-                    className="btn-primary"
-                    style={{ padding: '8px 12px', fontSize: 12 }}
-                  >
-                    {isNovelQueueRunning ? <RefreshCw size={12} className="spin" /> : null}
-                    {language === 'zh' ? '开始批量生成' : 'Run Queue'}
-                  </button>
-                )}
-              </div>
-            </div>
-            )}
-
-            {/* 章节队列显示 - 仅在第一章成功后显示 */}
-            {canContinueNovel && novelChapterQueue.length > 0 && (
-              <div style={{ marginBottom: 12, padding: 12, background: 'var(--bg-tertiary)', borderRadius: 8 }}>
-                <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 8 }}>
-                  {language === 'zh' ? `章节队列 (${novelChapterQueue.length})` : `Queue (${novelChapterQueue.length})`}
-                </div>
-                {novelChapterQueue.map((item) => (
-                  <div key={item.id} style={{
-                    padding: 8,
-                    background: 'var(--bg-primary)',
-                    borderRadius: 6,
-                    marginBottom: 6,
-                    border: item.status === 'failed' ? '1px solid var(--danger)' : '1px solid var(--border)',
-                  }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                      <span style={{ fontSize: 11, fontWeight: 500 }}>
-                        {language === 'zh' ? `第 ${item.chapterNo} 章` : `Ch. ${item.chapterNo}`}：{item.title}
-                      </span>
-                      <span style={{
-                        fontSize: 10,
-                        color: item.status === 'done' ? 'var(--accent)' : item.status === 'failed' ? 'var(--danger)' : 'var(--text-muted)',
-                      }}>
-                        {item.status === 'pending' ? (language === 'zh' ? '待执行' : 'Pending') :
-                         item.status === 'running' ? (language === 'zh' ? '执行中' : 'Running') :
-                         item.status === 'done' ? (language === 'zh' ? '已完成' : 'Done') :
-                         (language === 'zh' ? '失败' : 'Failed')}
-                      </span>
-                    </div>
-                    {item.status === 'failed' && item.error && (
-                      <div style={{ fontSize: 10, color: 'var(--danger)', marginBottom: 4 }}>{item.error}</div>
-                    )}
-                    <div style={{ display: 'flex', gap: 4 }}>
-                      {item.status === 'failed' && (
-                        <button
-                          onClick={() => handleRetryNovelQueueItem(item.id)}
-                          style={{ padding: '2px 6px', background: 'var(--accent)', border: 'none', borderRadius: 4, color: 'white', fontSize: 10 }}
-                        >
-                          {language === 'zh' ? '重试' : 'Retry'}
-                        </button>
-                      )}
-                      <button
-                        onClick={() => handleRemoveNovelQueueItem(item.id)}
-                        style={{ padding: '2px 6px', background: 'transparent', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-muted)', fontSize: 10 }}
-                      >
-                        <X size={10} />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* 正文优化按钮 - 仅在第一章成功后显示 */}
-            {canContinueNovel && (
-              <div style={{ marginBottom: 12 }}>
-                <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <Wand2 size={14} style={{ color: 'var(--accent)' }} />
-                  {language === 'zh' ? '正文优化' : 'Optimize'}
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(80px, 1fr))', gap: 6 }}>
-                  {(Object.keys(NOVEL_REWRITE_NAMES) as NovelRewriteType[]).slice(0, 6).map((rewriteType) => (
-                    <button
-                      key={rewriteType}
-                      onClick={() => handleNovelRewrite(rewriteType, novelChapterResult)}
-                      disabled={rewriteLoading}
+                {/* 批量生成 */}
+                {novelChapters.length > 0 && (
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <select
+                      value={batchChapterCount}
+                      onChange={(e) => setBatchChapterCount(Number(e.target.value))}
                       style={{
                         padding: '6px 8px',
-                        background: 'var(--bg-tertiary)',
+                        background: 'var(--bg-primary)',
                         border: '1px solid var(--border)',
                         borderRadius: 6,
-                        color: 'var(--text-secondary)',
-                        fontSize: 11,
-                        opacity: rewriteLoading ? 0.6 : 1,
+                        color: 'var(--text-primary)',
+                        fontSize: 12,
                       }}
                     >
-                      {language === 'zh' ? NOVEL_REWRITE_NAMES[rewriteType].zh : NOVEL_REWRITE_NAMES[rewriteType].en}
+                      <option value={1}>1 {language === 'zh' ? '章' : 'chapter'}</option>
+                      <option value={3}>3 {language === 'zh' ? '章' : 'chapters'}</option>
+                      <option value={5}>5 {language === 'zh' ? '章' : 'chapters'}</option>
+                    </select>
+                    <button
+                      onClick={handleRunBatchGenerate}
+                      disabled={fastLoading}
+                      style={{
+                        padding: '6px 12px',
+                        background: 'var(--accent)',
+                        border: 'none',
+                        borderRadius: 6,
+                        color: 'white',
+                        fontSize: 12,
+                      }}
+                    >
+                      {language === 'zh' ? '按当前规划批量生成' : 'Batch Generate'}
                     </button>
-                  ))}
-                </div>
-                {rewriteError && (
-                  <div style={{ color: 'var(--danger)', fontSize: 12, marginTop: 8 }}>
-                    {rewriteError}
                   </div>
                 )}
-              </div>
-            )}
 
-            {/* 候选结果预览区 */}
-            {novelChapterRevision && (
-              <div style={{
-                marginTop: 12,
-                padding: 12,
-                background: 'var(--bg-secondary)',
-                border: '1px solid var(--accent)',
-                borderRadius: 12,
-              }}>
-                <div style={{ fontWeight: 600, marginBottom: 8, color: 'var(--text-primary)' }}>
+                {/* 提示 */}
+                <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 12 }}>
                   {language === 'zh'
-                    ? `候选结果：第 ${novelChapterRevision.chapterNo} 章 · ${novelChapterRevision.actionLabel}`
-                    : `Candidate: Chapter ${novelChapterRevision.chapterNo} · ${novelChapterRevision.actionLabel}`}
-                </div>
-                <pre style={{
-                  whiteSpace: 'pre-wrap',
-                  wordBreak: 'break-word',
-                  fontSize: 13,
-                  lineHeight: 1.6,
-                  color: 'var(--text-secondary)',
-                  maxHeight: 300,
-                  overflow: 'auto',
-                  margin: 0,
-                  padding: 8,
-                  background: 'var(--bg-tertiary)',
-                  borderRadius: 8,
-                }}>
-                  {novelChapterRevision.content}
-                </pre>
-                {novelChapterRevisionCopyError && (
-                  <div style={{ color: 'var(--danger)', fontSize: 12, marginTop: 8 }}>
-                    {novelChapterRevisionCopyError}
-                  </div>
-                )}
-                <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
-                  <button
-                    onClick={handleApplyNovelChapterRevision}
-                    style={{
-                      padding: '8px 16px',
-                      background: 'var(--accent)',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: 8,
-                      fontSize: 13,
-                      fontWeight: 500,
-                    }}
-                  >
-                    {language === 'zh' ? '应用到当前章节' : 'Apply'}
-                  </button>
-                  <button
-                    onClick={handleCopyNovelChapterRevision}
-                    style={{
-                      padding: '8px 16px',
-                      background: 'var(--bg-tertiary)',
-                      color: novelChapterRevisionCopied ? 'var(--accent)' : 'var(--text-secondary)',
-                      border: '1px solid var(--border)',
-                      borderRadius: 8,
-                      fontSize: 13,
-                    }}
-                  >
-                    {novelChapterRevisionCopied
-                      ? (language === 'zh' ? '已复制' : 'Copied')
-                      : (language === 'zh' ? '复制候选结果' : 'Copy')}
-                  </button>
-                  <button
-                    onClick={handleDiscardNovelChapterRevision}
-                    style={{
-                      padding: '8px 16px',
-                      background: 'transparent',
-                      color: 'var(--text-muted)',
-                      border: '1px solid var(--border)',
-                      borderRadius: 8,
-                      fontSize: 13,
-                    }}
-                  >
-                    {language === 'zh' ? '放弃' : 'Discard'}
-                  </button>
+                    ? '不满意当前章节？填写修改要求后点击「重新生成本章」。'
+                    : 'Not satisfied? Enter your requirements and click "Regenerate".'}
                 </div>
               </div>
             )}
