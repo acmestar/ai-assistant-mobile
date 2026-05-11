@@ -2461,7 +2461,7 @@ export default function SuperWritingTab() {
             </div>
 
             {/* 确认设定并生成第一章按钮 - 仅在第一章未生成或失败时显示 */}
-            {(!novelChapterResult || !novelChapterResult.content?.trim()) && !fastLoading && (
+            {(!novelChapterResult || !novelChapterResult.content?.trim()) && !activeNovelAction && (
               <div style={{ marginTop: 12 }}>
                 {isFirstChapterFailed && (
                   <div style={{ color: 'var(--danger)', fontSize: 12, marginBottom: 8 }}>
@@ -2472,7 +2472,7 @@ export default function SuperWritingTab() {
                 )}
                 <button
                   onClick={handleGenerateFirstChapterFromProject}
-                  disabled={fastLoading}
+                  disabled={!!activeNovelAction}
                   style={{
                     width: '100%',
                     padding: '12px 20px',
@@ -2482,11 +2482,15 @@ export default function SuperWritingTab() {
                     color: 'white',
                     fontSize: 14,
                     fontWeight: 500,
+                    opacity: activeNovelAction ? 0.6 : 1,
+                    cursor: activeNovelAction ? 'not-allowed' : 'pointer',
                   }}
                 >
-                  {isFirstChapterFailed
-                    ? (language === 'zh' ? '重新生成第一章' : 'Regenerate First Chapter')
-                    : (language === 'zh' ? '确认设定并生成第一章' : 'Confirm Setup and Generate Chapter 1')}
+                  {activeNovelAction === 'generatingFirst'
+                    ? (language === 'zh' ? '正在生成...' : 'Generating...')
+                    : (isFirstChapterFailed
+                      ? (language === 'zh' ? '重新生成第一章' : 'Regenerate First Chapter')
+                      : (language === 'zh' ? '确认设定并生成第一章' : 'Confirm Setup and Generate Chapter 1'))}
                 </button>
               </div>
             )}
