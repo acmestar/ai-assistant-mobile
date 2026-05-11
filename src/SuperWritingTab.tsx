@@ -34,6 +34,7 @@ import {
   buildNovelProjectPrompt,
   buildNovelFirstChapterPlainPrompt,
   parseJsonFromModelText,
+  normalizeNovelProject,
 } from './creationUtils';
 import type { CreationMode } from './store';
 import ReactMarkdown from 'react-markdown';
@@ -111,7 +112,6 @@ export default function SuperWritingTab() {
   const [novelProject, setNovelProject] = useState<NovelProject | null>(null);
   const [novelChapterResult, setNovelChapterResult] = useState<NovelChapterDraft | null>(null);
   const [novelChapters, setNovelChapters] = useState<NovelChapterDraft[]>([]);
-  const [novelRawText, setNovelRawText] = useState('');
   const [showAdvancedNovelSettings, setShowAdvancedNovelSettings] = useState(false);
 
   // 小说生成步骤状态
@@ -134,6 +134,13 @@ export default function SuperWritingTab() {
   // 后续剧情控制状态
   const [novelNewCharacterNote, setNovelNewCharacterNote] = useState('');
   const [novelNewPlotNote, setNovelNewPlotNote] = useState('');
+
+  // 小说结构参数
+  const [novelCreationMode, setNovelCreationMode] = useState<'inspiration' | 'opening' | 'full_story'>('inspiration');
+  const [targetChapterCount, setTargetChapterCount] = useState<number>(10);
+  const [targetWordsPerChapter, setTargetWordsPerChapter] = useState<number>(1500);
+  const [protagonistCount, setProtagonistCount] = useState<number>(2);
+  const [supportingCharacterCount, setSupportingCharacterCount] = useState<number>(3);
 
   // 章节队列状态
   const [novelChapterQueue, setNovelChapterQueue] = useState<NovelChapterQueueItem[]>([]);
@@ -229,7 +236,6 @@ export default function SuperWritingTab() {
     setNovelProject(null);
     setNovelChapterResult(null);
     setNovelChapters([]);
-    setNovelRawText('');
     setNovelError('');
     setNovelGenerationStep('idle');
     setFastError('');
@@ -509,6 +515,11 @@ export default function SuperWritingTab() {
     try {
       const projectPrompt = buildNovelProjectPrompt({
         requirement: outlineText,
+        creationMode: novelCreationMode,
+        targetChapterCount,
+        targetWordsPerChapter,
+        protagonistCount,
+        supportingCharacterCount,
       });
 
       console.log('[NovelGenerateStep]', {
@@ -516,25 +527,30 @@ export default function SuperWritingTab() {
         effectiveModelId,
         selectedWritingModelId,
         promptLength: projectPrompt.length,
+        creationMode: novelCreationMode,
+        targetChapterCount,
       });
 
       const rawProjectText = await callChatCompletionRaw(projectPrompt, {
         modelId: effectiveModelId,
       });
 
-      setNovelRawText(rawProjectText);
-
       // 解析 NovelProject
-      const project = parseJsonFromModelText<NovelProject>(rawProjectText);
+      const parsedProject = parseJsonFromModelText<NovelProject>(rawProjectText);
 
-      if (!project) {
-        // 解析失败，显示原始文本 fallback
+      if (!parsedProject) {
+        // 解析失败，显示用户友好错误
         setNovelGenerationStep('error');
-        setNovelError(language === 'zh' ? '小说设定解析失败，已显示模型原始返回' : 'Novel project parsing failed, showing raw output');
+        setNovelError(language === 'zh'
+          ? '小说设定解析失败，请稍后重试，或简化故事描述后再试。'
+          : 'Failed to parse novel plan. Please try again or simplify your story description.');
         setNovelProject(null);
         setFastLoading(false);
         return;
       }
+
+      // 规范化小说企划，确保章节数量符合预期
+      const project = normalizeNovelProject(parsedProject, targetChapterCount);
 
       // 解析成功，只保存设定，不自动生成第一章
       setNovelProject(project);
@@ -545,6 +561,7 @@ export default function SuperWritingTab() {
         title: project.title,
         genre: project.genre,
         chaptersCount: project.chapters?.length || 0,
+        charactersCount: project.characters?.length || 0,
       });
 
     } catch (error: any) {
@@ -591,6 +608,7 @@ export default function SuperWritingTab() {
         requirement: outlineText,
         novelProject: novelProject,
         chapterPlan: novelProject.chapters?.[0],
+        targetWordsPerChapter,
       });
 
       console.log('[NovelGenerateStep]', {
@@ -600,6 +618,7 @@ export default function SuperWritingTab() {
         promptLength: chapterPrompt.length,
         projectTitle: novelProject.title,
         chapterTitle: novelProject.chapters?.[0]?.title,
+        targetWordsPerChapter,
       });
 
       const chapterText = await callChatCompletionRaw(chapterPrompt, {
@@ -1776,13 +1795,147 @@ export default function SuperWritingTab() {
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
                   {language === 'zh'
-                    ? '输入一个你想看的小说想法，AI 会自动补全人物、世界观、大纲和开篇。你可以什么都不改，直接开始阅读；也可以修改主角名字、风格或后续剧情。'
-                    : 'Enter a novel idea, AI will automatically complete characters, world, outline and opening. You can read as-is, or modify protagonist names, style, or plot.'}
+                    ? '输入小说灵感、开头或完整故事梗概，AI 会自动生成人物设定、世界观、大纲和开篇。'
+                    : 'Enter a novel idea, opening, or full story outline. AI will generate characters, world, outline and opening.'}
                 </div>
-                <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 8 }}>
-                  {language === 'zh'
-                    ? '示例：地铁上相爱 / 失眠的心理医生接到来自自己的电话 / 末世里两个敌对阵营的人互相救赎'
-                    : 'Examples: Love on subway / Sleepless therapist receives call from self / Enemies redeem each other in apocalypse'}
+
+                {/* 小说结构参数 */}
+                <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
+                  {/* 创作方式 */}
+                  <div style={{ marginBottom: 10 }}>
+                    <div style={{ fontSize: 11, fontWeight: 500, color: 'var(--text-secondary)', marginBottom: 6 }}>
+                      {language === 'zh' ? '创作方式' : 'Creation Mode'}
+                    </div>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      {[
+                        { value: 'inspiration', label: language === 'zh' ? '从灵感创作' : 'From idea' },
+                        { value: 'opening', label: language === 'zh' ? '根据开头续写' : 'Continue opening' },
+                        { value: 'full_story', label: language === 'zh' ? '完整故事扩写' : 'Expand story' },
+                      ].map((opt) => (
+                        <button
+                          key={opt.value}
+                          onClick={() => setNovelCreationMode(opt.value as any)}
+                          style={{
+                            flex: 1,
+                            padding: '6px 8px',
+                            background: novelCreationMode === opt.value ? 'var(--accent)' : 'var(--bg-secondary)',
+                            border: novelCreationMode === opt.value ? '1px solid var(--accent)' : '1px solid var(--border)',
+                            borderRadius: 6,
+                            color: novelCreationMode === opt.value ? 'white' : 'var(--text-muted)',
+                            fontSize: 10,
+                            textAlign: 'center',
+                          }}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* 数量参数 */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                    {/* 章节数量 */}
+                    <div>
+                      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 4 }}>
+                        {language === 'zh' ? '章节数量' : 'Chapters'}
+                      </div>
+                      <input
+                        type="number"
+                        min={1}
+                        max={50}
+                        value={targetChapterCount}
+                        onChange={(e) => {
+                          const v = parseInt(e.target.value) || 1;
+                          setTargetChapterCount(Math.max(1, Math.min(50, v)));
+                        }}
+                        style={{
+                          width: '100%',
+                          padding: '6px 8px',
+                          background: 'var(--bg-secondary)',
+                          border: '1px solid var(--border)',
+                          borderRadius: 6,
+                          color: 'var(--text-primary)',
+                          fontSize: 12,
+                        }}
+                      />
+                    </div>
+                    {/* 每章字数 */}
+                    <div>
+                      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 4 }}>
+                        {language === 'zh' ? '每章字数' : 'Words/chapter'}
+                      </div>
+                      <input
+                        type="number"
+                        min={500}
+                        max={5000}
+                        step={100}
+                        value={targetWordsPerChapter}
+                        onChange={(e) => {
+                          const v = parseInt(e.target.value) || 500;
+                          setTargetWordsPerChapter(Math.max(500, Math.min(5000, v)));
+                        }}
+                        style={{
+                          width: '100%',
+                          padding: '6px 8px',
+                          background: 'var(--bg-secondary)',
+                          border: '1px solid var(--border)',
+                          borderRadius: 6,
+                          color: 'var(--text-primary)',
+                          fontSize: 12,
+                        }}
+                      />
+                    </div>
+                    {/* 主角数量 */}
+                    <div>
+                      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 4 }}>
+                        {language === 'zh' ? '主角数量' : 'Protagonists'}
+                      </div>
+                      <input
+                        type="number"
+                        min={1}
+                        max={6}
+                        value={protagonistCount}
+                        onChange={(e) => {
+                          const v = parseInt(e.target.value) || 1;
+                          setProtagonistCount(Math.max(1, Math.min(6, v)));
+                        }}
+                        style={{
+                          width: '100%',
+                          padding: '6px 8px',
+                          background: 'var(--bg-secondary)',
+                          border: '1px solid var(--border)',
+                          borderRadius: 6,
+                          color: 'var(--text-primary)',
+                          fontSize: 12,
+                        }}
+                      />
+                    </div>
+                    {/* 重要配角数量 */}
+                    <div>
+                      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 4 }}>
+                        {language === 'zh' ? '重要配角' : 'Supporting'}
+                      </div>
+                      <input
+                        type="number"
+                        min={0}
+                        max={12}
+                        value={supportingCharacterCount}
+                        onChange={(e) => {
+                          const v = parseInt(e.target.value) || 0;
+                          setSupportingCharacterCount(Math.max(0, Math.min(12, v)));
+                        }}
+                        style={{
+                          width: '100%',
+                          padding: '6px 8px',
+                          background: 'var(--bg-secondary)',
+                          border: '1px solid var(--border)',
+                          borderRadius: 6,
+                          color: 'var(--text-primary)',
+                          fontSize: 12,
+                        }}
+                      />
+                    </div>
+                  </div>
                 </div>
               </div>
             )}
@@ -1950,32 +2103,10 @@ export default function SuperWritingTab() {
             <div style={{ color: 'var(--text-secondary)', fontSize: 13, marginBottom: 12 }}>
               {novelError}
             </div>
-            {/* 如果有原始文本，显示 fallback */}
-            {novelRawText && !novelProject && (
-              <div style={{ marginBottom: 12 }}>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>
-                  {language === 'zh' ? '模型原始返回：' : 'Model raw output:'}
-                </div>
-                <div style={{
-                  background: 'var(--bg-tertiary)',
-                  borderRadius: 8,
-                  padding: 12,
-                  maxHeight: 300,
-                  overflow: 'auto',
-                  fontSize: 12,
-                  lineHeight: 1.6,
-                  whiteSpace: 'pre-wrap',
-                  wordBreak: 'break-word',
-                }}>
-                  {novelRawText.slice(0, 2000)}{novelRawText.length > 2000 ? '...' : ''}
-                </div>
-              </div>
-            )}
             <button
               onClick={() => {
                 setNovelGenerationStep('idle');
                 setNovelError('');
-                setNovelRawText('');
               }}
               style={{
                 padding: '8px 16px',
@@ -3084,39 +3215,6 @@ export default function SuperWritingTab() {
                   : `${novelChapters.length} chapters generated, click "Read Full" to view all`}
               </div>
             )}
-          </div>
-        )}
-
-        {/* 小说企划解析失败时的原始文本显示 */}
-        {creationMode === 'novel' && novelRawText && !novelProject && (
-          <div style={{
-            padding: 16,
-            background: 'var(--bg-secondary)',
-            borderRadius: 12,
-            border: '1px solid var(--border)',
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
-                {language === 'zh' ? '生成结果（原始文本）' : 'Result (Raw Text)'}
-              </span>
-              <button
-                onClick={() => navigator.clipboard.writeText(novelRawText)}
-                style={{ background: 'transparent', border: 'none', color: 'var(--accent)', fontSize: 12 }}
-              >
-                {language === 'zh' ? '复制' : 'Copy'}
-              </button>
-            </div>
-            <div style={{
-              background: 'var(--bg-tertiary)',
-              borderRadius: 8,
-              padding: 12,
-              maxHeight: 400,
-              overflow: 'auto',
-              fontSize: 13,
-              lineHeight: 1.8,
-            }}>
-              <ReactMarkdown>{novelRawText}</ReactMarkdown>
-            </div>
           </div>
         )}
 

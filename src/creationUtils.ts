@@ -1026,9 +1026,57 @@ export function parseNovelPlanJSON(text: string): NovelProject | null {
 
     return project;
   } catch (e) {
-    console.error('解析小说企划 JSON 失败:', e);
+    console.error('[parseNovelPlanJSON] 解析失败:', (e as Error).message?.slice(0, 100));
     return null;
   }
+}
+
+/**
+ * 规范化小说企划，确保章节数量和角色数量符合预期
+ */
+export function normalizeNovelProject(
+  project: NovelProject,
+  targetChapterCount: number
+): NovelProject {
+  // 确保 characters 是数组
+  const characters = Array.isArray(project.characters) ? project.characters : [];
+
+  // 规范化章节
+  let chapters = Array.isArray(project.chapters) ? [...project.chapters] : [];
+
+  // 如果章节数量多于目标，截断
+  if (chapters.length > targetChapterCount) {
+    chapters = chapters.slice(0, targetChapterCount);
+  }
+
+  // 如果章节数量少于目标，补齐
+  if (chapters.length < targetChapterCount) {
+    for (let i = chapters.length; i < targetChapterCount; i++) {
+      chapters.push({
+        id: `chap_${i + 1}`,
+        chapterNo: i + 1,
+        title: `第${i + 1}章`,
+        goal: '',
+        mainEvent: '',
+        conflict: '',
+        hook: '',
+        locked: false,
+      });
+    }
+  }
+
+  // 确保 chapterNo 从 1 到 targetChapterCount 连续
+  chapters = chapters.map((ch, index) => ({
+    ...ch,
+    id: ch.id || `chap_${index + 1}`,
+    chapterNo: index + 1,
+  }));
+
+  return {
+    ...project,
+    characters,
+    chapters,
+  };
 }
 
 /**
@@ -1206,6 +1254,11 @@ ${previousChapter.slice(-3000)} ${previousChapter.length > 3000 ? '...(前文已
 // ============ 两步生成小说 ============
 
 /**
+ * 小说创作模式
+ */
+export type NovelCreationMode = 'inspiration' | 'opening' | 'full_story';
+
+/**
  * 构建生成小说设定（NovelProject）的 Prompt
  * 只生成 JSON，不包含第一章正文
  */
@@ -1214,17 +1267,44 @@ export function buildNovelProjectPrompt(options: {
   genre?: string;
   style?: string;
   chapterInfo?: string;
+  creationMode?: NovelCreationMode;
+  targetChapterCount?: number;
+  targetWordsPerChapter?: number;
+  protagonistCount?: number;
+  supportingCharacterCount?: number;
 }): string {
-  const { requirement, genre, style, chapterInfo } = options;
+  const {
+    requirement,
+    genre,
+    style,
+    chapterInfo,
+    creationMode = 'inspiration',
+    targetChapterCount = 10,
+    targetWordsPerChapter = 1500,
+    protagonistCount = 2,
+    supportingCharacterCount = 3,
+  } = options;
 
   const genreHint = genre ? `\n用户指定题材：${genre}` : '';
   const styleHint = style ? `\n用户指定风格：${style}` : '';
   const lengthHint = chapterInfo ? `\n用户指定篇幅：${chapterInfo}` : '';
 
-  return `你是一个专业的小说策划。请根据用户的一句话想法，自动生成完整的小说企划。
+  // 根据创作模式生成不同的提示
+  const creationModeHints: Record<NovelCreationMode, string> = {
+    inspiration: `【创作方式：从灵感创作】
+用户输入通常是灵感或简短概念，请补全完整设定、人物关系和分章规划。`,
+    opening: `【创作方式：根据开头续写】
+用户输入通常是小说开头，请保留开头语气和已有情节，不要推翻原设定。`,
+    full_story: `【创作方式：完整故事扩写】
+用户输入通常包含完整故事走向，请保留起承转合、关键转折和结局，不要只扩写开头。请把完整故事拆分为 ${targetChapterCount} 章的分章规划。`,
+  };
 
-用户想法：
+  return `你是一个专业的小说策划。请根据用户提供的小说素材生成小说企划。用户素材可能是一句话灵感、小说开头，或完整故事梗概。
+
+用户素材：
 ${requirement}${genreHint}${styleHint}${lengthHint}
+
+${creationModeHints[creationMode]}
 
 请输出 JSON 格式（不要输出 Markdown，不要解释，只输出纯 JSON）：
 
@@ -1240,32 +1320,8 @@ ${requirement}${genreHint}${styleHint}${lengthHint}
   "characters": [
     {
       "id": "char_1",
-      "name": "主角名",
-      "role": "protagonist",
-      "identity": "身份职业",
-      "personality": "性格特点",
-      "desire": "核心欲望",
-      "weakness": "性格弱点",
-      "relationship": "与主角关系",
-      "arc": "人物成长弧光",
-      "locked": false
-    },
-    {
-      "id": "char_2",
-      "name": "重要配角名",
-      "role": "supporting",
-      "identity": "身份职业",
-      "personality": "性格特点",
-      "desire": "核心欲望",
-      "weakness": "性格弱点",
-      "relationship": "与主角关系",
-      "arc": "人物成长弧光",
-      "locked": false
-    },
-    {
-      "id": "char_3",
-      "name": "反派或阻力来源名",
-      "role": "antagonist",
+      "name": "角色名",
+      "role": "protagonist/supporting/antagonist",
       "identity": "身份职业",
       "personality": "性格特点",
       "desire": "核心欲望",
@@ -1302,47 +1358,7 @@ ${requirement}${genreHint}${styleHint}${lengthHint}
     {
       "id": "chap_1",
       "chapterNo": 1,
-      "title": "第一章标题",
-      "goal": "本章目标",
-      "mainEvent": "主要事件",
-      "conflict": "冲突点",
-      "hook": "结尾钩子",
-      "locked": false
-    },
-    {
-      "id": "chap_2",
-      "chapterNo": 2,
-      "title": "第二章标题",
-      "goal": "本章目标",
-      "mainEvent": "主要事件",
-      "conflict": "冲突点",
-      "hook": "结尾钩子",
-      "locked": false
-    },
-    {
-      "id": "chap_3",
-      "chapterNo": 3,
-      "title": "第三章标题",
-      "goal": "本章目标",
-      "mainEvent": "主要事件",
-      "conflict": "冲突点",
-      "hook": "结尾钩子",
-      "locked": false
-    },
-    {
-      "id": "chap_4",
-      "chapterNo": 4,
-      "title": "第四章标题",
-      "goal": "本章目标",
-      "mainEvent": "主要事件",
-      "conflict": "冲突点",
-      "hook": "结尾钩子",
-      "locked": false
-    },
-    {
-      "id": "chap_5",
-      "chapterNo": 5,
-      "title": "第五章标题",
+      "title": "章节标题",
       "goal": "本章目标",
       "mainEvent": "主要事件",
       "conflict": "冲突点",
@@ -1363,13 +1379,14 @@ ${requirement}${genreHint}${styleHint}${lengthHint}
 }
 
 要求：
-1. 用户只给一句话时，必须自动补全所有空白，包括题材、风格、篇幅，不要反问
-2. 至少生成3个角色（主角、重要配角、反派或阻力来源）
-3. 章节规划5-12个
-4. 只输出合法 JSON，不要 Markdown，不要解释
-5. 不要生成第一章正文
-6. 不要输出 firstChapter 字段
-7. 不要输出 content 正文字段`;
+1. 请生成约 ${protagonistCount} 个主角和约 ${supportingCharacterCount} 个重要配角。如果剧情需要，可以额外加入反派、导师、家人、路人等功能角色。不要强制只有 3 个角色。
+2. 请生成 ${targetChapterCount} 个章节规划。每章目标正文约 ${targetWordsPerChapter} 字。如果用户输入的是完整故事，请把完整剧情均匀拆入这些章节中，不要只规划开头部分。
+3. characters 数量应根据参数生成，不限于示例数量。
+4. chapters 数量必须尽量等于 ${targetChapterCount}。
+5. 只输出合法 JSON，不要 Markdown，不要解释
+6. 不要生成第一章正文
+7. 不要输出 firstChapter 字段
+8. 不要输出 content 正文字段`;
 }
 
 /**
@@ -1380,12 +1397,16 @@ export function buildNovelFirstChapterPlainPrompt(options: {
   requirement: string;
   novelProject: NovelProject;
   chapterPlan?: NovelChapterPlan;
+  targetWordsPerChapter?: number;
 }): string {
-  const { requirement, novelProject, chapterPlan } = options;
+  const { requirement, novelProject, chapterPlan, targetWordsPerChapter = 1500 } = options;
 
   const characterList = novelProject.characters
     .map(c => `- ${c.name}（${c.role === 'protagonist' ? '主角' : c.role === 'antagonist' ? '反派' : '配角'}，${c.identity}，${c.personality}）`)
     .join('\n');
+
+  const minWords = Math.floor(targetWordsPerChapter * 0.8);
+  const maxWords = Math.floor(targetWordsPerChapter * 1.2);
 
   return `你是一个专业的小说作家。请根据以下小说设定，写出第一章正文。
 
@@ -1429,7 +1450,7 @@ ${novelProject.world.forbiddenRules ? `- 不可违背：${novelProject.world.for
 7. 有场景、动作、对白、心理、节奏和结尾钩子
 8. 不要写成大纲，要写真正的小说正文
 9. 不要突然完结，结尾要有钩子
-10. 字数控制在 1200-2000 字`;
+10. 目标字数约 ${targetWordsPerChapter} 字，可以上下浮动 20%（${minWords}-${maxWords} 字）`;
 }
 
 /**
