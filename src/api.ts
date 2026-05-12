@@ -31,6 +31,7 @@ export async function callChatCompletionRaw(
   prompt: string,
   options?: {
     imageBase64?: string;
+    images?: string[];  // 多图支持
     modelId?: string;
     onChunk?: (chunk: string) => void;
   }
@@ -49,13 +50,27 @@ export async function callChatCompletionRaw(
     finalModelId: model.id,
     promptLength: prompt.length,
     hasImage: !!options?.imageBase64,
+    hasImages: !!(options?.images?.length),
+    imageCount: options?.images?.length || 0,
   });
 
   const messages: Array<{ role: string; content: string | Array<{ type: string; text?: string; image_url?: { url: string } }> }> = [];
   messages.push({ role: 'user', content: prompt });
 
+  // 单图支持（向后兼容）
   if (options?.imageBase64) {
     messages[0] = { role: 'user', content: [{ type: 'text', text: prompt }, { type: 'image_url', image_url: { url: options.imageBase64 } }] };
+  }
+
+  // 多图支持
+  if (options?.images && options.images.length > 0) {
+    const content: Array<{ type: string; text?: string; image_url?: { url: string } }> = [
+      { type: 'text', text: prompt }
+    ];
+    options.images.forEach((imgDataUrl) => {
+      content.push({ type: 'image_url', image_url: { url: imgDataUrl } });
+    });
+    messages[0] = { role: 'user', content };
   }
 
   const resp = await fetch(`${API_BASE}/chat/completions`, {

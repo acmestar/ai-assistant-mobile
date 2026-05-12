@@ -1197,6 +1197,22 @@ export function normalizeNovelProject(
     ...project,
     characters,
     chapters,
+    // 规范化 visualInspiration（如果存在）
+    visualInspiration: project.visualInspiration
+      ? {
+          source: project.visualInspiration.source === 'multiImage' ? 'multiImage' : 'singleImage',
+          arrangementMode: project.visualInspiration.arrangementMode,
+          analysis: String(project.visualInspiration.analysis || ''),
+          imageSummaries: Array.isArray(project.visualInspiration.imageSummaries)
+            ? project.visualInspiration.imageSummaries.map((img, idx) => ({
+                index: typeof img.index === 'number' ? img.index : idx + 1,
+                name: img.name,
+                summary: String(img.summary || ''),
+                storyRole: img.storyRole,
+              }))
+            : undefined,
+        }
+      : undefined,
   };
 }
 
@@ -1376,12 +1392,21 @@ ${previousChapter.slice(-3000)} ${previousChapter.length > 3000 ? '...(前文已
 
 /**
  * 小说创作模式
+ * textInspiration: 文字灵感（原有文字模式）
+ * singleImage: 图片灵感（单图模式）
+ * multiImage: 多图故事线（多图模式）
  */
-export type NovelCreationMode = 'inspiration' | 'opening' | 'full_story';
+export type NovelCreationMode = 'textInspiration' | 'singleImage' | 'multiImage';
+
+/**
+ * 多图编排方式
+ */
+export type MultiImageArrangementMode = 'uploadOrder' | 'autoSort' | 'plotNodeByImage' | 'chapterByImage';
 
 /**
  * 构建生成小说设定（NovelProject）的 Prompt
  * 只生成 JSON，不包含第一章正文
+ * 文字灵感模式使用此函数
  */
 export function buildNovelProjectPrompt(options: {
   requirement: string;
@@ -1399,7 +1424,6 @@ export function buildNovelProjectPrompt(options: {
     genre,
     style,
     chapterInfo,
-    creationMode = 'inspiration',
     targetChapterCount = 10,
     targetWordsPerChapter: _targetWordsPerChapter = 1500, // 用于提示每章字数，但不在 prompt 中直接使用
     protagonistCount = 2,
@@ -1410,22 +1434,13 @@ export function buildNovelProjectPrompt(options: {
   const styleHint = style ? `\n用户指定风格：${style}` : '';
   const lengthHint = chapterInfo ? `\n用户指定篇幅：${chapterInfo}` : '';
 
-  // 根据创作模式生成不同的提示
-  const creationModeHints: Record<NovelCreationMode, string> = {
-    inspiration: `【创作方式：从灵感创作】
-用户输入通常是灵感或简短概念，请补全完整设定、人物关系和分章规划。`,
-    opening: `【创作方式：根据开头续写】
-用户输入通常是小说开头，请保留开头语气和已有情节，不要推翻原设定。`,
-    full_story: `【创作方式：完整故事扩写】
-用户输入通常包含完整故事走向，请保留起承转合、关键转折和结局，不要只扩写开头。请把完整故事拆分为 ${targetChapterCount} 章的分章规划。`,
-  };
-
   return `你是一个专业的小说策划。请根据用户提供的小说素材生成小说企划。用户素材可能是一句话灵感、小说开头，或完整故事梗概。
 
 用户素材：
 ${requirement}${genreHint}${styleHint}${lengthHint}
 
-${creationModeHints[creationMode]}
+【创作方式：文字灵感】
+用户输入通常是灵感或简短概念，请补全完整设定、人物关系和分章规划。
 
 请输出 JSON 格式（不要输出 Markdown，不要解释，只输出纯 JSON）：
 
@@ -2266,4 +2281,296 @@ export function parseIntegratePlanResult(text: string): {
     console.error('[parseIntegratePlanResult] 解析失败:', e);
     return null;
   }
+}
+
+// ============ 图片灵感小说企划 Prompt ============
+
+/**
+ * 构建单图小说企划 Prompt
+ * 用于根据一张图片生成小说企划
+ */
+export function buildNovelImageProjectPrompt(options: {
+  requirement?: string;
+  protagonistCount: number;
+  supportingCharacterCount: number;
+  targetChapterCount: number;
+  targetWordsPerChapter: number;
+}): string {
+  const { requirement, protagonistCount, supportingCharacterCount, targetChapterCount, targetWordsPerChapter } = options;
+
+  const minWords = Math.floor(targetWordsPerChapter * 0.75);
+  const maxWords = Math.floor(targetWordsPerChapter * 1.15);
+
+  return `你是一个专业的小说策划。你将基于用户提供的一张图片生成小说企划。
+
+${requirement ? `用户补充要求：\n${requirement}\n` : ''}
+
+【重要提示】
+不要只是描述图片。你需要从图片中提炼：
+- 整体氛围和情绪基调
+- 主要视觉元素（人物、场景、物品、色彩）
+- 可转化为小说人物/地点/物品的元素
+- 潜在冲突和戏剧张力
+- 隐藏的秘密或悬念
+- 象征意象和隐喻
+- 故事钩子
+
+然后将这些内容转化为完整的小说企划。
+
+请输出 JSON 格式（不要输出 Markdown，不要解释，只输出纯 JSON）：
+
+{
+  "title": "小说名",
+  "genre": "题材类型",
+  "style": "风格关键词",
+  "logline": "一句话简介",
+  "sellingPoints": "核心卖点",
+  "targetReaders": "目标读者",
+  "lengthSuggestion": "篇幅建议",
+
+  "characters": [
+    {
+      "id": "char_1",
+      "name": "角色名",
+      "role": "protagonist/supporting/antagonist",
+      "identity": "身份职业",
+      "personality": "性格特点",
+      "desire": "核心欲望",
+      "weakness": "性格弱点",
+      "relationship": "与主角关系",
+      "arc": "人物成长弧光",
+      "locked": false
+    }
+  ],
+
+  "world": {
+    "background": "故事背景",
+    "keyScenes": "关键场景",
+    "rules": "世界规则",
+    "forbiddenRules": "不可违背的规则"
+  },
+
+  "conflict": {
+    "external": "外部冲突",
+    "internal": "内心冲突",
+    "relationship": "关系冲突",
+    "stages": "阶段性阻碍"
+  },
+
+  "outline": {
+    "beginning": "开端",
+    "development": "发展",
+    "twist": "转折",
+    "climax": "高潮",
+    "ending": "结局"
+  },
+
+  "chapters": [
+    {
+      "id": "chap_1",
+      "chapterNo": 1,
+      "title": "章节标题",
+      "goal": "本章目标",
+      "mainEvent": "主要事件",
+      "conflict": "冲突点",
+      "hook": "结尾钩子",
+      "locked": false
+    }
+  ],
+
+  "firstChapterAdvice": {
+    "openingScene": "开场场景",
+    "characters": "出场人物",
+    "mood": "情绪基调",
+    "conflictIntro": "冲突引入",
+    "endingHook": "结尾钩子"
+  },
+
+  "notes": "其他建议",
+
+  "visualInspiration": {
+    "source": "singleImage",
+    "analysis": "对图片的整体分析，包括氛围、视觉元素、可转化内容、潜在冲突等（200-400字）",
+    "imageSummaries": [
+      {
+        "index": 1,
+        "name": "图片名称或描述",
+        "summary": "图片内容摘要",
+        "storyRole": "这张图片在故事中的叙事作用"
+      }
+    ]
+  }
+}
+
+要求：
+1. 【角色数量严格约束】
+   - role = "protagonist" 的角色数量必须严格等于 ${protagonistCount}。
+   - role = "supporting" 的角色数量应等于 ${supportingCharacterCount}。
+   - 其他人物可以存在，但不得标记为 protagonist 或 supporting。
+   - protagonist 只表示承担主线成长或主要视角的人。
+   - 反派用 antagonist，导师用 mentor，家人用 family，路人用 minor，其他用 other。
+2. 【临时 NPC 规则】
+   - 主角和重要配角数量只限制核心人物，不限制临时 NPC。
+   - 服务员、路人、守卫、司机、医生、小贩、群众等可根据场景自然出现。
+   - 临时 NPC 不计入 protagonist 或 supporting 数量。
+3. 【章节数量约束】
+   - chapters 数组长度必须等于 ${targetChapterCount}。
+4. 【图片分析要求】
+   - visualInspiration.analysis 必须包含对图片的深度分析。
+   - imageSummaries 必须包含对图片的摘要和故事角色说明。
+5. 【字数约束】
+   - 每章目标字数约 ${targetWordsPerChapter} 字（范围 ${minWords}-${maxWords}）。
+6. 只输出 JSON，不要其他文字。`;
+}
+
+/**
+ * 构建多图小说企划 Prompt
+ * 用于根据多张图片生成统一故事线的小说企划
+ */
+export function buildNovelMultiImageProjectPrompt(options: {
+  requirement?: string;
+  arrangementMode: MultiImageArrangementMode;
+  imageCount: number;
+  protagonistCount: number;
+  supportingCharacterCount: number;
+  targetChapterCount: number;
+  targetWordsPerChapter: number;
+}): string {
+  const { requirement, arrangementMode, imageCount, protagonistCount, supportingCharacterCount, targetChapterCount, targetWordsPerChapter } = options;
+
+  const minWords = Math.floor(targetWordsPerChapter * 0.75);
+  const maxWords = Math.floor(targetWordsPerChapter * 1.15);
+
+  // 编排方式说明
+  const arrangementDescriptions: Record<MultiImageArrangementMode, string> = {
+    uploadOrder: `【编排方式：按上传顺序编成故事】
+用户上传了 ${imageCount} 张图片，请按照图片的上传顺序（第1张到第${imageCount}张）串联成一个连贯的故事。每张图片代表故事的一个阶段或场景。`,
+    autoSort: `【编排方式：让 AI 自动排序】
+用户上传了 ${imageCount} 张图片，请根据图片内容和故事逻辑，自动判断最合理的故事顺序，然后生成统一的故事企划。你需要在 imageSummaries 中标注推荐的顺序。`,
+    plotNodeByImage: `【编排方式：每张图作为关键剧情节点】
+用户上传了 ${imageCount} 张图片，每张图片代表故事的一个关键剧情节点。请将这些节点串联成完整故事，确保每个节点都有戏剧张力和推进作用。`,
+    chapterByImage: `【编排方式：每张图作为章节灵感】
+用户上传了 ${imageCount} 张图片，每张图片作为一个章节的灵感来源。但章节数量仍以 ${targetChapterCount} 为准，可以多张图对应一个章节，或一张图对应多个章节。`,
+  };
+
+  return `你是一个专业的小说策划。你将基于用户提供的多张图片生成统一的小说企划。
+
+${requirement ? `用户补充要求：\n${requirement}\n` : ''}
+
+${arrangementDescriptions[arrangementMode]}
+
+【重要提示】
+不要逐图机械描述。你需要从多张图片中建立关系，形成统一故事世界：
+- 每张图片的摘要和叙事作用
+- 图片之间的关系和过渡
+- 核心冲突和戏剧张力
+- 统一的世界观和人物设定
+- 从图片到故事的创造性转化
+
+请输出 JSON 格式（不要输出 Markdown，不要解释，只输出纯 JSON）：
+
+{
+  "title": "小说名",
+  "genre": "题材类型",
+  "style": "风格关键词",
+  "logline": "一句话简介",
+  "sellingPoints": "核心卖点",
+  "targetReaders": "目标读者",
+  "lengthSuggestion": "篇幅建议",
+
+  "characters": [
+    {
+      "id": "char_1",
+      "name": "角色名",
+      "role": "protagonist/supporting/antagonist",
+      "identity": "身份职业",
+      "personality": "性格特点",
+      "desire": "核心欲望",
+      "weakness": "性格弱点",
+      "relationship": "与主角关系",
+      "arc": "人物成长弧光",
+      "locked": false
+    }
+  ],
+
+  "world": {
+    "background": "故事背景",
+    "keyScenes": "关键场景",
+    "rules": "世界规则",
+    "forbiddenRules": "不可违背的规则"
+  },
+
+  "conflict": {
+    "external": "外部冲突",
+    "internal": "内心冲突",
+    "relationship": "关系冲突",
+    "stages": "阶段性阻碍"
+  },
+
+  "outline": {
+    "beginning": "开端",
+    "development": "发展",
+    "twist": "转折",
+    "climax": "高潮",
+    "ending": "结局"
+  },
+
+  "chapters": [
+    {
+      "id": "chap_1",
+      "chapterNo": 1,
+      "title": "章节标题",
+      "goal": "本章目标",
+      "mainEvent": "主要事件",
+      "conflict": "冲突点",
+      "hook": "结尾钩子",
+      "locked": false
+    }
+  ],
+
+  "firstChapterAdvice": {
+    "openingScene": "开场场景",
+    "characters": "出场人物",
+    "mood": "情绪基调",
+    "conflictIntro": "冲突引入",
+    "endingHook": "结尾钩子"
+  },
+
+  "notes": "其他建议",
+
+  "visualInspiration": {
+    "source": "multiImage",
+    "arrangementMode": "${arrangementMode}",
+    "analysis": "对多张图片的整体分析，包括故事线串联逻辑、核心冲突、世界观统一性等（300-500字）",
+    "imageSummaries": [
+      {
+        "index": 1,
+        "name": "图片名称或描述",
+        "summary": "图片内容摘要",
+        "storyRole": "这张图片在故事中的叙事作用"
+      }
+    ]
+  }
+}
+
+要求：
+1. 【角色数量严格约束】
+   - role = "protagonist" 的角色数量必须严格等于 ${protagonistCount}。
+   - role = "supporting" 的角色数量应等于 ${supportingCharacterCount}。
+   - 其他人物可以存在，但不得标记为 protagonist 或 supporting。
+   - protagonist 只表示承担主线成长或主要视角的人。
+   - 反派用 antagonist，导师用 mentor，家人用 family，路人用 minor，其他用 other。
+2. 【临时 NPC 规则】
+   - 主角和重要配角数量只限制核心人物，不限制临时 NPC。
+   - 服务员、路人、守卫、司机、医生、小贩、群众等可根据场景自然出现。
+   - 临时 NPC 不计入 protagonist 或 supporting 数量。
+3. 【章节数量约束】
+   - chapters 数组长度必须等于 ${targetChapterCount}。
+4. 【多图分析要求】
+   - visualInspiration.analysis 必须包含对多图的整体分析和故事线串联逻辑。
+   - imageSummaries 必须包含每张图片的摘要和叙事作用，数组长度应等于 ${imageCount}。
+   - 如果编排方式是 autoSort，需要在 imageSummaries 中标注推荐的顺序。
+5. 【字数约束】
+   - 每章目标字数约 ${targetWordsPerChapter} 字（范围 ${minWords}-${maxWords}）。
+6. 只输出 JSON，不要其他文字。`;
 }

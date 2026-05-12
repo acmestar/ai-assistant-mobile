@@ -87,6 +87,19 @@ export interface NovelChapterPlan {
   locked?: boolean;
 }
 
+// 图片灵感解析结果
+export interface NovelVisualInspiration {
+  source: 'singleImage' | 'multiImage';
+  arrangementMode?: 'uploadOrder' | 'autoSort' | 'plotNodeByImage' | 'chapterByImage';
+  analysis: string;   // 整体分析
+  imageSummaries?: Array<{
+    index: number;
+    name?: string;
+    summary: string;
+    storyRole?: string;
+  }>;
+}
+
 export interface NovelProject {
   title: string;
   genre: string;
@@ -131,6 +144,9 @@ export interface NovelProject {
   };
 
   notes?: string;
+
+  // 图片灵感解析（可选，仅图片模式生成时存在）
+  visualInspiration?: NovelVisualInspiration;
 }
 
 // 章节正文草稿
@@ -635,6 +651,8 @@ interface AppState {
   addCompanyRisk: (companyId: string, risk: Omit<AICompany['risks'][0], 'id' | 'companyId' | 'createdAt' | 'status'>) => void;
   addCompanyMeeting: (companyId: string, meeting: Omit<AICompany['meetings'][0], 'id' | 'companyId' | 'createdAt'>) => void;
   updateCompanyTaskStatus: (companyId: string, taskId: string, status: AICompany['tasks'][0]['status']) => void;
+  updateCompanyTask: (companyId: string, taskId: string, updates: Partial<AICompany['tasks'][0]>) => void;
+  completeCompanyTask: (companyId: string, taskId: string, completionNote?: string) => void;
 
   // 角色/设定记忆库（支持原人名→替换人名映射）
   characterMemory: Array<{ id: string; originalName: string; replaceWith: string; description: string; createdAt: number }>;
@@ -942,9 +960,9 @@ export const useAppStore = create<AppState>()(
           c.id === companyId ? {
             ...c,
             memories: [...c.memories, {
+              ...memory,
               id: Date.now().toString(),
               companyId,
-              ...memory,
               createdAt: new Date().toISOString(),
             }],
             updatedAt: new Date().toISOString(),
@@ -956,9 +974,9 @@ export const useAppStore = create<AppState>()(
           c.id === companyId ? {
             ...c,
             tasks: [...c.tasks, {
+              ...task,
               id: Date.now().toString(),
               companyId,
-              ...task,
               status: 'todo',
               createdAt: new Date().toISOString(),
             }],
@@ -971,9 +989,9 @@ export const useAppStore = create<AppState>()(
           c.id === companyId ? {
             ...c,
             risks: [...c.risks, {
+              ...risk,
               id: Date.now().toString(),
               companyId,
-              ...risk,
               status: 'active',
               createdAt: new Date().toISOString(),
             }],
@@ -986,9 +1004,9 @@ export const useAppStore = create<AppState>()(
           c.id === companyId ? {
             ...c,
             meetings: [...c.meetings, {
+              ...meeting,
               id: Date.now().toString(),
               companyId,
-              ...meeting,
               createdAt: new Date().toISOString(),
             }],
             updatedAt: new Date().toISOString(),
@@ -1004,6 +1022,51 @@ export const useAppStore = create<AppState>()(
           } : c
         ),
       })),
+      updateCompanyTask: (companyId, taskId, updates) => set((state) => ({
+        aiCompanies: state.aiCompanies.map((c) =>
+          c.id === companyId ? {
+            ...c,
+            tasks: c.tasks.map((t: AICompany['tasks'][0]) => t.id === taskId ? { ...t, ...updates } : t),
+            updatedAt: new Date().toISOString(),
+          } : c
+        ),
+      })),
+      completeCompanyTask: (companyId, taskId, completionNote) => set((state) => {
+        const company = state.aiCompanies.find(c => c.id === companyId);
+        const task = company?.tasks.find(t => t.id === taskId);
+        if (!task) return state;
+
+        // 创建执行记忆
+        const executionMemory = {
+          id: Date.now().toString(),
+          companyId,
+          type: 'decision' as const,
+          content: `任务完成：${task.title}${completionNote ? `\n备注：${completionNote}` : ''}`,
+          relatedTaskIds: [taskId],
+          relatedGoalIds: task.relatedGoalId ? [task.relatedGoalId] : [],
+          sourceMeetingId: task.sourceMeetingId,
+          importance: 'medium' as const,
+          createdAt: new Date().toISOString(),
+        };
+
+        return {
+          aiCompanies: state.aiCompanies.map((c) =>
+            c.id === companyId ? {
+              ...c,
+              tasks: c.tasks.map((t: AICompany['tasks'][0]) =>
+                t.id === taskId ? {
+                  ...t,
+                  status: 'done',
+                  completedAt: new Date().toISOString(),
+                  completionNote,
+                } : t
+              ),
+              memories: [...c.memories, executionMemory],
+              updatedAt: new Date().toISOString(),
+            } : c
+          ),
+        };
+      }),
 
       // 角色/设定记忆库（支持原人名→替换人名映射）
       characterMemory: [],

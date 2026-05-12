@@ -18,6 +18,7 @@ import {
   Unlock,
   Plus,
   X,
+  Image as ImageIcon,
 } from 'lucide-react';
 import { useAppStore, CHAT_MODELS, NovelProject, NovelCharacter, NovelChapterPlan, NovelChapterDraft } from './store';
 import { executeModelQueue, regenerateQueueItem, callChatCompletionRaw } from './api';
@@ -35,8 +36,11 @@ import {
   buildNovelIntegrateFuturePlanPrompt,
   buildNovelRegenerateChapterPrompt,
   parseIntegratePlanResult,
+  buildNovelImageProjectPrompt,
+  buildNovelMultiImageProjectPrompt,
 } from './creationUtils';
 import type { CreationMode } from './store';
+import type { NovelCreationMode, MultiImageArrangementMode } from './creationUtils';
 import ReactMarkdown from 'react-markdown';
 import AutoResizeTextarea from './components/AutoResizeTextarea';
 
@@ -136,7 +140,7 @@ export default function SuperWritingTab() {
   const [novelNewPlotNote, setNovelNewPlotNote] = useState('');
 
   // 小说结构参数 - number state（用于提交）
-  const [novelCreationMode, setNovelCreationMode] = useState<'inspiration' | 'opening' | 'full_story'>('inspiration');
+  const [novelCreationMode, setNovelCreationMode] = useState<NovelCreationMode>('textInspiration');
   const [_targetChapterCount, setTargetChapterCount] = useState<number>(10);
   const [_targetWordsPerChapter, setTargetWordsPerChapter] = useState<number>(1500);
   const [_protagonistCount, setProtagonistCount] = useState<number>(2);
@@ -172,6 +176,107 @@ export default function SuperWritingTab() {
 
   // 新增角色输入（章节工作台内）
   const [newCharacterInput, setNewCharacterInput] = useState('');
+
+  // 图片灵感相关 state
+  const [novelSingleImage, setNovelSingleImage] = useState<{
+    name: string;
+    type: string;
+    dataUrl: string;
+  } | null>(null);
+  const [novelMultiImages, setNovelMultiImages] = useState<Array<{
+    name: string;
+    type: string;
+    dataUrl: string;
+  }>>([]);
+  const [multiImageArrangementMode, setMultiImageArrangementMode] = useState<MultiImageArrangementMode>('uploadOrder');
+  const [imageUploadError, setImageUploadError] = useState<string | null>(null);
+
+  // 支持的图片类型
+  const SUPPORTED_IMAGE_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+
+  // 处理单图上传
+  const handleSingleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setImageUploadError(null);
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!SUPPORTED_IMAGE_TYPES.includes(file.type)) {
+      setImageUploadError(language === 'zh' ? '仅支持 jpg/jpeg/png/webp 格式' : 'Only jpg/jpeg/png/webp formats are supported');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const dataUrl = event.target?.result as string;
+      setNovelSingleImage({
+        name: file.name,
+        type: file.type,
+        dataUrl,
+      });
+    };
+    reader.readAsDataURL(file);
+    // 清空 input 以便重新选择同一文件
+    e.target.value = '';
+  };
+
+  // 处理多图上传
+  const handleMultiImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setImageUploadError(null);
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+
+    // 检查类型
+    const invalidFiles = files.filter(f => !SUPPORTED_IMAGE_TYPES.includes(f.type));
+    if (invalidFiles.length > 0) {
+      setImageUploadError(language === 'zh' ? '仅支持 jpg/jpeg/png/webp 格式' : 'Only jpg/jpeg/png/webp formats are supported');
+      return;
+    }
+
+    // 检查数量限制
+    const totalCount = novelMultiImages.length + files.length;
+    if (totalCount > 9) {
+      setImageUploadError(language === 'zh' ? `最多上传 9 张图片，当前已选 ${novelMultiImages.length} 张，本次选择 ${files.length} 张` : `Maximum 9 images. Currently ${novelMultiImages.length}, selected ${files.length}`);
+      return;
+    }
+
+    // 读取所有图片
+    const readPromises = files.map(file => {
+      return new Promise<{ name: string; type: string; dataUrl: string }>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          resolve({
+            name: file.name,
+            type: file.type,
+            dataUrl: event.target?.result as string,
+          });
+        };
+        reader.onerror = () => reject(new Error(`Failed to read ${file.name}`));
+        reader.readAsDataURL(file);
+      });
+    });
+
+    Promise.all(readPromises).then(images => {
+      setNovelMultiImages(prev => [...prev, ...images]);
+    }).catch(err => {
+      console.error('[ImageUploadError]', err);
+      setImageUploadError(language === 'zh' ? '图片读取失败' : 'Failed to read images');
+    });
+
+    // 清空 input
+    e.target.value = '';
+  };
+
+  // 移除单图
+  const handleRemoveSingleImage = () => {
+    setNovelSingleImage(null);
+    setImageUploadError(null);
+  };
+
+  // 移除多图中的某一张
+  const handleRemoveMultiImage = (index: number) => {
+    setNovelMultiImages(prev => prev.filter((_, i) => i !== index));
+    setImageUploadError(null);
+  };
 
   // 计算最新已生成章节号
   const latestGeneratedChapterNo = novelChapters.length > 0
@@ -584,11 +689,7 @@ export default function SuperWritingTab() {
 
   // 小说生成：只生成设定，不自动生成第一章
   const handleGenerateNovelProject = async () => {
-    // 校验前置条件，不要 silent return
-    if (!outlineText.trim()) {
-      setNovelError(language === 'zh' ? '请输入小说需求' : 'Please enter novel requirement');
-      return;
-    }
+    // 校验前置条件
     if (!apiKey) {
       setNovelError(language === 'zh' ? '请先配置 API Key' : 'Please configure API Key first');
       return;
@@ -608,51 +709,131 @@ export default function SuperWritingTab() {
       return;
     }
 
+    // 根据模式校验特定条件
+    if (novelCreationMode === 'textInspiration') {
+      if (!outlineText.trim()) {
+        setNovelError(language === 'zh' ? '请输入小说需求' : 'Please enter novel requirement');
+        return;
+      }
+    } else if (novelCreationMode === 'singleImage') {
+      if (!novelSingleImage) {
+        setNovelError(language === 'zh' ? '请上传一张图片' : 'Please upload an image');
+        return;
+      }
+    } else if (novelCreationMode === 'multiImage') {
+      if (novelMultiImages.length < 2) {
+        setNovelError(language === 'zh' ? '请至少上传 2 张图片' : 'Please upload at least 2 images');
+        return;
+      }
+      if (novelMultiImages.length > 9) {
+        setNovelError(language === 'zh' ? '最多上传 9 张图片' : 'Maximum 9 images allowed');
+        return;
+      }
+    }
+
     // 设置动作状态
     setActiveNovelAction('generatingProject');
-    setNovelActionProgress(language === 'zh' ? '正在生成小说企划...' : 'Generating novel project...');
+    const progressText = novelCreationMode === 'textInspiration'
+      ? (language === 'zh' ? '正在生成小说企划...' : 'Generating novel project...')
+      : novelCreationMode === 'singleImage'
+        ? (language === 'zh' ? '正在根据图片生成小说企划...' : 'Generating novel from image...')
+        : (language === 'zh' ? '正在根据多图生成故事线...' : 'Generating story from images...');
+    setNovelActionProgress(progressText);
 
-    // 清空旧错误和旧结果（重新生成整本小说时清空所有）
+    // 清空旧错误和旧结果
     setNovelError('');
     setFastError('');
     setFastLoading(true);
 
-    // 清空旧小说残留（使用统一清理函数）
+    // 清空旧小说残留
     clearAllNovelState();
 
     // 生成小说设定
     setNovelGenerationStep('planning');
 
     try {
-      const projectPrompt = buildNovelProjectPrompt({
-        requirement: outlineText,
-        creationMode: novelCreationMode,
-        targetChapterCount: validation.settings.targetChapterCount,
-        targetWordsPerChapter: validation.settings.targetWordsPerChapter,
-        protagonistCount: validation.settings.protagonistCount,
-        supportingCharacterCount: validation.settings.supportingCharacterCount,
-      });
+      let rawProjectText: string;
+      let images: string[] = [];
 
-      console.log('[NovelGenerateStep]', {
-        step: 'planning',
-        effectiveModelId,
-        selectedWritingModelId,
-        promptLength: projectPrompt.length,
-        creationMode: novelCreationMode,
-        targetChapterCount: validation.settings.targetChapterCount,
-        protagonistCount: validation.settings.protagonistCount,
-        supportingCharacterCount: validation.settings.supportingCharacterCount,
-      });
+      if (novelCreationMode === 'textInspiration') {
+        // 文字灵感模式：使用现有 prompt
+        const projectPrompt = buildNovelProjectPrompt({
+          requirement: outlineText,
+          targetChapterCount: validation.settings.targetChapterCount,
+          targetWordsPerChapter: validation.settings.targetWordsPerChapter,
+          protagonistCount: validation.settings.protagonistCount,
+          supportingCharacterCount: validation.settings.supportingCharacterCount,
+        });
 
-      const rawProjectText = await callChatCompletionRaw(projectPrompt, {
-        modelId: effectiveModelId,
-      });
+        console.log('[NovelGenerateStep]', {
+          step: 'planning',
+          mode: 'textInspiration',
+          effectiveModelId,
+          promptLength: projectPrompt.length,
+        });
+
+        rawProjectText = await callChatCompletionRaw(projectPrompt, {
+          modelId: effectiveModelId,
+        });
+
+      } else if (novelCreationMode === 'singleImage') {
+        // 单图模式
+        const projectPrompt = buildNovelImageProjectPrompt({
+          requirement: outlineText.trim() || undefined,
+          protagonistCount: validation.settings.protagonistCount,
+          supportingCharacterCount: validation.settings.supportingCharacterCount,
+          targetChapterCount: validation.settings.targetChapterCount,
+          targetWordsPerChapter: validation.settings.targetWordsPerChapter,
+        });
+
+        images = [novelSingleImage!.dataUrl];
+
+        console.log('[NovelGenerateStep]', {
+          step: 'planning',
+          mode: 'singleImage',
+          effectiveModelId,
+          promptLength: projectPrompt.length,
+          imageName: novelSingleImage!.name,
+        });
+
+        rawProjectText = await callChatCompletionRaw(projectPrompt, {
+          modelId: effectiveModelId,
+          images,
+        });
+
+      } else {
+        // 多图模式
+        const projectPrompt = buildNovelMultiImageProjectPrompt({
+          requirement: outlineText.trim() || undefined,
+          arrangementMode: multiImageArrangementMode,
+          imageCount: novelMultiImages.length,
+          protagonistCount: validation.settings.protagonistCount,
+          supportingCharacterCount: validation.settings.supportingCharacterCount,
+          targetChapterCount: validation.settings.targetChapterCount,
+          targetWordsPerChapter: validation.settings.targetWordsPerChapter,
+        });
+
+        images = novelMultiImages.map(img => img.dataUrl);
+
+        console.log('[NovelGenerateStep]', {
+          step: 'planning',
+          mode: 'multiImage',
+          effectiveModelId,
+          promptLength: projectPrompt.length,
+          imageCount: novelMultiImages.length,
+          arrangementMode: multiImageArrangementMode,
+        });
+
+        rawProjectText = await callChatCompletionRaw(projectPrompt, {
+          modelId: effectiveModelId,
+          images,
+        });
+      }
 
       // 解析 NovelProject
       const parsedProject = parseJsonFromModelText<NovelProject>(rawProjectText);
 
       if (!parsedProject) {
-        // 解析失败，显示用户友好错误
         setNovelGenerationStep('error');
         setNovelError(language === 'zh'
           ? '小说设定解析失败，请稍后重试，或简化故事描述后再试。'
@@ -664,10 +845,24 @@ export default function SuperWritingTab() {
         return;
       }
 
-      // 规范化小说企划，确保章节数量和角色数量符合预期
+      // 规范化小说企划
       const project = normalizeNovelProject(parsedProject, validation.settings.targetChapterCount, validation.settings.protagonistCount, validation.settings.supportingCharacterCount);
 
-      // 解析成功，只保存设定，不自动生成第一章
+      // 如果是图片模式但 AI 没有返回 visualInspiration，补一个最低限度字段
+      if ((novelCreationMode === 'singleImage' || novelCreationMode === 'multiImage') && !project.visualInspiration) {
+        project.visualInspiration = {
+          source: novelCreationMode === 'multiImage' ? 'multiImage' : 'singleImage',
+          arrangementMode: novelCreationMode === 'multiImage' ? multiImageArrangementMode : undefined,
+          analysis: language === 'zh' ? 'AI 已根据上传图片生成小说企划。' : 'Novel project generated from uploaded images.',
+          imageSummaries: novelCreationMode === 'singleImage' && novelSingleImage
+            ? [{ index: 1, name: novelSingleImage.name, summary: '', storyRole: '' }]
+            : novelCreationMode === 'multiImage'
+              ? novelMultiImages.map((img, idx) => ({ index: idx + 1, name: img.name, summary: '', storyRole: '' }))
+              : undefined,
+        };
+      }
+
+      // 解析成功，保存设定
       setNovelProject(project);
       setNovelGenerationStep('project-ready');
 
@@ -677,6 +872,7 @@ export default function SuperWritingTab() {
         genre: project.genre,
         chaptersCount: project.chapters?.length || 0,
         charactersCount: project.characters?.length || 0,
+        hasVisualInspiration: !!project.visualInspiration,
       });
 
     } catch (error: any) {
@@ -692,6 +888,8 @@ export default function SuperWritingTab() {
       }
     } finally {
       setFastLoading(false);
+      setActiveNovelAction(null);
+      setNovelActionProgress(null);
     }
   };
 
@@ -1694,13 +1892,13 @@ export default function SuperWritingTab() {
                     </div>
                     <div style={{ display: 'flex', gap: 6 }}>
                       {[
-                        { value: 'inspiration', label: language === 'zh' ? '从灵感创作' : 'From idea' },
-                        { value: 'opening', label: language === 'zh' ? '根据开头续写' : 'Continue opening' },
-                        { value: 'full_story', label: language === 'zh' ? '完整故事扩写' : 'Expand story' },
+                        { value: 'textInspiration', label: language === 'zh' ? '文字灵感' : 'Text', icon: '📝' },
+                        { value: 'singleImage', label: language === 'zh' ? '图片灵感' : 'Image', icon: '🖼️' },
+                        { value: 'multiImage', label: language === 'zh' ? '多图故事线' : 'Multi-Image', icon: '🎬' },
                       ].map((opt) => (
                         <button
                           key={opt.value}
-                          onClick={() => setNovelCreationMode(opt.value as any)}
+                          onClick={() => setNovelCreationMode(opt.value as NovelCreationMode)}
                           style={{
                             flex: 1,
                             padding: '6px 8px',
@@ -1712,11 +1910,255 @@ export default function SuperWritingTab() {
                             textAlign: 'center',
                           }}
                         >
-                          {opt.label}
+                          {opt.icon} {opt.label}
                         </button>
                       ))}
                     </div>
                   </div>
+
+                  {/* 文字灵感模式：显示需求输入框 */}
+                  {novelCreationMode === 'textInspiration' && (
+                    <div style={{ marginBottom: 10 }}>
+                      <div style={{ fontSize: 11, fontWeight: 500, color: 'var(--text-secondary)', marginBottom: 6 }}>
+                        {language === 'zh' ? '小说需求' : 'Novel Requirement'}
+                      </div>
+                      <textarea
+                        value={outlineText}
+                        onChange={(e) => setOutlineText(e.target.value)}
+                        placeholder={language === 'zh' ? '描述你想写的小说，例如：一个都市爱情故事，女主是律师...' : 'Describe your novel idea...'}
+                        rows={3}
+                        style={{
+                          width: '100%',
+                          padding: '10px 12px',
+                          background: 'var(--bg-secondary)',
+                          border: '1px solid var(--border)',
+                          borderRadius: 8,
+                          color: 'var(--text-primary)',
+                          fontSize: 13,
+                          resize: 'vertical',
+                          lineHeight: 1.5,
+                        }}
+                      />
+                    </div>
+                  )}
+
+                  {/* 单图灵感模式：显示图片上传 */}
+                  {novelCreationMode === 'singleImage' && (
+                    <div style={{ marginBottom: 10 }}>
+                      <div style={{ fontSize: 11, fontWeight: 500, color: 'var(--text-secondary)', marginBottom: 6 }}>
+                        {language === 'zh' ? '上传图片' : 'Upload Image'}
+                      </div>
+                      {!novelSingleImage ? (
+                        <label style={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          padding: 24,
+                          background: 'var(--bg-secondary)',
+                          border: '2px dashed var(--border)',
+                          borderRadius: 8,
+                          cursor: 'pointer',
+                          color: 'var(--text-muted)',
+                          fontSize: 12,
+                        }}>
+                          <ImageIcon size={32} style={{ marginBottom: 8, opacity: 0.5 }} />
+                          <span>{language === 'zh' ? '点击上传图片' : 'Click to upload'}</span>
+                          <span style={{ fontSize: 10, marginTop: 4 }}>{language === 'zh' ? '支持 jpg/jpeg/png/webp' : 'jpg/jpeg/png/webp'}</span>
+                          <input
+                            type="file"
+                            accept="image/jpeg,image/jpg,image/png,image/webp"
+                            onChange={handleSingleImageUpload}
+                            style={{ display: 'none' }}
+                          />
+                        </label>
+                      ) : (
+                        <div style={{ position: 'relative', display: 'inline-block' }}>
+                          <img
+                            src={novelSingleImage.dataUrl}
+                            alt={novelSingleImage.name}
+                            style={{
+                              maxWidth: '100%',
+                              maxHeight: 200,
+                              borderRadius: 8,
+                              border: '1px solid var(--border)',
+                            }}
+                          />
+                          <button
+                            onClick={handleRemoveSingleImage}
+                            style={{
+                              position: 'absolute',
+                              top: 8,
+                              right: 8,
+                              padding: '4px 8px',
+                              background: 'rgba(0,0,0,0.7)',
+                              border: 'none',
+                              borderRadius: 4,
+                              color: 'white',
+                              fontSize: 11,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            {language === 'zh' ? '移除' : 'Remove'}
+                          </button>
+                          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}>
+                            {novelSingleImage.name}
+                          </div>
+                        </div>
+                      )}
+                      {/* 补充要求 */}
+                      <div style={{ marginTop: 10 }}>
+                        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 4 }}>
+                          {language === 'zh' ? '补充要求（选填）' : 'Additional requirements (optional)'}
+                        </div>
+                        <textarea
+                          value={outlineText}
+                          onChange={(e) => setOutlineText(e.target.value)}
+                          placeholder={language === 'zh' ? '例如：希望是悬疑风格，主角是侦探...' : 'E.g., suspense style, detective protagonist...'}
+                          rows={2}
+                          style={{
+                            width: '100%',
+                            padding: '8px 10px',
+                            background: 'var(--bg-secondary)',
+                            border: '1px solid var(--border)',
+                            borderRadius: 6,
+                            color: 'var(--text-primary)',
+                            fontSize: 12,
+                            resize: 'vertical',
+                          }}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 多图故事线模式：显示多图上传 */}
+                  {novelCreationMode === 'multiImage' && (
+                    <div style={{ marginBottom: 10 }}>
+                      <div style={{ fontSize: 11, fontWeight: 500, color: 'var(--text-secondary)', marginBottom: 6 }}>
+                        {language === 'zh' ? '上传多张图片（2-9张）' : 'Upload Images (2-9)'}
+                      </div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+                        {novelMultiImages.map((img, index) => (
+                          <div key={index} style={{ position: 'relative', width: 80, height: 80 }}>
+                            <img
+                              src={img.dataUrl}
+                              alt={img.name}
+                              style={{
+                                width: '100%',
+                                height: '100%',
+                                objectFit: 'cover',
+                                borderRadius: 6,
+                                border: '1px solid var(--border)',
+                              }}
+                            />
+                            <button
+                              onClick={() => handleRemoveMultiImage(index)}
+                              style={{
+                                position: 'absolute',
+                                top: -6,
+                                right: -6,
+                                width: 20,
+                                height: 20,
+                                padding: 0,
+                                background: 'var(--danger)',
+                                border: 'none',
+                                borderRadius: '50%',
+                                color: 'white',
+                                fontSize: 10,
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                              }}
+                            >
+                              <X size={12} />
+                            </button>
+                            <div style={{ position: 'absolute', bottom: 2, left: 2, background: 'rgba(0,0,0,0.6)', color: 'white', fontSize: 9, padding: '1px 4px', borderRadius: 3 }}>
+                              {index + 1}
+                            </div>
+                          </div>
+                        ))}
+                        {novelMultiImages.length < 9 && (
+                          <label style={{
+                            width: 80,
+                            height: 80,
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            background: 'var(--bg-secondary)',
+                            border: '2px dashed var(--border)',
+                            borderRadius: 6,
+                            cursor: 'pointer',
+                            color: 'var(--text-muted)',
+                          }}>
+                            <Plus size={20} />
+                            <span style={{ fontSize: 9, marginTop: 2 }}>{language === 'zh' ? '添加' : 'Add'}</span>
+                            <input
+                              type="file"
+                              accept="image/jpeg,image/jpg,image/png,image/webp"
+                              multiple
+                              onChange={handleMultiImageUpload}
+                              style={{ display: 'none' }}
+                            />
+                          </label>
+                        )}
+                      </div>
+                      {/* 编排方式选择 */}
+                      <div style={{ marginBottom: 10 }}>
+                        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 4 }}>
+                          {language === 'zh' ? '编排方式' : 'Arrangement Mode'}
+                        </div>
+                        <select
+                          value={multiImageArrangementMode}
+                          onChange={(e) => setMultiImageArrangementMode(e.target.value as MultiImageArrangementMode)}
+                          style={{
+                            width: '100%',
+                            padding: '8px 10px',
+                            background: 'var(--bg-secondary)',
+                            border: '1px solid var(--border)',
+                            borderRadius: 6,
+                            color: 'var(--text-primary)',
+                            fontSize: 12,
+                          }}
+                        >
+                          <option value="uploadOrder">{language === 'zh' ? '按上传顺序编成故事' : 'Story by upload order'}</option>
+                          <option value="autoSort">{language === 'zh' ? '让 AI 自动排序' : 'AI auto sort'}</option>
+                          <option value="plotNodeByImage">{language === 'zh' ? '每张图作为关键剧情节点' : 'Each image as plot node'}</option>
+                          <option value="chapterByImage">{language === 'zh' ? '每张图作为章节灵感' : 'Each image as chapter inspiration'}</option>
+                        </select>
+                      </div>
+                      {/* 补充要求 */}
+                      <div>
+                        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 4 }}>
+                          {language === 'zh' ? '补充要求（选填）' : 'Additional requirements (optional)'}
+                        </div>
+                        <textarea
+                          value={outlineText}
+                          onChange={(e) => setOutlineText(e.target.value)}
+                          placeholder={language === 'zh' ? '例如：希望是爱情故事，结局圆满...' : 'E.g., love story with happy ending...'}
+                          rows={2}
+                          style={{
+                            width: '100%',
+                            padding: '8px 10px',
+                            background: 'var(--bg-secondary)',
+                            border: '1px solid var(--border)',
+                            borderRadius: 6,
+                            color: 'var(--text-primary)',
+                            fontSize: 12,
+                            resize: 'vertical',
+                          }}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 图片上传错误提示 */}
+                  {imageUploadError && (
+                    <div style={{ fontSize: 11, color: 'var(--danger)', marginBottom: 8, padding: '6px 10px', background: 'rgba(239, 68, 68, 0.1)', borderRadius: 6 }}>
+                      {imageUploadError}
+                    </div>
+                  )}
 
                   {/* 数量参数 */}
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
@@ -1898,7 +2340,12 @@ export default function SuperWritingTab() {
               {generationMode === 'fast' || creationMode === 'novel' ? (
                 <button
                   onClick={handleFastGenerate}
-                  disabled={!outlineText.trim() || fastLoading}
+                  disabled={
+                    fastLoading ||
+                    (creationMode === 'novel' && novelCreationMode === 'textInspiration' && !outlineText.trim()) ||
+                    (creationMode === 'novel' && novelCreationMode === 'singleImage' && !novelSingleImage) ||
+                    (creationMode === 'novel' && novelCreationMode === 'multiImage' && novelMultiImages.length < 2)
+                  }
                   className="btn-primary"
                   style={{ flex: 1, padding: 10 }}
                 >
@@ -1906,14 +2353,22 @@ export default function SuperWritingTab() {
                     <>
                       <RefreshCw size={14} className="spin" />
                       {creationMode === 'novel'
-                        ? (language === 'zh' ? '正在生成小说设定...' : 'Generating novel setup...')
+                        ? novelCreationMode === 'textInspiration'
+                          ? (language === 'zh' ? '正在生成小说企划...' : 'Generating novel project...')
+                          : novelCreationMode === 'singleImage'
+                            ? (language === 'zh' ? '正在根据图片生成小说企划...' : 'Generating from image...')
+                            : (language === 'zh' ? '正在根据多图生成故事线...' : 'Generating from images...')
                         : (language === 'zh' ? '生成中...' : 'Generating...')}
                     </>
                   ) : (
                     <>
                       <Sparkles size={14} />
                       {creationMode === 'novel'
-                        ? (language === 'zh' ? '生成小说设定' : 'Generate Novel Setup')
+                        ? novelCreationMode === 'textInspiration'
+                          ? (language === 'zh' ? '生成小说企划' : 'Generate Novel Project')
+                          : novelCreationMode === 'singleImage'
+                            ? (language === 'zh' ? '根据图片生成小说企划' : 'Generate from Image')
+                            : (language === 'zh' ? '根据多图生成故事线' : 'Generate from Images')
                         : (language === 'zh' ? '快速生成' : 'Fast Generate')}
                     </>
                   )}
@@ -2029,6 +2484,68 @@ export default function SuperWritingTab() {
                 </button>
               </div>
             </div>
+
+            {/* 图片灵感解析展示 */}
+            {novelProject.visualInspiration && (
+              <div style={{
+                marginBottom: 12,
+                padding: 12,
+                background: 'var(--bg-tertiary)',
+                borderRadius: 8,
+                borderLeft: '3px solid var(--accent)',
+              }}>
+                <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <ImageIcon size={14} style={{ color: 'var(--accent)' }} />
+                  {novelProject.visualInspiration.source === 'singleImage'
+                    ? (language === 'zh' ? '图片灵感解析' : 'Image Inspiration Analysis')
+                    : (language === 'zh' ? '多图故事线解析' : 'Multi-Image Story Analysis')}
+                </div>
+                {/* 编排方式（多图模式） */}
+                {novelProject.visualInspiration.source === 'multiImage' && novelProject.visualInspiration.arrangementMode && (
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6 }}>
+                    {language === 'zh' ? '编排方式：' : 'Arrangement: '}
+                    {novelProject.visualInspiration.arrangementMode === 'uploadOrder' && (language === 'zh' ? '按上传顺序' : 'Upload order')}
+                    {novelProject.visualInspiration.arrangementMode === 'autoSort' && (language === 'zh' ? 'AI 自动排序' : 'AI auto sort')}
+                    {novelProject.visualInspiration.arrangementMode === 'plotNodeByImage' && (language === 'zh' ? '每图作为剧情节点' : 'Plot node per image')}
+                    {novelProject.visualInspiration.arrangementMode === 'chapterByImage' && (language === 'zh' ? '每图作为章节灵感' : 'Chapter inspiration per image')}
+                  </div>
+                )}
+                {/* 整体分析 */}
+                {novelProject.visualInspiration.analysis && (
+                  <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 8 }}>
+                    {novelProject.visualInspiration.analysis}
+                  </div>
+                )}
+                {/* 每张图摘要 */}
+                {novelProject.visualInspiration.imageSummaries && novelProject.visualInspiration.imageSummaries.length > 0 && (
+                  <div style={{ marginTop: 8 }}>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>
+                      {language === 'zh' ? '图片摘要：' : 'Image Summaries:'}
+                    </div>
+                    {novelProject.visualInspiration.imageSummaries.map((img, idx) => (
+                      <div key={idx} style={{
+                        padding: '6px 8px',
+                        background: 'var(--bg-primary)',
+                        borderRadius: 4,
+                        marginBottom: 4,
+                        fontSize: 11,
+                      }}>
+                        <div style={{ fontWeight: 500, color: 'var(--text-primary)' }}>
+                          {language === 'zh' ? `图 ${img.index}` : `Image ${img.index}`}
+                          {img.name && <span style={{ color: 'var(--text-muted)', marginLeft: 4 }}>({img.name})</span>}
+                        </div>
+                        {img.summary && <div style={{ color: 'var(--text-secondary)', marginTop: 2 }}>{img.summary}</div>}
+                        {img.storyRole && (
+                          <div style={{ color: 'var(--accent)', marginTop: 2, fontSize: 10 }}>
+                            {language === 'zh' ? '叙事作用：' : 'Story role: '}{img.storyRole}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* 基础设定区块 */}
             <div style={{ marginBottom: 12 }}>
