@@ -9,6 +9,8 @@ import {
   Sunrise,
   Target,
   ClipboardList,
+  X,
+  CheckCircle,
 } from 'lucide-react';
 import { useAppStore } from '../store';
 import { AICompany, CompanyAgent, CompanyMemory, CompanyTask, CompanyRisk, CompanyMeeting, TaskStatus } from './types';
@@ -20,10 +22,12 @@ interface CompanyWorkspaceProps {
 }
 
 export default function CompanyWorkspace({ companyId, onBack, onStartMeeting }: CompanyWorkspaceProps) {
-  const { language, aiCompanies, updateAICompany } = useAppStore();
+  const { language, aiCompanies, updateAICompany, completeCompanyTask } = useAppStore();
   const company = aiCompanies.find((c: AICompany) => c.id === companyId);
 
   const [activeTab, setActiveTab] = useState<'overview' | 'agents' | 'memories' | 'tasks' | 'risks' | 'meetings'>('overview');
+  const [completingTaskId, setCompletingTaskId] = useState<string | null>(null);
+  const [completionNote, setCompletionNote] = useState('');
 
   if (!company) {
     return (
@@ -381,6 +385,81 @@ export default function CompanyWorkspace({ companyId, onBack, onStartMeeting }: 
 
   const renderTasks = () => (
     <div style={{ padding: 16 }}>
+      {/* 完成任务弹窗 */}
+      {completingTaskId && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 100,
+          padding: 20,
+        }}>
+          <div style={{
+            background: 'var(--bg-secondary)',
+            borderRadius: 16,
+            padding: 20,
+            maxWidth: 320,
+            width: '100%',
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>
+                {language === 'zh' ? '完成任务' : 'Complete Task'}
+              </span>
+              <button onClick={() => { setCompletingTaskId(null); setCompletionNote(''); }} style={{ background: 'none', border: 'none', color: 'var(--text-muted)' }}>
+                <X size={18} />
+              </button>
+            </div>
+            <textarea
+              value={completionNote}
+              onChange={(e) => setCompletionNote(e.target.value)}
+              placeholder={language === 'zh' ? '添加完成备注（可选）...' : 'Add completion note (optional)...'}
+              style={{
+                width: '100%',
+                minHeight: 80,
+                padding: 12,
+                borderRadius: 8,
+                border: '1px solid var(--border)',
+                background: 'var(--bg-tertiary)',
+                color: 'var(--text-primary)',
+                fontSize: 13,
+                resize: 'vertical',
+              }}
+            />
+            <button
+              onClick={() => {
+                completeCompanyTask(companyId, completingTaskId, completionNote);
+                setCompletingTaskId(null);
+                setCompletionNote('');
+              }}
+              style={{
+                width: '100%',
+                marginTop: 12,
+                padding: 12,
+                background: 'var(--accent)',
+                border: 'none',
+                borderRadius: 8,
+                color: 'white',
+                fontSize: 14,
+                fontWeight: 500,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 6,
+              }}
+            >
+              <CheckCircle size={16} />
+              {language === 'zh' ? '确认完成' : 'Confirm'}
+            </button>
+          </div>
+        </div>
+      )}
+
       {company.tasks?.length === 0 ? (
         <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>
           <CheckSquare size={40} style={{ marginBottom: 12, opacity: 0.5 }} />
@@ -388,55 +467,150 @@ export default function CompanyWorkspace({ companyId, onBack, onStartMeeting }: 
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {company.tasks?.map((task: CompanyTask) => (
-            <div
-              key={task.id}
-              style={{
-                background: 'var(--bg-secondary)',
-                borderRadius: 12,
-                padding: 14,
-                border: '1px solid var(--border)',
-                opacity: task.status === 'done' ? 0.6 : 1,
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-                <input
-                  type="checkbox"
-                  checked={task.status === 'done'}
-                  onChange={() => {
-                    const newStatus: TaskStatus = task.status === 'done' ? 'todo' : 'done';
-                    const updatedTasks = company.tasks?.map(t =>
-                      t.id === task.id ? { ...t, status: newStatus } : t
-                    );
-                    updateAICompany(companyId, { tasks: updatedTasks });
-                  }}
-                  style={{ marginTop: 3 }}
-                />
-                <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
-                  <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-primary)', textDecoration: task.status === 'done' ? 'line-through' : 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {task.title}
-                  </div>
-                  {task.description && (
-                    <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{task.description}</p>
-                  )}
-                  <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
-                    <span style={{
-                      padding: '2px 6px',
-                      background: task.priority === 'high' ? 'rgba(239, 68, 68, 0.1)' : 'var(--bg-tertiary)',
-                      borderRadius: 4,
-                      fontSize: 10,
-                      color: task.priority === 'high' ? 'var(--danger)' : 'var(--text-muted)',
-                    }}>
-                      {task.priority}
-                    </span>
-                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                      {new Date(task.createdAt).toLocaleDateString()}
-                    </span>
+          {company.tasks?.map((task: CompanyTask) => {
+            // 查找关联的目标和风险
+            const relatedGoal = task.relatedGoalId ? company.goals?.find(g => g.id === task.relatedGoalId) : undefined;
+            const relatedRisks = task.relatedRiskIds?.map(id => company.risks?.find(r => r.id === id)).filter(Boolean);
+            const assignee = task.assigneeId ? company.agents?.find(a => a.id === task.assigneeId) : undefined;
+
+            return (
+              <div
+                key={task.id}
+                style={{
+                  background: 'var(--bg-secondary)',
+                  borderRadius: 12,
+                  padding: 14,
+                  border: '1px solid var(--border)',
+                  opacity: task.status === 'done' ? 0.6 : 1,
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                  <input
+                    type="checkbox"
+                    checked={task.status === 'done'}
+                    onChange={() => {
+                      if (task.status === 'todo' || task.status === 'doing') {
+                        // 完成任务时弹出备注框
+                        setCompletingTaskId(task.id);
+                      } else {
+                        // 取消完成，直接更新状态
+                        const newStatus: TaskStatus = 'todo';
+                        const updatedTasks = company.tasks?.map(t =>
+                          t.id === task.id ? { ...t, status: newStatus } : t
+                        );
+                        updateAICompany(companyId, { tasks: updatedTasks });
+                      }
+                    }}
+                    style={{ marginTop: 3 }}
+                  />
+                  <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
+                    <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-primary)', textDecoration: task.status === 'done' ? 'line-through' : 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {task.title}
+                    </div>
+                    {task.description && (
+                      <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{task.description}</p>
+                    )}
+
+                    {/* 关联信息 */}
+                    {(relatedGoal || relatedRisks?.length || assignee) && (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
+                        {relatedGoal && (
+                          <span style={{
+                            padding: '2px 6px',
+                            background: 'rgba(16, 185, 129, 0.1)',
+                            borderRadius: 4,
+                            fontSize: 10,
+                            color: 'var(--accent)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 3,
+                          }}>
+                            <Target size={10} />
+                            {relatedGoal.title}
+                          </span>
+                        )}
+                        {relatedRisks?.map(risk => risk && (
+                          <span key={risk.id} style={{
+                            padding: '2px 6px',
+                            background: 'rgba(239, 68, 68, 0.1)',
+                            borderRadius: 4,
+                            fontSize: 10,
+                            color: 'var(--danger)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 3,
+                          }}>
+                            <AlertTriangle size={10} />
+                            {risk.title}
+                          </span>
+                        ))}
+                        {assignee && (
+                          <span style={{
+                            padding: '2px 6px',
+                            background: 'rgba(59, 130, 246, 0.1)',
+                            borderRadius: 4,
+                            fontSize: 10,
+                            color: 'var(--accent-blue)',
+                          }}>
+                            @{assignee.name}
+                          </span>
+                        )}
+                      </div>
+                    )}
+
+                    {/* 截止日期和完成时间 */}
+                    <div style={{ display: 'flex', gap: 8, marginTop: 6, alignItems: 'center' }}>
+                      <span style={{
+                        padding: '2px 6px',
+                        background: task.priority === 'high' ? 'rgba(239, 68, 68, 0.1)' : 'var(--bg-tertiary)',
+                        borderRadius: 4,
+                        fontSize: 10,
+                        color: task.priority === 'high' ? 'var(--danger)' : 'var(--text-muted)',
+                      }}>
+                        {task.priority}
+                      </span>
+                      {task.dueDate && task.status !== 'done' && (
+                        <span style={{
+                          fontSize: 10,
+                          color: new Date(task.dueDate) < new Date() ? 'var(--danger)' : 'var(--text-muted)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 3,
+                        }}>
+                          <Calendar size={10} />
+                          {new Date(task.dueDate).toLocaleDateString()}
+                        </span>
+                      )}
+                      {task.completedAt && (
+                        <span style={{ fontSize: 10, color: 'var(--accent)' }}>
+                          ✓ {new Date(task.completedAt).toLocaleDateString()}
+                        </span>
+                      )}
+                      {!task.completedAt && (
+                        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                          {new Date(task.createdAt).toLocaleDateString()}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* 完成备注 */}
+                    {task.completionNote && (
+                      <div style={{
+                        marginTop: 8,
+                        padding: 8,
+                        background: 'var(--bg-tertiary)',
+                        borderRadius: 6,
+                        fontSize: 11,
+                        color: 'var(--text-secondary)',
+                      }}>
+                        💬 {task.completionNote}
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

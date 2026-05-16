@@ -1395,13 +1395,132 @@ ${previousChapter.slice(-3000)} ${previousChapter.length > 3000 ? '...(前文已
  * textInspiration: 文字灵感（原有文字模式）
  * singleImage: 图片灵感（单图模式）
  * multiImage: 多图故事线（多图模式）
+ * aiInspiration: AI 灵感击发
  */
-export type NovelCreationMode = 'textInspiration' | 'singleImage' | 'multiImage';
+export type NovelCreationMode = 'textInspiration' | 'singleImage' | 'multiImage' | 'aiInspiration';
 
 /**
  * 多图编排方式
  */
 export type MultiImageArrangementMode = 'uploadOrder' | 'autoSort' | 'plotNodeByImage' | 'chapterByImage';
+
+// ============ AI 灵感击发类型 ============
+
+/**
+ * AI 灵感击发生成类型
+ */
+export type InspirationGenerateType = 'idea' | 'opening' | 'fullStory';
+
+/**
+ * AI 灵感击发小说分类
+ */
+export type InspirationCategory =
+  | '悬疑'
+  | '犯罪'
+  | '刑侦'
+  | '惊悚'
+  | '恐怖'
+  | '爱情'
+  | '都市'
+  | '家庭伦理'
+  | '校园'
+  | '职场'
+  | '古装'
+  | '权谋'
+  | '仙侠'
+  | '玄幻'
+  | '奇幻'
+  | '科幻'
+  | '末日'
+  | '穿越'
+  | '重生'
+  | '复仇'
+  | '爽文'
+  | '短剧感'
+  | '微短剧感'
+  | '喜剧'
+  | '治愈'
+  | '女性成长'
+  | '大女主'
+  | '男频逆袭'
+  | '豪门'
+  | '娱乐圈';
+
+/**
+ * AI 灵感候选
+ */
+export interface InspirationCandidate {
+  id: string;
+  title: string;
+  content: string;
+  type: InspirationGenerateType;
+  categories: string[];
+  tags?: string[];
+  highlights?: string[];
+  suitableFor?: string[];
+  createdAt: number;
+}
+
+/**
+ * 灵感库条目
+ */
+export interface InspirationLibraryItem extends InspirationCandidate {
+  favorite: boolean;
+  usedCount?: number;
+  updatedAt: number;
+}
+
+/**
+ * AI 灵感击发分类列表
+ */
+export const INSPIRATION_CATEGORIES: InspirationCategory[] = [
+  '悬疑',
+  '犯罪',
+  '刑侦',
+  '惊悚',
+  '恐怖',
+  '爱情',
+  '都市',
+  '家庭伦理',
+  '校园',
+  '职场',
+  '古装',
+  '权谋',
+  '仙侠',
+  '玄幻',
+  '奇幻',
+  '科幻',
+  '末日',
+  '穿越',
+  '重生',
+  '复仇',
+  '爽文',
+  '短剧感',
+  '微短剧感',
+  '喜剧',
+  '治愈',
+  '女性成长',
+  '大女主',
+  '男频逆袭',
+  '豪门',
+  '娱乐圈',
+];
+
+/**
+ * 获取生成类型显示名称
+ */
+export function getInspirationGenerateTypeLabel(type: InspirationGenerateType): string {
+  switch (type) {
+    case 'idea':
+      return '灵感';
+    case 'opening':
+      return '开头';
+    case 'fullStory':
+      return '完整故事';
+    default:
+      return '灵感';
+  }
+}
 
 /**
  * 构建生成小说设定（NovelProject）的 Prompt
@@ -2573,4 +2692,116 @@ ${arrangementDescriptions[arrangementMode]}
 5. 【字数约束】
    - 每章目标字数约 ${targetWordsPerChapter} 字（范围 ${minWords}-${maxWords}）。
 6. 只输出 JSON，不要其他文字。`;
+}
+
+// ============ AI 灵感击发 ============
+
+/**
+ * 构建 AI 灵感击发 Prompt
+ */
+export function buildNovelInspirationPrompt(options: {
+  categories: string[];
+  generateType: InspirationGenerateType;
+  preference?: string;
+  count?: number;
+}): string {
+  const count = options.count ?? 20;
+  const typeLabel = getInspirationGenerateTypeLabel(options.generateType);
+
+  const typeInstruction =
+    options.generateType === 'idea'
+      ? `生成类型：灵感。
+每条 content 写 1-3 句话，必须是一个有钩子的小说故事点子。
+不要写成长篇梗概。`
+      : options.generateType === 'opening'
+        ? `生成类型：开头。
+每条 content 写一个小说开篇片段，3-8 句。
+必须开局即冲突，有画面感、有悬念、有继续读下去的欲望。
+不要写成故事大纲，不要写成影视剧本。`
+        : `生成类型：完整故事。
+每条 content 写一个较完整的故事雏形，建议 150-300 字。
+必须包含主角、目标、阻碍、核心冲突、反转或悬念。
+它不是正式小说企划，不要生成章节规划。`;
+
+  return `你是专业小说创意策划师。请为用户生成 ${count} 个小说创作候选。
+
+当前用途：小说创作。
+不要生成影视分镜、剧本格式、镜头语言、拍摄建议。
+
+用户选择的分类：
+${options.categories.join(' / ')}
+
+生成类型：
+${typeLabel}
+
+补充偏好：
+${options.preference?.trim() || '无'}
+
+${typeInstruction}
+
+质量要求：
+1. 必须生成 ${count} 条。
+2. 每条必须有明显差异，不要重复同一种结构。
+3. 每条必须有故事钩子。
+4. 不要输出空泛概念。
+5. 尽量适合继续扩展成小说。
+6. 标题要有吸引力。
+7. 标签要具体，不要只重复分类名。
+8. 适合方向要说明这个素材适合发展成什么类型的小说。
+9. 不要出现"以下是""当然可以"等解释性文字。
+
+请只返回 JSON，不要 Markdown，不要代码块。
+
+JSON 格式：
+{
+  "items": [
+    {
+      "title": "标题",
+      "content": "正文内容",
+      "tags": ["标签1", "标签2", "标签3"],
+      "highlights": ["核心看点1", "核心看点2"],
+      "suitableFor": ["适合方向1", "适合方向2"]
+    }
+  ]
+}`;
+}
+
+/**
+ * 解析 AI 灵感击发结果
+ */
+export function parseNovelInspirationResult(
+  rawText: string,
+  options: {
+    categories: string[];
+    generateType: InspirationGenerateType;
+  }
+): InspirationCandidate[] {
+  try {
+    // 清理可能的 markdown 代码块
+    const text = rawText
+      .replace(/```json/gi, '')
+      .replace(/```/g, '')
+      .trim();
+
+    const parsed = JSON.parse(text);
+    const rawItems = Array.isArray(parsed?.items) ? parsed.items : [];
+
+    return rawItems
+      .slice(0, 20)
+      .map((item: any, index: number) => ({
+        id: `inspiration-${Date.now()}-${index}`,
+        title: String(item?.title || '').trim(),
+        content: String(item?.content || '').trim(),
+        type: options.generateType,
+        categories: options.categories,
+        tags: Array.isArray(item?.tags) ? item.tags.map(String).filter(Boolean) : [],
+        highlights: Array.isArray(item?.highlights) ? item.highlights.map(String).filter(Boolean) : [],
+        suitableFor: Array.isArray(item?.suitableFor) ? item.suitableFor.map(String).filter(Boolean) : [],
+        createdAt: Date.now(),
+      }))
+      .filter((item: InspirationCandidate) => item.title && item.content);
+  } catch (error) {
+    console.error('[ParseInspirationError]', error);
+    return [];
+  }
 }

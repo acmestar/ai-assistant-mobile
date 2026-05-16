@@ -366,11 +366,52 @@ export default function CompanyMeetingPage({ companyId, meetingType: initialMeet
       if (minutesResult.success && minutesResult.data) {
         setMinutes(minutesResult.data);
 
-        // 提取任务和记忆
+        // 构建公司当前状态上下文
+        const currentGoals = company.goals?.filter(g => g.status === 'active') || [];
+        const currentRisks = company.risks?.filter(r => r.status === 'active') || [];
+        const currentTasks = company.tasks?.filter(t => t.status !== 'done') || [];
+
+        // 提取任务和记忆（增强版：包含关联分析）
         const taskExtractionResult = await callModel<{ tasks: SuggestedTask[] }>(
           'task_extraction',
           {
-            prompt: `根据以下会议讨论内容，提取建议的任务：\n\n${JSON.stringify(minutesResult.data)}\n\n${currentSpeeches.map(s => `【${s.agentName}】${s.content}`).join('\n')}\n\n输出 JSON 格式：\n{\n  "tasks": [\n    { "id": "task-1", "title": "任务标题", "description": "任务描述", "priority": "high" | "medium" | "low" }\n  ]\n}`,
+            prompt: `根据以下会议讨论内容，提取建议的任务，并分析任务与公司目标、风险的关联。
+
+## 会议讨论内容
+${JSON.stringify(minutesResult.data, null, 2)}
+
+${currentSpeeches.map(s => `【${s.agentName}】${s.content}`).join('\n')}
+
+## 公司当前目标
+${currentGoals.length > 0 ? currentGoals.map(g => `- ${g.title}: ${g.description || ''}`).join('\n') : '暂无活跃目标'}
+
+## 公司当前风险
+${currentRisks.length > 0 ? currentRisks.map(r => `- ${r.title}: ${r.description || ''}`).join('\n') : '暂无活跃风险'}
+
+## 公司待办任务
+${currentTasks.length > 0 ? currentTasks.map(t => `- ${t.title}`).join('\n') : '暂无待办任务'}
+
+## 输出要求
+输出 JSON 格式，每个任务需分析：
+1. 是否与某个目标相关（relatedGoalTitle 填目标标题）
+2. 是否与某个风险相关（relatedRiskTitle 填风险标题）
+3. 建议分配给哪个角色负责（assigneeRole）
+4. 建议多少天内完成（dueInDays）
+
+{
+  "tasks": [
+    {
+      "id": "task-1",
+      "title": "任务标题",
+      "description": "任务描述",
+      "priority": "high" | "medium" | "low",
+      "relatedGoalTitle": "关联的目标标题（无则不填）",
+      "relatedRiskTitle": "关联的风险标题（无则不填）",
+      "assigneeRole": "建议负责的角色",
+      "dueInDays": 7
+    }
+  ]
+}`,
           },
           { mode: userMode, companyId, meetingId: sessionId, requireJson: true }
         );
@@ -467,9 +508,31 @@ export default function CompanyMeetingPage({ companyId, meetingType: initialMeet
 
     if (showTaskConfirm && pendingTasks.length > 0) {
       pendingTasks.forEach(task => {
+        // 查找关联的目标和风险
+        const relatedGoal = task.relatedGoalTitle
+          ? company.goals?.find(g => g.title.includes(task.relatedGoalTitle!) || task.relatedGoalTitle!.includes(g.title))
+          : undefined;
+        const relatedRisk = task.relatedRiskTitle
+          ? company.risks?.find(r => r.title.includes(task.relatedRiskTitle!) || task.relatedRiskTitle!.includes(r.title))
+          : undefined;
+
+        // 查找建议分配的角色
+        const assignee = task.assigneeRole
+          ? company.agents?.find(a => a.role.includes(task.assigneeRole!) || task.assigneeRole!.includes(a.role))
+          : undefined;
+
+        // 计算截止日期
+        const dueDate = task.dueInDays
+          ? new Date(Date.now() + task.dueInDays * 24 * 60 * 60 * 1000).toISOString()
+          : undefined;
+
         const companyTask = {
           ...task,
           companyId,
+          relatedGoalId: relatedGoal?.id,
+          relatedRiskIds: relatedRisk ? [relatedRisk.id] : [],
+          assigneeId: assignee?.id,
+          dueDate,
           status: 'todo' as const,
           sourceMeetingId: savedMeetingId,
           createdAt: new Date().toISOString(),

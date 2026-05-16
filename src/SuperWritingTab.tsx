@@ -40,7 +40,8 @@ import {
   buildNovelMultiImageProjectPrompt,
 } from './creationUtils';
 import type { CreationMode } from './store';
-import type { NovelCreationMode, MultiImageArrangementMode } from './creationUtils';
+import type { NovelCreationMode, MultiImageArrangementMode, InspirationGenerateType, InspirationCategory, InspirationCandidate, InspirationLibraryItem } from './creationUtils';
+import { INSPIRATION_CATEGORIES, getInspirationGenerateTypeLabel, buildNovelInspirationPrompt, parseNovelInspirationResult } from './creationUtils';
 import ReactMarkdown from 'react-markdown';
 import AutoResizeTextarea from './components/AutoResizeTextarea';
 
@@ -190,79 +191,160 @@ export default function SuperWritingTab() {
   }>>([]);
   const [multiImageArrangementMode, setMultiImageArrangementMode] = useState<MultiImageArrangementMode>('uploadOrder');
   const [imageUploadError, setImageUploadError] = useState<string | null>(null);
+  const [draggingMultiImageIndex, setDraggingMultiImageIndex] = useState<number | null>(null);
+
+  // AI 灵感击发相关 state
+  const [inspirationCategories, setInspirationCategories] = useState<InspirationCategory[]>([]);
+  const [inspirationGenerateType, setInspirationGenerateType] = useState<InspirationGenerateType>('idea');
+  const [inspirationPreference, setInspirationPreference] = useState('');
+  const [inspirationCandidates, setInspirationCandidates] = useState<InspirationCandidate[]>([]);
+  const [inspirationLibrary, setInspirationLibrary] = useState<InspirationLibraryItem[]>([]);
+  const [inspirationError, setInspirationError] = useState('');
+  const [inspirationLoading, setInspirationLoading] = useState(false);
+
+  // 灵感库本地存储 key
+  const INSPIRATION_LIBRARY_STORAGE_KEY = 'novel_inspiration_library_v1';
+
+  // 图片限制常量
+  const MAX_NOVEL_IMAGE_SIZE_MB = 10;
+  const MAX_NOVEL_IMAGE_SIZE_BYTES = MAX_NOVEL_IMAGE_SIZE_MB * 1024 * 1024;
+  const NOVEL_IMAGE_MAX_DIMENSION = 1568;
+  const NOVEL_IMAGE_QUALITY = 0.82;
 
   // 支持的图片类型
   const SUPPORTED_IMAGE_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
 
+  // 校验小说图片文件（类型 + 大小）
+  const validateNovelImageFile = (file: File): string | null => {
+    if (!SUPPORTED_IMAGE_TYPES.includes(file.type)) {
+      return language === 'zh'
+        ? '仅支持 jpg/jpeg/png/webp 格式'
+        : 'Only jpg/jpeg/png/webp formats are supported';
+    }
+    if (file.size > MAX_NOVEL_IMAGE_SIZE_BYTES) {
+      return language === 'zh'
+        ? `图片过大，请选择 ${MAX_NOVEL_IMAGE_SIZE_MB}MB 以内的 jpg/jpeg/png/webp 图片。`
+        : `Image too large. Please select a jpg/jpeg/png/webp image under ${MAX_NOVEL_IMAGE_SIZE_MB}MB.`;
+    }
+    return null;
+  };
+
+  // 压缩小说图片
+  const compressNovelImageFile = async (file: File): Promise<{ name: string; type: string; dataUrl: string }> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const dataUrl = e.target?.result as string;
+        const img = new Image();
+        img.onload = () => {
+          try {
+            // 计算缩放尺寸
+            let width = img.width;
+            let height = img.height;
+            if (width > NOVEL_IMAGE_MAX_DIMENSION || height > NOVEL_IMAGE_MAX_DIMENSION) {
+              const ratio = Math.min(NOVEL_IMAGE_MAX_DIMENSION / width, NOVEL_IMAGE_MAX_DIMENSION / height);
+              width = Math.round(width * ratio);
+              height = Math.round(height * ratio);
+            }
+
+            // 创建 canvas 并绘制
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) {
+              // fallback: 返回原始 dataUrl
+              resolve({ name: file.name, type: file.type, dataUrl });
+              return;
+            }
+            ctx.drawImage(img, 0, 0, width, height);
+
+            // 输出格式：PNG 转 JPEG 以获得更好的压缩率
+            const outputType = file.type === 'image/png' ? 'image/jpeg' : file.type;
+            const compressedDataUrl = canvas.toDataURL(outputType, NOVEL_IMAGE_QUALITY);
+
+            resolve({
+              name: file.name,
+              type: outputType,
+              dataUrl: compressedDataUrl,
+            });
+          } catch (err) {
+            // fallback: 返回原始 dataUrl
+            console.warn('[ImageCompressFallback]', err);
+            resolve({ name: file.name, type: file.type, dataUrl });
+          }
+        };
+        img.onerror = () => {
+          // 图片加载失败，fallback 到原始 dataUrl
+          console.warn('[ImageLoadFallback]', file.name);
+          resolve({ name: file.name, type: file.type, dataUrl });
+        };
+        img.src = dataUrl;
+      };
+      reader.onerror = () => reject(new Error(`Failed to read ${file.name}`));
+      reader.readAsDataURL(file);
+    });
+  };
+
   // 处理单图上传
-  const handleSingleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleSingleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     setImageUploadError(null);
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (!SUPPORTED_IMAGE_TYPES.includes(file.type)) {
-      setImageUploadError(language === 'zh' ? '仅支持 jpg/jpeg/png/webp 格式' : 'Only jpg/jpeg/png/webp formats are supported');
+    // 校验文件
+    const validationError = validateNovelImageFile(file);
+    if (validationError) {
+      setImageUploadError(validationError);
+      e.target.value = '';
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const dataUrl = event.target?.result as string;
-      setNovelSingleImage({
-        name: file.name,
-        type: file.type,
-        dataUrl,
-      });
-    };
-    reader.readAsDataURL(file);
-    // 清空 input 以便重新选择同一文件
+    // 压缩并设置图片
+    try {
+      const compressed = await compressNovelImageFile(file);
+      setNovelSingleImage(compressed);
+    } catch (err) {
+      console.error('[SingleImageUploadError]', err);
+      setImageUploadError(language === 'zh' ? '图片处理失败' : 'Failed to process image');
+    }
+
     e.target.value = '';
   };
 
   // 处理多图上传
-  const handleMultiImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleMultiImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     setImageUploadError(null);
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
 
-    // 检查类型
-    const invalidFiles = files.filter(f => !SUPPORTED_IMAGE_TYPES.includes(f.type));
-    if (invalidFiles.length > 0) {
-      setImageUploadError(language === 'zh' ? '仅支持 jpg/jpeg/png/webp 格式' : 'Only jpg/jpeg/png/webp formats are supported');
-      return;
-    }
-
-    // 检查数量限制
+    // 检查数量限制（先检查数量，再检查单个文件）
     const totalCount = novelMultiImages.length + files.length;
     if (totalCount > 9) {
-      setImageUploadError(language === 'zh' ? `最多上传 9 张图片，当前已选 ${novelMultiImages.length} 张，本次选择 ${files.length} 张` : `Maximum 9 images. Currently ${novelMultiImages.length}, selected ${files.length}`);
+      setImageUploadError(language === 'zh' ? '多图故事线最多上传 9 张图片。' : 'Multi-image story supports up to 9 images.');
+      e.target.value = '';
       return;
     }
 
-    // 读取所有图片
-    const readPromises = files.map(file => {
-      return new Promise<{ name: string; type: string; dataUrl: string }>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = (event) => {
-          resolve({
-            name: file.name,
-            type: file.type,
-            dataUrl: event.target?.result as string,
-          });
-        };
-        reader.onerror = () => reject(new Error(`Failed to read ${file.name}`));
-        reader.readAsDataURL(file);
-      });
-    });
+    // 校验每个文件
+    for (const file of files) {
+      const validationError = validateNovelImageFile(file);
+      if (validationError) {
+        setImageUploadError(validationError);
+        e.target.value = '';
+        return;
+      }
+    }
 
-    Promise.all(readPromises).then(images => {
-      setNovelMultiImages(prev => [...prev, ...images]);
-    }).catch(err => {
-      console.error('[ImageUploadError]', err);
-      setImageUploadError(language === 'zh' ? '图片读取失败' : 'Failed to read images');
-    });
+    // 压缩所有图片
+    try {
+      const compressedImages = await Promise.all(files.map(file => compressNovelImageFile(file)));
+      setNovelMultiImages(prev => [...prev, ...compressedImages]);
+    } catch (err) {
+      console.error('[MultiImageUploadError]', err);
+      setImageUploadError(language === 'zh' ? '图片处理失败' : 'Failed to process images');
+    }
 
-    // 清空 input
     e.target.value = '';
   };
 
@@ -276,6 +358,154 @@ export default function SuperWritingTab() {
   const handleRemoveMultiImage = (index: number) => {
     setNovelMultiImages(prev => prev.filter((_, i) => i !== index));
     setImageUploadError(null);
+  };
+
+  // 拖拽排序多图
+  const handleReorderMultiImages = (fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex) return;
+    setNovelMultiImages(prev => {
+      const next = [...prev];
+      const [moved] = next.splice(fromIndex, 1);
+      next.splice(toIndex, 0, moved);
+      return next;
+    });
+  };
+
+  // AI 灵感击发：生成候选
+  const handleGenerateInspiration = async () => {
+    setInspirationError('');
+
+    // 校验分类
+    if (inspirationCategories.length === 0) {
+      setInspirationError(language === 'zh' ? '请至少选择 1 个小说分类' : 'Please select at least 1 category');
+      return;
+    }
+    if (inspirationCategories.length > 3) {
+      setInspirationError(language === 'zh' ? '最多选择 3 个分类' : 'Maximum 3 categories');
+      return;
+    }
+
+    setInspirationLoading(true);
+    setInspirationCandidates([]);
+
+    try {
+      const prompt = buildNovelInspirationPrompt({
+        categories: inspirationCategories,
+        generateType: inspirationGenerateType,
+        preference: inspirationPreference,
+        count: 20,
+      });
+
+      const resultText = await callChatCompletionRaw(prompt, {
+        modelId: effectiveModelId,
+      });
+
+      const items = parseNovelInspirationResult(resultText, {
+        categories: inspirationCategories,
+        generateType: inspirationGenerateType,
+      });
+
+      if (items.length === 0) {
+        setInspirationError(language === 'zh'
+          ? 'AI 没有返回有效灵感，请换个分类或补充偏好后重试。'
+          : 'AI returned no valid inspirations. Please try different categories or preferences.');
+      } else {
+        setInspirationCandidates(items);
+      }
+    } catch (error: any) {
+      console.error('[InspirationError]', error);
+      setInspirationError(error.message || (language === 'zh' ? '灵感生成失败' : 'Failed to generate inspirations'));
+    } finally {
+      setInspirationLoading(false);
+    }
+  };
+
+  // AI 灵感击发：选择分类
+  const handleToggleInspirationCategory = (category: InspirationCategory) => {
+    setInspirationCategories(prev => {
+      if (prev.includes(category)) {
+        return prev.filter(c => c !== category);
+      }
+      if (prev.length >= 3) {
+        // 已选满 3 个，不添加，但可以提示
+        setInspirationError(language === 'zh' ? '最多选择 3 个分类' : 'Maximum 3 categories');
+        return prev;
+      }
+      return [...prev, category];
+    });
+    setInspirationError('');
+  };
+
+  // AI 灵感击发：使用候选
+  const handleUseInspirationCandidate = (candidate: InspirationCandidate) => {
+    const text = `标题：${candidate.title}
+
+${candidate.content}
+
+分类：${candidate.categories.join(' / ')}
+看点：${candidate.tags?.join(' / ') || ''}
+适合方向：${candidate.suitableFor?.join(' / ') || ''}`;
+    setOutlineText(text);
+    setNovelCreationMode('textInspiration');
+    setInspirationError(language === 'zh' ? '已填入文字灵感，可继续编辑后生成小说企划。' : 'Filled into text inspiration. You can edit and generate novel project.');
+  };
+
+  // AI 灵感击发：复制候选
+  const handleCopyInspirationCandidate = async (candidate: InspirationCandidate) => {
+    const text = `${candidate.title}
+
+${candidate.content}
+
+分类：${candidate.categories.join(' / ')}
+标签：${candidate.tags?.join(' / ') || ''}
+适合方向：${candidate.suitableFor?.join(' / ') || ''}`;
+    try {
+      await navigator.clipboard.writeText(text);
+      setInspirationError(language === 'zh' ? '已复制' : 'Copied');
+    } catch {
+      setInspirationError(language === 'zh' ? '复制失败，请手动选择文本复制。' : 'Copy failed. Please select and copy manually.');
+    }
+  };
+
+  // AI 灵感击发：收藏候选
+  const handleFavoriteInspirationCandidate = (candidate: InspirationCandidate) => {
+    setInspirationLibrary(prev => {
+      // 检查是否已收藏（通过 id 或 title+content 判断）
+      const exists = prev.some(item => item.id === candidate.id || (item.title === candidate.title && item.content === candidate.content));
+      if (exists) {
+        return prev;
+      }
+      const newItem: InspirationLibraryItem = {
+        ...candidate,
+        favorite: true,
+        usedCount: 0,
+        updatedAt: Date.now(),
+      };
+      return [newItem, ...prev];
+    });
+    setInspirationError(language === 'zh' ? '已收藏到灵感库' : 'Added to inspiration library');
+  };
+
+  // AI 灵感击发：使用灵感库条目
+  const handleUseLibraryItem = (item: InspirationLibraryItem) => {
+    handleUseInspirationCandidate(item);
+    // 更新使用次数
+    setInspirationLibrary(prev => prev.map(i => {
+      if (i.id === item.id) {
+        return { ...i, usedCount: (i.usedCount || 0) + 1, updatedAt: Date.now() };
+      }
+      return i;
+    }));
+  };
+
+  // AI 灵感击发：复制灵感库条目
+  const handleCopyLibraryItem = async (item: InspirationLibraryItem) => {
+    handleCopyInspirationCandidate(item);
+  };
+
+  // AI 灵感击发：删除灵感库条目
+  const handleDeleteLibraryItem = (itemId: string) => {
+    setInspirationLibrary(prev => prev.filter(item => item.id !== itemId));
   };
 
   // 计算最新已生成章节号
@@ -456,6 +686,33 @@ export default function SuperWritingTab() {
     setCurrentChapterCopyError('');
     clearNovelContinuationState();
   };
+
+  // 加载灵感库
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(INSPIRATION_LIBRARY_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          setInspirationLibrary(parsed);
+        }
+      }
+    } catch (error) {
+      console.warn('Failed to load inspiration library', error);
+    }
+  }, []);
+
+  // 保存灵感库
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        INSPIRATION_LIBRARY_STORAGE_KEY,
+        JSON.stringify(inspirationLibrary.slice(0, 200))
+      );
+    } catch (error) {
+      console.warn('Failed to save inspiration library', error);
+    }
+  }, [inspirationLibrary]);
 
   // 接收从聊天页传递的需求
   useEffect(() => {
@@ -879,7 +1136,28 @@ export default function SuperWritingTab() {
       console.error('[NovelProjectError]', error);
       setNovelGenerationStep('error');
       const errorMessage = error.message || (language === 'zh' ? '小说设定生成失败' : 'Novel project generation failed');
-      if (error.message?.includes('API 错误:')) {
+
+      // 检查是否是模型不支持图片的错误
+      const isVisionUnsupported = (msg: string) => {
+        const lowerMsg = msg.toLowerCase();
+        return (
+          lowerMsg.includes('vision') ||
+          lowerMsg.includes('image_url') ||
+          lowerMsg.includes('multimodal') ||
+          lowerMsg.includes('content array') ||
+          (lowerMsg.includes('image') && lowerMsg.includes('unsupported')) ||
+          lowerMsg.includes('does not support') ||
+          lowerMsg.includes('invalid content type') ||
+          lowerMsg.includes('not support image')
+        );
+      };
+
+      // 图片模式下检查是否是模型不支持图片
+      if ((novelCreationMode === 'singleImage' || novelCreationMode === 'multiImage') && isVisionUnsupported(errorMessage)) {
+        setNovelError(language === 'zh'
+          ? '当前模型暂不支持图片理解，请切换支持图片的模型或使用文字灵感。'
+          : 'The current model does not support image understanding. Please switch to a vision-capable model or use text inspiration.');
+      } else if (error.message?.includes('API 错误:')) {
         setNovelError(error.message);
       } else if (error.response) {
         setNovelError(`API 错误: ${error.response.status || '未知'} ${error.response.statusText || ''}`);
@@ -1895,6 +2173,7 @@ export default function SuperWritingTab() {
                         { value: 'textInspiration', label: language === 'zh' ? '文字灵感' : 'Text', icon: '📝' },
                         { value: 'singleImage', label: language === 'zh' ? '图片灵感' : 'Image', icon: '🖼️' },
                         { value: 'multiImage', label: language === 'zh' ? '多图故事线' : 'Multi-Image', icon: '🎬' },
+                        { value: 'aiInspiration', label: language === 'zh' ? 'AI 灵感击发' : 'AI Spark', icon: '💡' },
                       ].map((opt) => (
                         <button
                           key={opt.value}
@@ -2037,9 +2316,35 @@ export default function SuperWritingTab() {
                       <div style={{ fontSize: 11, fontWeight: 500, color: 'var(--text-secondary)', marginBottom: 6 }}>
                         {language === 'zh' ? '上传多张图片（2-9张）' : 'Upload Images (2-9)'}
                       </div>
+                      {/* 多图顺序说明 */}
+                      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 8, lineHeight: 1.5 }}>
+                        {language === 'zh'
+                          ? '默认按当前预览顺序理解图片。可拖拽图片调整顺序。若选择「让 AI 自动排序」，AI 会自行判断故事顺序。'
+                          : 'Images are understood in preview order by default. Drag to reorder. If you select "AI auto sort", AI will determine the story order.'}
+                      </div>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
                         {novelMultiImages.map((img, index) => (
-                          <div key={index} style={{ position: 'relative', width: 80, height: 80 }}>
+                          <div
+                            key={index}
+                            draggable
+                            onDragStart={() => setDraggingMultiImageIndex(index)}
+                            onDragOver={(event) => event.preventDefault()}
+                            onDrop={(event) => {
+                              event.preventDefault();
+                              if (draggingMultiImageIndex !== null) {
+                                handleReorderMultiImages(draggingMultiImageIndex, index);
+                              }
+                              setDraggingMultiImageIndex(null);
+                            }}
+                            onDragEnd={() => setDraggingMultiImageIndex(null)}
+                            style={{
+                              position: 'relative',
+                              width: 80,
+                              height: 80,
+                              opacity: draggingMultiImageIndex === index ? 0.5 : 1,
+                              cursor: 'grab',
+                            }}
+                          >
                             <img
                               src={img.dataUrl}
                               alt={img.name}
@@ -2073,8 +2378,9 @@ export default function SuperWritingTab() {
                             >
                               <X size={12} />
                             </button>
+                            {/* 图片编号 */}
                             <div style={{ position: 'absolute', bottom: 2, left: 2, background: 'rgba(0,0,0,0.6)', color: 'white', fontSize: 9, padding: '1px 4px', borderRadius: 3 }}>
-                              {index + 1}
+                              {language === 'zh' ? `第 ${index + 1} 张` : `#${index + 1}`}
                             </div>
                           </div>
                         ))}
@@ -2150,6 +2456,295 @@ export default function SuperWritingTab() {
                           }}
                         />
                       </div>
+                    </div>
+                  )}
+
+                  {/* AI 灵感击发模式 */}
+                  {novelCreationMode === 'aiInspiration' && (
+                    <div style={{ marginBottom: 10 }}>
+                      <div style={{ fontSize: 11, fontWeight: 500, color: 'var(--text-secondary)', marginBottom: 6 }}>
+                        💡 {language === 'zh' ? 'AI 灵感击发' : 'AI Inspiration Spark'}
+                      </div>
+                      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 10, lineHeight: 1.5 }}>
+                        {language === 'zh'
+                          ? '不知道写什么？选择分类和偏好，让 AI 一次生成 20 个灵感候选。'
+                          : "Don't know what to write? Select categories and preferences, let AI generate 20 inspiration candidates."}
+                      </div>
+
+                      {/* 分类选择 */}
+                      <div style={{ marginBottom: 12 }}>
+                        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 4 }}>
+                          {language === 'zh' ? '小说分类（最多选 3 个）' : 'Categories (max 3)'}
+                        </div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                          {INSPIRATION_CATEGORIES.map((cat) => (
+                            <button
+                              key={cat}
+                              onClick={() => handleToggleInspirationCategory(cat)}
+                              style={{
+                                padding: '4px 8px',
+                                fontSize: 10,
+                                background: inspirationCategories.includes(cat) ? 'var(--accent)' : 'var(--bg-secondary)',
+                                border: inspirationCategories.includes(cat) ? '1px solid var(--accent)' : '1px solid var(--border)',
+                                borderRadius: 4,
+                                color: inspirationCategories.includes(cat) ? 'white' : 'var(--text-muted)',
+                                cursor: 'pointer',
+                              }}
+                            >
+                              {cat}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* 生成类型 */}
+                      <div style={{ marginBottom: 12 }}>
+                        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 4 }}>
+                          {language === 'zh' ? '生成类型' : 'Generate Type'}
+                        </div>
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          {[
+                            { value: 'idea', label: language === 'zh' ? '灵感' : 'Idea', desc: language === 'zh' ? '一句话故事点子' : 'One-line story idea' },
+                            { value: 'opening', label: language === 'zh' ? '开头' : 'Opening', desc: language === 'zh' ? '小说开篇钩子' : 'Novel opening hook' },
+                            { value: 'fullStory', label: language === 'zh' ? '完整故事' : 'Full Story', desc: language === 'zh' ? '故事雏形' : 'Story outline' },
+                          ].map((opt) => (
+                            <button
+                              key={opt.value}
+                              onClick={() => setInspirationGenerateType(opt.value as InspirationGenerateType)}
+                              style={{
+                                flex: 1,
+                                padding: '8px 6px',
+                                background: inspirationGenerateType === opt.value ? 'var(--accent-dim)' : 'var(--bg-secondary)',
+                                border: inspirationGenerateType === opt.value ? '1px solid var(--accent)' : '1px solid var(--border)',
+                                borderRadius: 6,
+                                cursor: 'pointer',
+                                textAlign: 'center' as const,
+                              }}
+                            >
+                              <div style={{ fontSize: 11, fontWeight: 500, color: inspirationGenerateType === opt.value ? 'var(--accent)' : 'var(--text-primary)' }}>
+                                {opt.label}
+                              </div>
+                              <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 2 }}>
+                                {opt.desc}
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* 补充偏好 */}
+                      <div style={{ marginBottom: 12 }}>
+                        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 4 }}>
+                          {language === 'zh' ? '补充偏好（选填）' : 'Preferences (optional)'}
+                        </div>
+                        <textarea
+                          value={inspirationPreference}
+                          onChange={(e) => setInspirationPreference(e.target.value)}
+                          placeholder={language === 'zh' ? '例如：想要强反转、女主复仇、短剧感、开局冲突强……' : 'E.g., strong twist, female revenge, short drama style...'}
+                          rows={2}
+                          style={{
+                            width: '100%',
+                            padding: '8px 10px',
+                            background: 'var(--bg-secondary)',
+                            border: '1px solid var(--border)',
+                            borderRadius: 6,
+                            color: 'var(--text-primary)',
+                            fontSize: 12,
+                            resize: 'vertical',
+                          }}
+                        />
+                      </div>
+
+                      {/* 错误提示 */}
+                      {inspirationError && (
+                        <div style={{ fontSize: 11, color: 'var(--danger)', marginBottom: 8, padding: '6px 10px', background: 'rgba(239, 68, 68, 0.1)', borderRadius: 6 }}>
+                          {inspirationError}
+                        </div>
+                      )}
+
+                      {/* 生成按钮 */}
+                      <button
+                        onClick={handleGenerateInspiration}
+                        disabled={inspirationLoading || inspirationCategories.length === 0}
+                        className="btn-primary"
+                        style={{ width: '100%', padding: 10 }}
+                      >
+                        {inspirationLoading ? (
+                          <>
+                            <RefreshCw size={14} className="spin" />
+                            {language === 'zh' ? '正在击发灵感...' : 'Generating inspirations...'}
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles size={14} />
+                            {language === 'zh' ? `生成 20 个${getInspirationGenerateTypeLabel(inspirationGenerateType)}` : `Generate 20 ${getInspirationGenerateTypeLabel(inspirationGenerateType)}s`}
+                          </>
+                        )}
+                      </button>
+
+                      {/* 候选结果 */}
+                      {inspirationCandidates.length > 0 && (
+                        <div style={{ marginTop: 16 }}>
+                          <div style={{ fontSize: 11, fontWeight: 500, color: 'var(--text-secondary)', marginBottom: 8 }}>
+                            {language === 'zh' ? `候选灵感 (${inspirationCandidates.length})` : `Candidates (${inspirationCandidates.length})`}
+                          </div>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                            {inspirationCandidates.map((candidate, idx) => (
+                              <div
+                                key={candidate.id}
+                                style={{
+                                  padding: 12,
+                                  background: 'var(--bg-secondary)',
+                                  border: '1px solid var(--border)',
+                                  borderRadius: 8,
+                                }}
+                              >
+                                <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 4 }}>
+                                  #{String(idx + 1).padStart(2, '0')}
+                                </div>
+                                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 6 }}>
+                                  {candidate.title}
+                                </div>
+                                <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 8 }}>
+                                  {candidate.content}
+                                </div>
+                                {candidate.tags && candidate.tags.length > 0 && (
+                                  <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 4 }}>
+                                    {language === 'zh' ? '标签' : 'Tags'}：{candidate.tags.join(' / ')}
+                                  </div>
+                                )}
+                                {candidate.highlights && candidate.highlights.length > 0 && (
+                                  <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 4 }}>
+                                    {language === 'zh' ? '看点' : 'Highlights'}：{candidate.highlights.join(' / ')}
+                                  </div>
+                                )}
+                                {candidate.suitableFor && candidate.suitableFor.length > 0 && (
+                                  <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 8 }}>
+                                    {language === 'zh' ? '适合' : 'Suitable for'}：{candidate.suitableFor.join(' / ')}
+                                  </div>
+                                )}
+                                <div style={{ display: 'flex', gap: 6 }}>
+                                  <button
+                                    onClick={() => handleUseInspirationCandidate(candidate)}
+                                    style={{
+                                      padding: '4px 10px',
+                                      fontSize: 10,
+                                      background: 'var(--accent)',
+                                      border: 'none',
+                                      borderRadius: 4,
+                                      color: 'white',
+                                      cursor: 'pointer',
+                                    }}
+                                  >
+                                    {language === 'zh' ? '使用' : 'Use'}
+                                  </button>
+                                  <button
+                                    onClick={() => handleFavoriteInspirationCandidate(candidate)}
+                                    style={{
+                                      padding: '4px 10px',
+                                      fontSize: 10,
+                                      background: 'var(--bg-tertiary)',
+                                      border: '1px solid var(--border)',
+                                      borderRadius: 4,
+                                      color: 'var(--text-secondary)',
+                                      cursor: 'pointer',
+                                    }}
+                                  >
+                                    {language === 'zh' ? '收藏' : 'Save'}
+                                  </button>
+                                  <button
+                                    onClick={() => handleCopyInspirationCandidate(candidate)}
+                                    style={{
+                                      padding: '4px 10px',
+                                      fontSize: 10,
+                                      background: 'var(--bg-tertiary)',
+                                      border: '1px solid var(--border)',
+                                      borderRadius: 4,
+                                      color: 'var(--text-secondary)',
+                                      cursor: 'pointer',
+                                    }}
+                                  >
+                                    {language === 'zh' ? '复制' : 'Copy'}
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* 灵感库 */}
+                      {inspirationLibrary.length > 0 && (
+                        <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
+                          <div style={{ fontSize: 11, fontWeight: 500, color: 'var(--text-secondary)', marginBottom: 8 }}>
+                            📚 {language === 'zh' ? `灵感库 (${inspirationLibrary.length})` : `Library (${inspirationLibrary.length})`}
+                          </div>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                            {inspirationLibrary.slice(0, 10).map((item) => (
+                              <div
+                                key={item.id}
+                                style={{
+                                  padding: 10,
+                                  background: 'var(--bg-tertiary)',
+                                  border: '1px solid var(--border)',
+                                  borderRadius: 6,
+                                }}
+                              >
+                                <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 4 }}>
+                                  {item.title}
+                                </div>
+                                <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
+                                  {item.content}
+                                </div>
+                                <div style={{ display: 'flex', gap: 4 }}>
+                                  <button
+                                    onClick={() => handleUseLibraryItem(item)}
+                                    style={{
+                                      padding: '2px 8px',
+                                      fontSize: 9,
+                                      background: 'var(--accent)',
+                                      border: 'none',
+                                      borderRadius: 3,
+                                      color: 'white',
+                                      cursor: 'pointer',
+                                    }}
+                                  >
+                                    {language === 'zh' ? '使用' : 'Use'}
+                                  </button>
+                                  <button
+                                    onClick={() => handleCopyLibraryItem(item)}
+                                    style={{
+                                      padding: '2px 8px',
+                                      fontSize: 9,
+                                      background: 'var(--bg-secondary)',
+                                      border: '1px solid var(--border)',
+                                      borderRadius: 3,
+                                      color: 'var(--text-muted)',
+                                      cursor: 'pointer',
+                                    }}
+                                  >
+                                    {language === 'zh' ? '复制' : 'Copy'}
+                                  </button>
+                                  <button
+                                    onClick={() => handleDeleteLibraryItem(item.id)}
+                                    style={{
+                                      padding: '2px 8px',
+                                      fontSize: 9,
+                                      background: 'transparent',
+                                      border: '1px solid var(--danger)',
+                                      borderRadius: 3,
+                                      color: 'var(--danger)',
+                                      cursor: 'pointer',
+                                    }}
+                                  >
+                                    {language === 'zh' ? '删除' : 'Delete'}
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
 

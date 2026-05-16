@@ -70,7 +70,12 @@ export interface CompanyMemory {
   companyId: string;
   type: MemoryType;
   content: string;
+
+  // 关联字段
+  relatedTaskIds?: string[];   // 关联的任务
+  relatedGoalIds?: string[];   // 关联的目标
   sourceMeetingId?: string;
+
   importance: MemoryImportance;
   createdAt: string;
 }
@@ -91,7 +96,19 @@ export interface CompanyTask {
   companyId: string;
   title: string;
   description?: string;
-  sourceMeetingId?: string;
+
+  // 关联字段
+  relatedGoalId?: string;      // 关联的目标
+  relatedMemoryIds?: string[]; // 关联的记忆
+  relatedRiskIds?: string[];   // 关联的风险
+  sourceMeetingId?: string;    // 来源会议
+
+  // 执行字段
+  assigneeId?: string;         // 分配的 AI 角色
+  dueDate?: string;            // 截止日期
+  completedAt?: string;        // 完成时间
+  completionNote?: string;     // 完成备注
+
   priority: TaskPriority;
   status: TaskStatus;
   createdAt: string;
@@ -281,6 +298,11 @@ export interface SuggestedTask {
   title: string;
   description?: string;
   priority: TaskPriority;
+  // 关联信息
+  relatedGoalTitle?: string;   // 关联的目标标题（用于匹配）
+  relatedRiskTitle?: string;   // 关联的风险标题（用于匹配）
+  assigneeRole?: string;       // 建议分配的角色
+  dueInDays?: number;          // 建议完成天数
 }
 
 // 建议记忆（轻量结构）
